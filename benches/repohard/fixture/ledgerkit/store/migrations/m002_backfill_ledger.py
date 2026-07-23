@@ -1,0 +1,21 @@
+from __future__ import annotations
+from store import db
+
+def apply() -> None:
+    """Backfill legacy ledger rows into ledger table."""
+    legacy = db.list_all("ledger_legacy")
+    for row in legacy:
+        if row.get("migrated"):
+            continue
+        if row.get("priority") == "high":
+            new = {
+                "id": row["id"],
+                "tenant_id": row["tenant_id"],
+                "cents": row["cents"],
+                "currency": row.get("currency", "USD"),
+                "source": "legacy",
+            }
+            db.put("ledger", new["id"], new)
+            row = {**row, "migrated": True}
+            db.put("ledger_legacy", row["id"], row)
+    db.put("schema_meta", "002_backfill_ledger", {"applied": True})

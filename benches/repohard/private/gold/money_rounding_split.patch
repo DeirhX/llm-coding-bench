@@ -1,0 +1,20 @@
+diff --git a/pkg/money.py b/pkg/money.py
+index 543727e..44e8e2f 100644
+--- a/pkg/money.py
++++ b/pkg/money.py
+@@ -24,9 +24,12 @@ class Money:
+         """Split into N parts that sum exactly to self.cents."""
+         if parts <= 0:
+             raise ValueError("parts must be positive")
+-        share = self.cents / parts
+-        base = int(share)
+-        return [Money(base, self.currency) for _ in range(parts)]
++        base, rem = divmod(self.cents, parts)
++        out: list[Money] = []
++        for i in range(parts):
++            extra = 1 if i < rem else 0
++            out.append(Money(base + extra, self.currency))
++        return out
+ 
+ 
+ def _same(a: Money, b: Money) -> None:

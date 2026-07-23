@@ -1,0 +1,57 @@
+diff --git a/service/payment_service.py b/service/payment_service.py
+index 0382d3b..609e02c 100644
+--- a/service/payment_service.py
++++ b/service/payment_service.py
+@@ -22,29 +22,34 @@ def _lock_for(key: str) -> threading.Lock:
+ 
+ 
+ def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:
+-    """Process payment.succeeded webhook."""
++    """Process payment.succeeded webhook (idempotent on webhook_id)."""
+     webhook_id = payload["webhook_id"]
+     tenant_id = payload["tenant_id"]
+     invoice_id = payload["invoice_id"]
+     amount_cents = int(payload["amount_cents"])
+ 
+-    set_tenant(TenantContext(tenant_id=tenant_id))
+-    pay = {
+-        "id": str(uuid.uuid4()),
+-        "tenant_id": tenant_id,
+-        "invoice_id": invoice_id,
+-        "amount_cents": amount_cents,
+-        "webhook_id": webhook_id,
+-    }
+-    payment_repo.upsert(pay)
+-    invoice_service.mark_paid(invoice_id)
+-    inv = invoice_repo.get(invoice_id) or {}
+-    account_id = inv.get("account_id") or payload.get("account_id")
+-    if account_id:
+-        entitlement_service.activate_paid_plan(account_id, tenant_id)
+-    outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay["id"]))
+-    webhook_repo.mark_processed(webhook_id, {"payment_id": pay["id"]})
+-    return {"status": "ok", "payment_id": pay["id"], "webhook_id": webhook_id}
++    lock = _lock_for(webhook_id)
++    with lock:
++        if webhook_repo.is_processed(webhook_id):
++            return {"status": "duplicate", "webhook_id": webhook_id}
++
++        set_tenant(TenantContext(tenant_id=tenant_id))
++        pay = {
++            "id": str(uuid.uuid4()),
++            "tenant_id": tenant_id,
++            "invoice_id": invoice_id,
++            "amount_cents": amount_cents,
++            "webhook_id": webhook_id,
++        }
++        payment_repo.upsert(pay)
++        invoice_service.mark_paid(invoice_id)
++        inv = invoice_repo.get(invoice_id) or {}
++        account_id = inv.get("account_id") or payload.get("account_id")
++        if account_id:
++            entitlement_service.activate_paid_plan(account_id, tenant_id)
++        outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay["id"]))
++        webhook_repo.mark_processed(webhook_id, {"payment_id": pay["id"]})
++        return {"status": "ok", "payment_id": pay["id"], "webhook_id": webhook_id}
+ 
+ 
+ def record_payment(invoice_id: str, amount_cents: int) -> dict[str, Any]:

@@ -1,0 +1,6 @@
+from __future__ import annotations
+
+DEFAULT_CURRENCY = "USD"
+CACHE_TTL_S = 300
+OUTBOX_BATCH = 32
+WEBHOOK_MAX_ATTEMPTS = 5

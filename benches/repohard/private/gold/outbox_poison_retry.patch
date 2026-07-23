@@ -1,0 +1,28 @@
+diff --git a/worker/outbox_worker.py b/worker/outbox_worker.py
+index c98029d..b418052 100644
+--- a/worker/outbox_worker.py
++++ b/worker/outbox_worker.py
+@@ -12,12 +12,11 @@ class PoisonError(RuntimeError):
+ def default_publish(event: dict[str, Any]) -> None:
+     if event.get("payload", {}).get("poison"):
+         raise PoisonError("poison pill")
+-    # pretend publish succeeded
+     return None
+ 
+ 
+ def process_once(publish: Callable[[dict], None] | None = None) -> dict[str, Any]:
+-    """Drain outbox batch."""
++    """Drain outbox batch; only ack after successful publish."""
+     publish = publish or default_publish
+     batch = outbox.claim_batch()
+     ok = 0
+@@ -26,8 +25,8 @@ def process_once(publish: Callable[[dict], None] | None = None) -> dict[str, Any
+         try:
+             publish(row)
+             outbox.mark_published(row["id"])
++            outbox.ack(row["id"])
+             ok += 1
+         except Exception:
+             failed += 1
+-        outbox.ack(row["id"])
+     return {"ok": ok, "failed": failed, "batch": len(batch)}

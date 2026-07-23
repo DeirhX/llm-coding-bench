@@ -1,0 +1,32 @@
+diff --git a/service/reconcile_service.py b/service/reconcile_service.py
+index a529037..9283af4 100644
+--- a/service/reconcile_service.py
++++ b/service/reconcile_service.py
+@@ -1,20 +1,24 @@
+ from __future__ import annotations
+ 
+ from typing import Any
++from collections import defaultdict
+ 
+ from store import invoice_repo, payment_repo
+ from pkg.tenant import require_tenant
+ 
+ 
+ def reconcile_tenant() -> dict[str, Any]:
+-    """Match open invoices to payments."""
++    """Match open invoices to payments (bulk payment load)."""
+     ctx = require_tenant()
+     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)
++    pays = payment_repo.list_by_tenant(ctx.tenant_id)
++    by_inv: dict[str, list[dict[str, Any]]] = defaultdict(list)
++    for p in pays:
++        by_inv[p["invoice_id"]].append(p)
+     matched = 0
+     gaps = []
+     for inv in invoices:
+-        pays = payment_repo.list_by_invoice(inv["id"])
+-        paid = sum(p.get("amount_cents", 0) for p in pays)
++        paid = sum(p.get("amount_cents", 0) for p in by_inv.get(inv["id"], []))
+         if paid >= inv.get("amount_cents", 0) and inv.get("status") == "paid":
+             matched += 1
+         elif paid > 0 and inv.get("status") != "paid":

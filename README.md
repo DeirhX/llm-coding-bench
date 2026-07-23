@@ -21,6 +21,11 @@ benches/
   claim/
     claims.yaml       # ← T/F ASSIGNMENT
     bench.py
+  repohard/
+    assignment/*.md   # ← issue text
+    fixture/ledgerkit/# synthetic multi-package product (agent workspace)
+    private/          # NEVER on agent path — hidden pytest + gold patches
+    tools.py / tasks.py / bench.py
   registry.py
 bench_lib/
 scripts/
@@ -33,6 +38,7 @@ run.py
 | **Pyhard** | `pyhard` | `benches/pyhard/assignment/*.md` | 9 Python tasks / 99 pts |
 | **Archbench** | `arch` | `benches/arch/assignment/*.md` + shared shopapi | Tools-first exploration (9 / 90) |
 | **Claim probe** | `claim` | `benches/claim/claims.yaml` + shared shopapi | 20 true/false traps (tie-break) |
+| **Repohard** | `repohard` | `benches/repohard/assignment/*.md` + synthetic ledgerkit | Explore → unified diff; private pytest (8 / 80) |
 
 Graders stay in Python (they must execute). Prompts/claims are data.
 
@@ -57,7 +63,8 @@ Graders stay in Python (they must execute). Prompts/claims are data.
 
 **Shared**
 
-- Python **3.14+** (pyhard / archbench graders)
+- Python **3.14+** (pyhard / archbench / repohard graders)
+- `pytest` (repohard private grading)
 
 Results live under `results/` (override with `BENCH_OUT`).
 
@@ -89,6 +96,7 @@ Or per-phase modules:
 python3.14 -m benches.pyhard
 python3.14 -m benches.arch
 python3.14 -m benches.claim
+python3.14 -m benches.repohard
 ```
 
 ## Cursor Agent CLI backend
@@ -111,6 +119,7 @@ How it works:
 - Prompt is passed on stdin (avoids ARG_MAX issues)
 - Pyhard uses a throwaway empty `--workspace` so the agent cannot edit this repo
 - Arch/claim point `--workspace` at `benches/shopapi/fixture/shopapi` and swap the Ollama `<arch_tool>` preamble for Cursor-native tool instructions
+- Repohard points `--workspace` at `benches/repohard/fixture/ledgerkit` (never `private/`); model must return a unified diff in `<arch_final>`
 - Usage tokens come from the CLI JSON `usage` object when present
 
 Useful Cursor env knobs:
@@ -156,4 +165,5 @@ Writes a markdown leaderboard to `results/REPORT.md` (or `--out`) and prints a b
 - Archbench’s Ollama tool protocol uses `<arch_tool>` / `<arch_final>` (not `<tool_call>`) so Qwen tool parsers do not EOF the server.
 - Evidence points require **actual tool reads** (`files_read`). Citations alone do not count (Cursor ask-mode currently scores 0 evidence — honest, not a free lunch).
 - Pyhard graders award **per-case partial credit** (first failure no longer zeros the task).
+- **Repohard** uses a large *synthetic* ledgerkit fixture on purpose — no OSS fork contamination gamble. Private tests/gold never sit on the agent workspace path. Grade = private pytest only (v1).
 - Prefer `run.py` / `BENCH_OUT` over ancient `$HOME/.ollama/bench` paths in old notes.

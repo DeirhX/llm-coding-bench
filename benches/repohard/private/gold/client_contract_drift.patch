@@ -1,0 +1,18 @@
+diff --git a/client/models.py b/client/models.py
+index a2284f2..7d33a2c 100644
+--- a/client/models.py
++++ b/client/models.py
+@@ -15,10 +15,10 @@ class InvoiceDTO:
+ 
+     @classmethod
+     def from_api(cls, data: dict[str, Any]) -> "InvoiceDTO":
+-        if "amount" in data:
++        if "amount_cents" in data:
++            amount = int(data["amount_cents"]) / 100.0
++        elif "amount" in data:
+             amount = float(data["amount"])
+-        elif "amount_cents" in data:
+-            amount = float(data["amount_cents"])
+         else:
+             amount = 0.0
+         return cls(

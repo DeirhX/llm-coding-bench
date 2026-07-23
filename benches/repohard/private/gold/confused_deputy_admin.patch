@@ -1,0 +1,27 @@
+diff --git a/service/admin_service.py b/service/admin_service.py
+index 7aae386..1984492 100644
+--- a/service/admin_service.py
++++ b/service/admin_service.py
+@@ -10,6 +10,8 @@ def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]
+     """Internal export used by ops dashboards."""
+     ctx = require_tenant()
+     tid = target_tenant_id or ctx.tenant_id
++    if tid != ctx.tenant_id and not ctx.is_admin:
++        raise PermissionError("cannot export foreign tenant")
+     rows = invoice_repo.list_by_tenant(tid)
+     audit_repo.write(ctx.tenant_id, "export_invoices", {"target": tid, "n": len(rows)})
+     return rows
+diff --git a/api/internal.py b/api/internal.py
+index 98d4d5e..1ed8f25 100644
+--- a/api/internal.py
++++ b/api/internal.py
+@@ -8,5 +8,8 @@ def export(body=None, headers=None, **_):
+     """Internal path used by sibling services."""
+     require_tenant()
+     body = body or {}
+-    rows = admin_service.export_invoices(body.get("tenant_id"))
++    try:
++        rows = admin_service.export_invoices(body.get("tenant_id"))
++    except PermissionError as e:
++        return {"error": str(e), "status": 403}
+     return {"status": 200, "invoices": rows}

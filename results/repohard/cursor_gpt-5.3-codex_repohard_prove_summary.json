@@ -1,0 +1,9 @@
+{
+  "model": "gpt-5.3-codex",
+  "tag": "cursor_gpt-5.3-codex_repohard_prove",
+  "score": 20,
+  "max_score": 20,
+  "pass": 2,
+  "tasks": 2,
+  "path": "C:\\Sources\\ai\\llm-coding-bench\\results\\repohard\\cursor_gpt-5.3-codex_repohard_prove_20260723_152503.json"
+}

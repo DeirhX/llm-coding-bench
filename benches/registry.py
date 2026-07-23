@@ -16,6 +16,8 @@ BENCH_ALIASES: dict[str, str] = {
     "archbench": "arch",
     "py": "pyhard",
     "claims": "claim",
+    "repo": "repohard",
+    "deepfix": "repohard",
 }
 
 
@@ -66,6 +68,14 @@ BENCHES: dict[str, BenchSpec] = {
         module="benches.claim.bench",
         results_subdir="archbench",
         expected_tasks=20,
+    ),
+    "repohard": BenchSpec(
+        id="repohard",
+        title="Repohard",
+        summary="Large synthetic ledgerkit repo: explore + patch; graded by private pytest (8 tasks)",
+        module="benches.repohard.bench",
+        results_subdir="repohard",
+        expected_tasks=8,
     ),
 }
 

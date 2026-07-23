@@ -128,6 +128,10 @@ def _accept_latest(spec: BenchSpec, path: Path) -> bool:
         return name.endswith("_latest.json") and (
             "_claim_" in name or name.endswith("_claim_latest.json")
         )
+    if spec.id == "repohard":
+        if "_summary" in name:
+            return False
+        return name.endswith("_latest.json") and "repohard" in name
     return True
 
 

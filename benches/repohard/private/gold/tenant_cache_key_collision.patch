@@ -1,0 +1,35 @@
+diff --git a/store/cache.py b/store/cache.py
+index e82c6a0..10e4ab8 100644
+--- a/store/cache.py
++++ b/store/cache.py
+@@ -9,8 +9,8 @@ def reset() -> None:
+     _CACHE.clear()
+ 
+ 
+-def cache_key_account(account_id: str) -> str:
+-    return f"acct:{account_id}"
++def cache_key_account(tenant_id: str, account_id: str) -> str:
++    return f"acct:{tenant_id}:{account_id}"
+ 
+ 
+ def cache_key_invoice(invoice_id: str) -> str:
+diff --git a/service/account_service.py b/service/account_service.py
+index 95d2382..b8da183 100644
+--- a/service/account_service.py
++++ b/service/account_service.py
+@@ -8,10 +8,13 @@ from pkg.tenant import require_tenant
+ 
+ def get_account(account_id: str) -> dict[str, Any] | None:
+     ctx = require_tenant()
+-    key = cache.cache_key_account(account_id)
++    key = cache.cache_key_account(ctx.tenant_id, account_id)
+     hit = cache.get(key)
+     if hit is not None:
+-        return hit
++        if hit.get("tenant_id") != ctx.tenant_id:
++            cache.invalidate(key)
++        else:
++            return hit
+     row = account_repo.get(account_id, tenant_id=ctx.tenant_id)
+     if row is None:
+         return None
