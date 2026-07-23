@@ -1,0 +1,24 @@
+[
+  {
+    "model": "north-mini-code-1.0:bf16",
+    "provider": "ollama",
+    "task": "mini_sql",
+    "title": "Harder: mini SQL SELECT/JOIN/WHERE",
+    "ok": false,
+    "score": 1,
+    "max_score": 8,
+    "grade_detail": "FAIL case 0: case 0: [] != [{'name': 'Ann'}, {'name': 'Cy'}]\nFAIL case 1: '>' not supported between instances of 'int' and 'NoneType'\nFAIL case 2: case 2: [{'id': 1}, {'id': 2}, {'id': 3}] != [{'id': 1}, {'id': 3}]\nFAIL case 3: '>=' not supported between instances of 'int' and 'NoneType'\nFAIL case 4: case 4: [] != [{'orders.id': 11}]\nFAIL case 6: case 6: [] != [{'users.id': 2, 'orders.id': 12}]\nFAIL case 7: '>=' not supported between instances of 'int' and 'NoneType'\nSCORE 1/8",
+    "wall_s": 237.16,
+    "load_s": 0.13,
+    "eval_tokens": 14815,
+    "prompt_tokens": 238,
+    "toks_per_s": 62.55,
+    "done_reason": "stop",
+    "content_chars": 5875,
+    "thinking_chars": 55303,
+    "code_chars": 5861,
+    "num_ctx": 65536,
+    "num_predict": 49152,
+    "python": "3.14.6"
+  }
+]

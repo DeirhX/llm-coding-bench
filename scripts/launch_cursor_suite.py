@@ -40,6 +40,10 @@ def main() -> int:
         "PATH", ""
     )
     env["BENCH_MODEL"] = model
+    log = ROOT / "results" / f"cursor_{safe}_suite.log"
+    # Touch before spawn so parallel `tail -f` / follow_log.sh cannot race.
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.touch(exist_ok=True)
     proc = subprocess.Popen(
         ["/bin/zsh", str(SCRIPT), model],
         cwd=str(ROOT),
@@ -50,7 +54,6 @@ def main() -> int:
         start_new_session=True,
     )
     pid_file.write_text(str(proc.pid), encoding="utf-8")
-    log = ROOT / "results" / f"cursor_{safe}_suite.log"
     print(f"started model={model} pid={proc.pid} log={log}")
     return 0
 

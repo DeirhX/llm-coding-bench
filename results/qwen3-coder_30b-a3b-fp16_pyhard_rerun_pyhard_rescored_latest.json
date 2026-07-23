@@ -18,7 +18,9 @@
     "code_chars": 1071,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 12,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder:30b-a3b-fp16",
@@ -39,7 +41,9 @@
     "code_chars": 725,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 14,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder:30b-a3b-fp16",
@@ -60,7 +64,9 @@
     "code_chars": 1643,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder:30b-a3b-fp16",
@@ -81,7 +87,9 @@
     "code_chars": 2917,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 12,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder:30b-a3b-fp16",
@@ -102,7 +110,9 @@
     "code_chars": 1097,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder:30b-a3b-fp16",
@@ -124,7 +134,9 @@
     "code_chars": 1841,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 4,
+    "rescore_source": "artifact:qwen3-coder_30b-a3b-fp16_pyhard_rerun__sat_solve__code.py"
   },
   {
     "model": "qwen3-coder:30b-a3b-fp16",
@@ -145,7 +157,9 @@
     "code_chars": 6156,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 13,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder:30b-a3b-fp16",
@@ -166,7 +180,9 @@
     "code_chars": 1903,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder:30b-a3b-fp16",
@@ -188,6 +204,8 @@
     "code_chars": 5437,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 4,
+    "rescore_source": "artifact:qwen3-coder_30b-a3b-fp16_pyhard_rerun__mini_sql__code.py"
   }
 ]

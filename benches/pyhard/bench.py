@@ -28,6 +28,13 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from bench_lib.assignment import load_markdown_assignment  # noqa: E402
+from bench_lib.ollama_think import (  # noqa: E402
+    apply_think,
+    default_num_predict,
+    grade_from_response,
+    parse_think,
+    thinking_enabled,
+)
 from bench_lib.paths import results_dir  # noqa: E402
 
 OUT_DIR = results_dir()
@@ -50,11 +57,22 @@ PYTHON = sys.executable
 if sys.version_info[:2] < (3, 14):
     raise SystemExit(f"Need Python >= 3.14 for grading, got {sys.version}")
 
+THINK = parse_think()
 OPTIONS = {
     "temperature": 0.1,
     "num_ctx": int(os.environ.get("BENCH_NUM_CTX", "65536")),
-    "num_predict": int(os.environ.get("BENCH_NUM_PREDICT", "16384")),
+    # Think-on shares num_predict with the answer; default 49k when thinking.
+    "num_predict": default_num_predict(16384, think_base=49152),
 }
+
+# Comma-separated task ids to run (default: all). Used to refill missing artifacts.
+_TASK_FILTER = {
+    t.strip()
+    for t in os.environ.get("BENCH_TASKS", "").split(",")
+    if t.strip()
+}
+# When set with BENCH_TASKS, merge partial results into existing *_pyhard_latest.json.
+MERGE_LATEST = os.environ.get("BENCH_MERGE_LATEST", "0") == "1"
 
 GRADE_TIMEOUT_S = 5.0
 
@@ -76,10 +94,9 @@ def chat_ollama(model: str, prompt: str) -> dict[str, Any]:
         "messages": [{"role": "user", "content": prompt}],
         "options": OPTIONS,
     }
-    # Default OFF — thinking models otherwise burn num_predict on monologue (see Qwen3.5 @16k).
-    # Set BENCH_THINK=1 to allow native thinking.
-    if os.environ.get("BENCH_THINK", "0") != "1":
-        body["think"] = False
+    # Top-level think only (never inside options — Ollama ignores that).
+    # Default OFF. BENCH_THINK=1|true|low|medium|high|max enables thinking.
+    apply_think(body, THINK)
     req = urllib.request.Request(
         "http://127.0.0.1:11434/api/chat",
         data=json.dumps(body).encode(),
@@ -93,12 +110,15 @@ def chat_ollama(model: str, prompt: str) -> dict[str, Any]:
     msg = data.get("message") or {}
     content = msg.get("content") or ""
     thinking = msg.get("thinking") or ""
+    # Grade answer content; keep combined only for logs/artifacts.
+    grade_text = grade_from_response(content, thinking, scrape_thinking=False)
     combined = content if not thinking else f"<think>\n{thinking}\n</think>\n{content}"
     eval_duration = float(data.get("eval_duration") or 0)
     eval_count = float(data.get("eval_count") or 0)
     return {
         "content": content,
         "thinking": thinking,
+        "grade_text": grade_text,
         "combined": combined,
         "wall_s": wall,
         "load_s": float(data.get("load_duration") or 0) / 1e9,
@@ -107,6 +127,7 @@ def chat_ollama(model: str, prompt: str) -> dict[str, Any]:
         "toks_per_s": (eval_count / (eval_duration / 1e9)) if eval_duration > 0 else 0.0,
         "done_reason": data.get("done_reason"),
         "provider": "ollama",
+        "think": THINK,
     }
 
 
@@ -115,7 +136,14 @@ def chat_cursor(model: str, prompt: str) -> dict[str, Any]:
 
     # Isolated empty workspace so ask-mode cannot trampoline into this repo.
     with tempfile.TemporaryDirectory(prefix="cursor_pyhard_") as td:
-        return cursor_cli.chat(model, prompt, mode="ask", workspace=td)
+        resp = cursor_cli.chat(model, prompt, mode="ask", workspace=td)
+    # Normalize to ollama-shaped fields used by the runner.
+    content = resp.get("content") or ""
+    thinking = resp.get("thinking") or ""
+    resp.setdefault("grade_text", grade_from_response(content, thinking))
+    resp.setdefault("combined", content if not thinking else f"<think>\n{thinking}\n</think>\n{content}")
+    resp.setdefault("think", THINK)
+    return resp
 
 
 def chat(model: str, prompt: str) -> dict[str, Any]:
@@ -1153,6 +1181,7 @@ def main() -> None:
     log(
         log_path,
         f"provider={PROVIDER}\nmodel={MODEL}\npython={PYTHON}\nversion={sys.version}\n"
+        f"think={THINK!r} thinking_enabled={thinking_enabled(THINK)}\n"
         f"options={OPTIONS}\n",
     )
 
@@ -1181,13 +1210,34 @@ def main() -> None:
     except Exception as e:
         log(log_path, f"warmup ERROR: {e}\n")
 
+    run_tasks = [t for t in TASKS if not _TASK_FILTER or t.id in _TASK_FILTER]
+    if _TASK_FILTER:
+        unknown = sorted(_TASK_FILTER - {t.id for t in TASKS})
+        if unknown:
+            raise SystemExit(f"Unknown BENCH_TASKS: {unknown}")
+        log(log_path, f"BENCH_TASKS={','.join(t.id for t in run_tasks)} merge={MERGE_LATEST}\n")
+
     results: list[dict[str, Any]] = []
-    for task in TASKS:
+    for task in run_tasks:
         log(log_path, f"\n-- {task.id} ...\n")
         try:
             resp = chat(MODEL, task.prompt)
-            g = task.grade(resp["combined"])
+            grade_src = resp.get("grade_text")
+            if grade_src is None:
+                grade_src = resp.get("combined") or resp.get("content") or ""
+            g = task.grade(grade_src)
             mx = g["max_score"] or task.max_score
+            truncated_empty = (
+                resp.get("done_reason") == "length"
+                and not (resp.get("content") or "").strip()
+                and bool(resp.get("thinking"))
+            )
+            if truncated_empty and g["score"] == 0:
+                detail = g.get("detail") or ""
+                g["detail"] = (
+                    "truncated_empty_content: think burned num_predict; graded empty answer.\n"
+                    + detail
+                ).rstrip()
             row = {
                 "model": MODEL,
                 "provider": PROVIDER,
@@ -1198,20 +1248,22 @@ def main() -> None:
                 "max_score": mx,
                 "grade_detail": g["detail"],
                 "wall_s": round(resp["wall_s"], 2),
-                "load_s": round(resp["load_s"], 2),
+                "load_s": round(resp.get("load_s") or 0, 2),
                 "eval_tokens": resp["eval_tokens"],
                 "prompt_tokens": resp["prompt_tokens"],
                 "toks_per_s": round(resp["toks_per_s"], 2),
                 "done_reason": resp["done_reason"],
-                "content_chars": len(resp["content"]),
-                "thinking_chars": len(resp["thinking"]),
+                "content_chars": len(resp.get("content") or ""),
+                "thinking_chars": len(resp.get("thinking") or ""),
                 "code_chars": len(g.get("code") or ""),
+                "truncated_empty_content": truncated_empty,
+                "think": resp.get("think", THINK),
                 "num_ctx": OPTIONS["num_ctx"],
                 "num_predict": OPTIONS["num_predict"],
                 "python": sys.version.split()[0],
             }
             results.append(row)
-            (OUT_DIR / f"{TAG}__{task.id}.txt").write_text(resp["combined"], encoding="utf-8")
+            (OUT_DIR / f"{TAG}__{task.id}.txt").write_text(resp.get("combined") or grade_src, encoding="utf-8")
             (OUT_DIR / f"{TAG}__{task.id}__code.py").write_text(g.get("code") or "", encoding="utf-8")
             log(log_path, json.dumps(row, indent=2) + "\n")
         except Exception as e:
@@ -1227,6 +1279,20 @@ def main() -> None:
             log(log_path, f"ERROR: {e}\n")
         summary_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
+    latest_path = OUT_DIR / f"{TAG}_pyhard_latest.json"
+    if MERGE_LATEST and latest_path.is_file():
+        by_task = {r["task"]: r for r in json.loads(latest_path.read_text(encoding="utf-8"))}
+        for row in results:
+            by_task[row["task"]] = row
+        # Preserve original TASKS order when possible.
+        order = [t.id for t in TASKS]
+        merged = [by_task[t] for t in order if t in by_task]
+        for t, row in by_task.items():
+            if t not in order:
+                merged.append(row)
+        results = merged
+        log(log_path, f"merged into existing {latest_path.name} ({len(results)} tasks)\n")
+
     total = sum(r.get("score", 0) for r in results)
     mx = sum(r.get("max_score", 0) for r in results)
     passed = sum(1 for r in results if r.get("ok"))
@@ -1238,7 +1304,7 @@ def main() -> None:
         f"pass {passed}/{len(results)}  score {total}/{mx}  avg tok/s {avg_tps:.1f}\n"
         f"Wrote {summary_path}\n",
     )
-    (OUT_DIR / f"{TAG}_pyhard_latest.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+    latest_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

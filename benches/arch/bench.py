@@ -26,6 +26,7 @@ _REPO = _ROOT.parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
+from bench_lib.ollama_think import apply_think, default_num_predict, parse_think  # noqa: E402
 from bench_lib.paths import results_dir  # noqa: E402
 from benches.arch.tasks import (  # noqa: E402
     SELFTEST_TRAJECTORIES,
@@ -49,10 +50,12 @@ TAG = os.environ.get(
 )
 FIXTURE = FIXTURE_ROOT
 
+THINK = parse_think()
 OPTIONS = {
     "temperature": float(os.environ.get("BENCH_TEMPERATURE", "0.1")),
     "num_ctx": int(os.environ.get("BENCH_NUM_CTX", "65536")),
-    "num_predict": int(os.environ.get("BENCH_NUM_PREDICT", "8192")),
+    # Agent turns + thinking need headroom; default 24k when think-on.
+    "num_predict": default_num_predict(8192, think_base=24576),
 }
 
 MAX_ROUNDS = int(os.environ.get("BENCH_MAX_ROUNDS", "32"))
@@ -67,10 +70,8 @@ def chat(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
         "messages": messages,
         "options": OPTIONS,
     }
-    # Disable extended thinking for agent loops (saves budget; thinking models still work).
-    # Override with BENCH_THINK=1 if you want thinking on.
-    if os.environ.get("BENCH_THINK", "0") != "1":
-        body["think"] = False
+    # Default OFF for agent loops. BENCH_THINK=1|medium|… enables thinking.
+    apply_think(body, THINK)
     data_bytes = json.dumps(body).encode()
     t0 = time.perf_counter()
     last_err: Exception | None = None
@@ -252,9 +253,9 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
         totals["prompt_tokens"] += resp["prompt_tokens"]
         totals["eval_tokens"] += resp["eval_tokens"]
         totals["done_reason"] = resp["done_reason"]
+        # Do not promote thinking→content: empty content usually means num_predict
+        # exhaustion mid-think; substituting the trace poisons the tool protocol.
         content = resp["content"] or ""
-        if resp["thinking"] and not content.strip():
-            content = resp["thinking"]
         last_content = content
         messages.append({"role": "assistant", "content": content})
 

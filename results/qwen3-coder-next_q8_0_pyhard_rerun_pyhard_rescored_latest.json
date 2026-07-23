@@ -18,7 +18,9 @@
     "code_chars": 1114,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 12,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder-next:q8_0",
@@ -39,7 +41,9 @@
     "code_chars": 728,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 14,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder-next:q8_0",
@@ -60,7 +64,9 @@
     "code_chars": 1512,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder-next:q8_0",
@@ -82,7 +88,9 @@
     "code_chars": 2821,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 11,
+    "rescore_source": "artifact:qwen3-coder-next_q8_0_pyhard_rerun__eval_expr__code.py"
   },
   {
     "model": "qwen3-coder-next:q8_0",
@@ -103,7 +111,9 @@
     "code_chars": 1097,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder-next:q8_0",
@@ -124,7 +134,9 @@
     "code_chars": 6606,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder-next:q8_0",
@@ -145,7 +157,9 @@
     "code_chars": 7506,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 13,
+    "rescore_source": "official_pass"
   },
   {
     "model": "qwen3-coder-next:q8_0",
@@ -167,7 +181,9 @@
     "code_chars": 6189,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 6,
+    "rescore_source": "artifact:qwen3-coder-next_q8_0_pyhard_rerun__unify__code.py"
   },
   {
     "model": "qwen3-coder-next:q8_0",
@@ -188,6 +204,8 @@
     "code_chars": 7169,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 8,
+    "rescore_source": "official_pass"
   }
 ]

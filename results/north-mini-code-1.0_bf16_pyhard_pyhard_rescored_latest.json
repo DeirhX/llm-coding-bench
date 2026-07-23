@@ -18,7 +18,9 @@
     "code_chars": 500,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 12,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -39,7 +41,9 @@
     "code_chars": 773,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 14,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -60,7 +64,9 @@
     "code_chars": 1471,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -70,7 +76,7 @@
     "ok": false,
     "score": 0,
     "max_score": 12,
-    "grade_detail": "File \"/var/folders/pl/qymk0p_s68dbrzt7q0f6159c0000gn/T/pybench_vcijncjh/candidate.py\", line 112\n    But there is a subtlety: In parse_expr, after parsing left term, we check for '+' or '-' operators. However, what about unary minus that appears at the start of an expression? That is handled by parse_term -> parse_factor -> sees '-', so it's fine.\n                                                                                                                                                                                                                                                    ^\nSyntaxError: unterminated string literal (detected at line 112)",
+    "grade_detail": "File \"/var/folders/pl/qymk0p_s68dbrzt7q0f6159c0000gn/T/pybench_jeyoy324/candidate.py\", line 112\n    But there is a subtlety: In parse_expr, after parsing left term, we check for '+' or '-' operators. However, what about unary minus that appears at the start of an expression? That is handled by parse_term -> parse_factor -> sees '-', so it's fine.\n                                                                                                                                                                                                                                                    ^\nSyntaxError: unterminated string literal (detected at line 112)",
     "wall_s": 281.72,
     "load_s": 0.13,
     "eval_tokens": 16384,
@@ -82,7 +88,9 @@
     "code_chars": 56024,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 0,
+    "rescore_source": "artifact:north-mini-code-1.0_bf16_pyhard__eval_expr__code.py"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -103,7 +111,9 @@
     "code_chars": 1193,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -125,7 +135,9 @@
     "code_chars": 3534,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 7,
+    "rescore_source": "artifact:north-mini-code-1.0_bf16_pyhard__sat_solve__code.py"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -135,7 +147,7 @@
     "ok": false,
     "score": 0,
     "max_score": 13,
-    "grade_detail": "File \"/var/folders/pl/qymk0p_s68dbrzt7q0f6159c0000gn/T/pybench_nt08l0k2/candidate.py\", line 45\n    But careful: The function signature expects to return the resulting document; it doesn't say we cannot modify the input. It says \"Do not mutate the input document\". So we must ensure that the original doc is unchanged. Deep copying ensures that.\n                                                                                          ^\nSyntaxError: unterminated string literal (detected at line 45)",
+    "grade_detail": "File \"/var/folders/pl/qymk0p_s68dbrzt7q0f6159c0000gn/T/pybench_r86222j8/candidate.py\", line 45\n    But careful: The function signature expects to return the resulting document; it doesn't say we cannot modify the input. It says \"Do not mutate the input document\". So we must ensure that the original doc is unchanged. Deep copying ensures that.\n                                                                                          ^\nSyntaxError: unterminated string literal (detected at line 45)",
     "wall_s": 276.85,
     "load_s": 0.13,
     "eval_tokens": 16384,
@@ -147,7 +159,9 @@
     "code_chars": 74233,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 0,
+    "rescore_source": "artifact:north-mini-code-1.0_bf16_pyhard__json_patch__code.py"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -168,7 +182,9 @@
     "code_chars": 3659,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -190,6 +206,8 @@
     "code_chars": 6196,
     "num_ctx": 65536,
     "num_predict": 16384,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 5,
+    "rescore_source": "artifact:north-mini-code-1.0_bf16_pyhard__mini_sql__code.py"
   }
 ]

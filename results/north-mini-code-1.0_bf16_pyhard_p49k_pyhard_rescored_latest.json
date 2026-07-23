@@ -18,7 +18,9 @@
     "code_chars": 900,
     "num_ctx": 65536,
     "num_predict": 49152,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 12,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -39,7 +41,9 @@
     "code_chars": 2336,
     "num_ctx": 65536,
     "num_predict": 49152,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 14,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -60,7 +64,9 @@
     "code_chars": 1495,
     "num_ctx": 65536,
     "num_predict": 49152,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -81,7 +87,9 @@
     "code_chars": 3171,
     "num_ctx": 65536,
     "num_predict": 49152,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 12,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -102,7 +110,9 @@
     "code_chars": 1097,
     "num_ctx": 65536,
     "num_predict": 49152,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -123,7 +133,9 @@
     "code_chars": 4578,
     "num_ctx": 65536,
     "num_predict": 49152,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -144,7 +156,9 @@
     "code_chars": 6370,
     "num_ctx": 65536,
     "num_predict": 49152,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 13,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -165,7 +179,9 @@
     "code_chars": 2301,
     "num_ctx": 65536,
     "num_predict": 49152,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 10,
+    "rescore_source": "official_pass"
   },
   {
     "model": "north-mini-code-1.0:bf16",
@@ -187,6 +203,8 @@
     "code_chars": 5861,
     "num_ctx": 65536,
     "num_predict": 49152,
-    "python": "3.14.6"
+    "python": "3.14.6",
+    "score_before": 1,
+    "rescore_source": "artifact:north-mini-code-1.0_bf16_pyhard_p49k__mini_sql__code.py"
   }
 ]

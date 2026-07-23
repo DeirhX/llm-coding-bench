@@ -28,6 +28,7 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from bench_lib.assignment import load_simple_claims_yaml  # noqa: E402
+from bench_lib.ollama_think import apply_think, default_num_predict, parse_think  # noqa: E402
 from bench_lib.paths import results_dir  # noqa: E402
 from benches.shopapi.tools import FIXTURE_ROOT, ToolSession  # noqa: E402
 
@@ -46,10 +47,11 @@ TAG = os.environ.get(
 )
 FIXTURE = FIXTURE_ROOT
 
+THINK = parse_think()
 OPTIONS = {
     "temperature": float(os.environ.get("BENCH_TEMPERATURE", "0.1")),
     "num_ctx": int(os.environ.get("BENCH_NUM_CTX", "65536")),
-    "num_predict": int(os.environ.get("BENCH_NUM_PREDICT", "8192")),
+    "num_predict": default_num_predict(8192, think_base=24576),
 }
 MAX_ROUNDS = int(os.environ.get("BENCH_MAX_ROUNDS", "40"))
 MAX_TOOL_CALLS = int(os.environ.get("BENCH_MAX_TOOL_CALLS", "40"))
@@ -71,8 +73,7 @@ def chat(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
         "messages": messages,
         "options": OPTIONS,
     }
-    if os.environ.get("BENCH_THINK", "0") != "1":
-        body["think"] = False
+    apply_think(body, THINK)
     req = urllib.request.Request(
         f"{HOST}/api/chat",
         data=json.dumps(body).encode(),
@@ -304,7 +305,7 @@ def run_model_ollama() -> dict[str, Any]:
         totals["prompt_tokens"] += resp["prompt_tokens"]
         totals["eval_tokens"] += resp["eval_tokens"]
         totals["done_reason"] = resp["done_reason"]
-        content = resp["content"] or resp.get("thinking") or ""
+        content = resp["content"] or ""
         messages.append({"role": "assistant", "content": content})
         final = parse_final(content)
         if final is not None and parse_tool_call(content) is None:

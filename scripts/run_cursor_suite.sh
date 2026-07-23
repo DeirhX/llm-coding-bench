@@ -13,6 +13,8 @@ MODEL="${1:-${BENCH_MODEL:-composer-2.5}}"
 SAFE="$(echo "$MODEL" | sed 's/[^a-zA-Z0-9._-]/_/g')"
 LOG="$ROOT/results/cursor_${SAFE}_suite.log"
 mkdir -p "$ROOT/results"
+# Create before any follower attaches (avoids tail -f race).
+: >>"$LOG"
 exec >>"$LOG" 2>&1
 
 echo "==== cursor suite start $(date) model=$MODEL ===="
