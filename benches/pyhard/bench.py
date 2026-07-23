@@ -70,12 +70,16 @@ class Task:
 
 
 def chat_ollama(model: str, prompt: str) -> dict[str, Any]:
-    body = {
+    body: dict[str, Any] = {
         "model": model,
         "stream": False,
         "messages": [{"role": "user", "content": prompt}],
         "options": OPTIONS,
     }
+    # Default OFF — thinking models otherwise burn num_predict on monologue (see Qwen3.5 @16k).
+    # Set BENCH_THINK=1 to allow native thinking.
+    if os.environ.get("BENCH_THINK", "0") != "1":
+        body["think"] = False
     req = urllib.request.Request(
         "http://127.0.0.1:11434/api/chat",
         data=json.dumps(body).encode(),

@@ -1,0 +1,9 @@
+{
+  "model": "composer-2.5",
+  "tag": "cursor_composer-2.5_arch",
+  "score": 85,
+  "max_score": 90,
+  "pass": 9,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/cursor_composer-2.5_arch_20260723_132414.json"
+}

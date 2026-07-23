@@ -1,0 +1,9 @@
+{
+  "model": "claude-sonnet-5-thinking-high",
+  "tag": "cursor_claude-sonnet-5-thinking-high_arch",
+  "score": 85,
+  "max_score": 90,
+  "pass": 9,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/cursor_claude-sonnet-5-thinking-high_arch_20260723_135234.json"
+}

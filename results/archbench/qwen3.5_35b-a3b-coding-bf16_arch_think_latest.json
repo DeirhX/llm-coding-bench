@@ -839,5 +839,121 @@
     "num_ctx": 65536,
     "num_predict": 8192,
     "last_content_chars": 445
+  },
+  {
+    "model": "qwen3.5:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "redesign_webhook_idempotency",
+    "title": "Constrained fix: webhook idempotency",
+    "family": "redesign",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "files=['service/payment_service.py']; evidence 1/1",
+    "answer": {
+      "touch_files": [
+        "service/payment_service.py"
+      ],
+      "plan_steps": [
+        "Move _mark_processed(webhook_id) call from line 51 to immediately after the idempotency check at line 32-33",
+        "This ensures webhook_id is recorded as processed BEFORE any side effects (outbox.insert, order_service.mark_paid)",
+        "If crash occurs after idempotency check but before side effects, retry will see _already_processed returns True and skip processing"
+      ],
+      "idempotency_change": "Move _mark_processed(webhook_id) from AFTER outbox.insert/order_service.mark_paid to BEFORE them (right after the _already_processed check)",
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_mark_processed",
+        "service/payment_service.py:_already_processed"
+      ]
+    },
+    "tool_calls": 10,
+    "files_read": [
+      "api/webhooks.py",
+      "service/order_service.py",
+      "service/payment_service.py",
+      "store/db.py",
+      "worker/webhook_retry.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "handle_payment_webhook",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/webhook_retry.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 40.29,
+    "prompt_tokens": 22539,
+    "eval_tokens": 2472,
+    "rounds": 11,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 835
   }
 ]

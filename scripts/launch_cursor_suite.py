@@ -1,9 +1,15 @@
 #!/usr/bin/env python3.14
-"""Detach run_cursor_suite.sh into its own session (survives parent shell death)."""
+"""Detach run_cursor_suite.sh into its own session (survives parent shell death).
+
+Usage:
+  python3.14 scripts/launch_cursor_suite.py
+  python3.14 scripts/launch_cursor_suite.py claude-sonnet-5-high
+"""
 
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,19 +17,21 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent
 ROOT = SCRIPTS.parent
 SCRIPT = SCRIPTS / "run_cursor_suite.sh"
-PID_FILE = ROOT / "results" / "cursor_composer25_suite.pid"
 
 
 def main() -> int:
     if not SCRIPT.is_file():
         print(f"missing {SCRIPT}", file=sys.stderr)
         return 1
+    model = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("BENCH_MODEL", "composer-2.5")
+    safe = re.sub(r"[^a-zA-Z0-9._-]", "_", model)
     (ROOT / "results").mkdir(parents=True, exist_ok=True)
-    if PID_FILE.exists():
+    pid_file = ROOT / "results" / f"cursor_{safe}_suite.pid"
+    if pid_file.exists():
         try:
-            old = int(PID_FILE.read_text().strip())
+            old = int(pid_file.read_text().strip())
             os.kill(old, 0)
-            print(f"already running pid={old}")
+            print(f"already running model={model} pid={old}")
             return 0
         except (ValueError, OSError):
             pass
@@ -31,8 +39,9 @@ def main() -> int:
     env["PATH"] = str(Path.home() / ".local/bin") + ":/usr/local/bin:/usr/bin:/bin:" + env.get(
         "PATH", ""
     )
+    env["BENCH_MODEL"] = model
     proc = subprocess.Popen(
-        ["/bin/zsh", str(SCRIPT)],
+        ["/bin/zsh", str(SCRIPT), model],
         cwd=str(ROOT),
         env=env,
         stdin=subprocess.DEVNULL,
@@ -40,8 +49,9 @@ def main() -> int:
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    PID_FILE.write_text(str(proc.pid), encoding="utf-8")
-    print(f"started pid={proc.pid} log={ROOT / 'results' / 'cursor_composer25_suite.log'}")
+    pid_file.write_text(str(proc.pid), encoding="utf-8")
+    log = ROOT / "results" / f"cursor_{safe}_suite.log"
+    print(f"started model={model} pid={proc.pid} log={log}")
     return 0
 
 

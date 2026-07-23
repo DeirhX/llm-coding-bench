@@ -1,0 +1,9 @@
+{
+  "model": "qwen3.5:35b-a3b-coding-bf16",
+  "tag": "qwen3.5_35b-a3b-coding-bf16_arch_think",
+  "score": 81,
+  "max_score": 90,
+  "pass": 8,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/qwen3.5_35b-a3b-coding-bf16_arch_think_20260723_132103.json"
+}
