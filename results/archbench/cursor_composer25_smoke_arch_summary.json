@@ -1,0 +1,9 @@
+{
+  "model": "composer-2.5",
+  "tag": "cursor_composer25_smoke_arch",
+  "score": 9,
+  "max_score": 10,
+  "pass": 1,
+  "tasks": 1,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/cursor_composer25_smoke_arch_20260723_124941.json"
+}

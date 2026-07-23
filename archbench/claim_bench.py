@@ -8,6 +8,7 @@ hurts (no "skip"). Highly discriminative vs vague architecture essays.
 Usage:
   BENCH_SELFTEST=1 python3.14 claim_bench.py
   BENCH_MODEL='qwen3-coder-next:q8_0' python3.14 claim_bench.py
+  BENCH_PROVIDER=cursor BENCH_MODEL='composer-2.5' python3.14 claim_bench.py
 """
 
 from __future__ import annotations
@@ -22,20 +23,28 @@ from pathlib import Path
 from typing import Any
 
 _ROOT = Path(__file__).resolve().parent
+_REPO = _ROOT.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
 
+from bench_lib.paths import results_dir  # noqa: E402
 from tools import ToolSession  # noqa: E402
 
-OUT_DIR = Path.home() / ".ollama" / "bench" / "results" / "archbench"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR = results_dir("archbench")
 
 SELFTEST = os.environ.get("BENCH_SELFTEST") == "1"
+PROVIDER = os.environ.get("BENCH_PROVIDER", "ollama").strip().lower()
 MODEL = "selftest" if SELFTEST else os.environ.get("BENCH_MODEL", "")
+_TAG_BASE = re.sub(r"[^a-zA-Z0-9._-]", "_", MODEL or "model")
 TAG = os.environ.get(
     "BENCH_TAG",
-    "selftest_claim" if SELFTEST else re.sub(r"[^a-zA-Z0-9._-]", "_", MODEL or "model") + "_claim",
+    "selftest_claim"
+    if SELFTEST
+    else f"{'cursor_' if PROVIDER in ('cursor', 'cursor-cli', 'agent') else ''}{_TAG_BASE}_claim",
 )
+FIXTURE = _ROOT / "fixture" / "shopapi"
 
 OPTIONS = {
     "temperature": float(os.environ.get("BENCH_TEMPERATURE", "0.1")),
@@ -125,6 +134,9 @@ def parse_tool_call(text: str) -> dict[str, Any] | None:
         return None
 
 
+_FENCE_JSON = re.compile(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", re.I)
+
+
 def parse_final(text: str) -> dict[str, Any] | None:
     m = _FINAL_RE.search(text)
     blob = m.group(1).strip() if m else None
@@ -133,6 +145,12 @@ def parse_final(text: str) -> dict[str, Any] | None:
         blob = m2.group(0) if m2 else None
     if not blob:
         return None
+    fence = _FENCE_JSON.search(blob)
+    if fence:
+        blob = fence.group(1).strip()
+    else:
+        blob = re.sub(r"^```(?:json)?\s*", "", blob.strip(), flags=re.I)
+        blob = re.sub(r"\s*```$", "", blob.strip())
     try:
         obj = json.loads(blob)
         return obj if isinstance(obj, dict) else None
@@ -210,11 +228,13 @@ def grade_answers(answer: dict[str, Any] | None, session: ToolSession) -> dict[s
     }
 
 
-PROMPT = """You are investigating the shopapi Python repo (tools only — do not invent files).
+_CLAIMS_BLOCK = "\n".join(f'- {cid}: "{text}"' for cid, text, _ in CLAIMS)
+
+PROMPT = f"""You are investigating the shopapi Python repo (tools only — do not invent files).
 
 Tools — one at a time (use arch_tool, NOT tool_call):
 <arch_tool>
-{"name": "TOOL_NAME", "arguments": {..}}
+{{"name": "TOOL_NAME", "arguments": {{..}}}}
 </arch_tool>
 
 Tools: list_dir, read_file, grep, find_refs. Budget: 40 calls.
@@ -222,18 +242,38 @@ Tools: list_dir, read_file, grep, find_refs. Budget: 40 calls.
 Judge EACH claim true or false based on code evidence. Guessing is punished.
 
 Claims:
-""" + "\n".join(f'- {cid}: "{text}"' for cid, text, _ in CLAIMS) + """
+{_CLAIMS_BLOCK}
 
 Finish with:
 <arch_final>
-{
-  "answers": {
+{{
+  "answers": {{
     "c01": true,
     "c02": false
-  },
-  "citations": {"c01": ["path.py:symbol"]}
-}
+  }},
+  "citations": {{"c01": ["path.py:symbol"]}}
+}}
 </arch_final>
+
+Every claim id c01..c15 must appear with a boolean.
+"""
+
+CURSOR_PROMPT = f"""You are investigating the shopapi Python repo (workspace root = shopapi).
+Use your built-in tools to inspect the code. Do not invent files.
+
+Judge EACH claim true or false based on code evidence. Guessing is punished.
+
+Claims:
+{_CLAIMS_BLOCK}
+
+Finish with a JSON object (optionally in a ```json fence or <arch_final> wrapper):
+{{
+  "answers": {{
+    "c01": true,
+    "c02": false
+  }},
+  "citations": {{"c01": ["path.py:symbol"]}}
+}}
 
 Every claim id c01..c15 must appear with a boolean.
 """
@@ -267,7 +307,7 @@ def run_selftest() -> int:
     return 0
 
 
-def run_model() -> dict[str, Any]:
+def run_model_ollama() -> dict[str, Any]:
     session = ToolSession(max_calls=MAX_TOOL_CALLS)
     messages = [{"role": "user", "content": PROMPT}]
     totals = {"wall_s": 0.0, "prompt_tokens": 0, "eval_tokens": 0, "rounds": 0, "done_reason": None}
@@ -303,6 +343,7 @@ def run_model() -> dict[str, Any]:
     grade = grade_answers(final, session)
     return {
         "model": MODEL,
+        "provider": "ollama",
         "bench": "claim",
         "tag": TAG,
         **grade,
@@ -318,6 +359,64 @@ def run_model() -> dict[str, Any]:
     }
 
 
+def run_model_cursor() -> dict[str, Any]:
+    from bench_lib import cursor_cli
+
+    resp = cursor_cli.chat(
+        MODEL,
+        CURSOR_PROMPT,
+        mode=os.environ.get("BENCH_CURSOR_MODE", "ask"),
+        workspace=FIXTURE,
+    )
+    content = resp.get("content") or ""
+    final = parse_final(content)
+    session = ToolSession(max_calls=MAX_TOOL_CALLS)
+    cites = (final or {}).get("citations") or {}
+    if isinstance(cites, dict):
+        paths = []
+        for v in cites.values():
+            if isinstance(v, list):
+                paths.extend(v)
+            elif isinstance(v, str):
+                paths.append(v)
+    elif isinstance(cites, list):
+        paths = cites
+    else:
+        paths = []
+    for c in paths:
+        if isinstance(c, str) and c.strip():
+            path = c.split(":")[0].replace("fixture/shopapi/", "").replace("shopapi/", "")
+            if path.endswith((".py", ".md")):
+                session.files_read.add(path)
+    grade = grade_answers(final, session)
+    return {
+        "model": MODEL,
+        "provider": "cursor",
+        "bench": "claim",
+        "tag": TAG,
+        **grade,
+        "answer": final,
+        "tool_calls": None,
+        "wall_s": round(float(resp.get("wall_s") or 0), 2),
+        "prompt_tokens": int(resp.get("prompt_tokens") or 0),
+        "eval_tokens": int(resp.get("eval_tokens") or 0),
+        "rounds": 1,
+        "done_reason": resp.get("done_reason"),
+        "num_ctx": OPTIONS["num_ctx"],
+        "num_predict": OPTIONS["num_predict"],
+        "raw_content": content,
+        "session_id": resp.get("session_id"),
+    }
+
+
+def run_model() -> dict[str, Any]:
+    if PROVIDER in ("cursor", "cursor-cli", "agent"):
+        return run_model_cursor()
+    if PROVIDER != "ollama":
+        raise SystemExit(f"Unknown BENCH_PROVIDER={PROVIDER!r} (use ollama|cursor)")
+    return run_model_ollama()
+
+
 def main() -> int:
     if SELFTEST:
         return run_selftest()
@@ -325,7 +424,17 @@ def main() -> int:
         raise SystemExit("Set BENCH_MODEL or BENCH_SELFTEST=1")
     stamp = time.strftime("%Y%m%d_%H%M%S")
     try:
-        chat(MODEL, [{"role": "user", "content": "pong"}])
+        if PROVIDER in ("cursor", "cursor-cli", "agent"):
+            from bench_lib import cursor_cli
+
+            cursor_cli.chat(
+                MODEL,
+                "Reply with the single word: pong",
+                mode="ask",
+                workspace=FIXTURE,
+            )
+        else:
+            chat(MODEL, [{"role": "user", "content": "pong"}])
     except Exception as e:  # noqa: BLE001
         print(f"warmup failed: {e}", file=sys.stderr)
         return 2
@@ -333,7 +442,7 @@ def main() -> int:
     path = OUT_DIR / f"{TAG}_{stamp}.json"
     path.write_text(json.dumps(result, indent=2), encoding="utf-8")
     (OUT_DIR / f"{TAG}_latest.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
-    print(json.dumps({k: result[k] for k in result if k not in ("per_claim", "answer")}, indent=2))
+    print(json.dumps({k: result[k] for k in result if k not in ("per_claim", "answer", "raw_content")}, indent=2))
     print("WROTE", path)
     return 0
 

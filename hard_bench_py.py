@@ -3,6 +3,7 @@
 
 Usage:
   BENCH_MODEL='qwen3-coder-next:q8_0' BENCH_TAG='next_pyhard' python3.14 hard_bench_py.py
+  BENCH_PROVIDER=cursor BENCH_MODEL='composer-2.5' python3.14 hard_bench_py.py
   BENCH_SELFTEST=1 python3.14 hard_bench_py.py
 """
 
@@ -21,14 +22,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-OUT_DIR = Path.home() / ".ollama" / "bench" / "results"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+_REPO = Path(__file__).resolve().parent
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
+
+from bench_lib.paths import results_dir  # noqa: E402
+
+OUT_DIR = results_dir()
 
 SELFTEST = os.environ.get("BENCH_SELFTEST") == "1"
+PROVIDER = os.environ.get("BENCH_PROVIDER", "ollama").strip().lower()
 MODEL = "selftest" if SELFTEST else os.environ["BENCH_MODEL"]
 TAG = os.environ.get(
     "BENCH_TAG",
-    "selftest_pyhard" if SELFTEST else re.sub(r"[^a-zA-Z0-9._-]", "_", MODEL),
+    "selftest_pyhard"
+    if SELFTEST
+    else f"{'cursor_' if PROVIDER == 'cursor' else ''}{re.sub(r'[^a-zA-Z0-9._-]', '_', MODEL)}",
 )
 
 # Prefer the interpreter running this file (should be 3.14).
@@ -55,7 +64,7 @@ class Task:
     reference: str
 
 
-def chat(model: str, prompt: str) -> dict[str, Any]:
+def chat_ollama(model: str, prompt: str) -> dict[str, Any]:
     body = {
         "model": model,
         "stream": False,
@@ -88,7 +97,24 @@ def chat(model: str, prompt: str) -> dict[str, Any]:
         "eval_tokens": int(data.get("eval_count") or 0),
         "toks_per_s": (eval_count / (eval_duration / 1e9)) if eval_duration > 0 else 0.0,
         "done_reason": data.get("done_reason"),
+        "provider": "ollama",
     }
+
+
+def chat_cursor(model: str, prompt: str) -> dict[str, Any]:
+    from bench_lib import cursor_cli
+
+    # Isolated empty workspace so ask-mode cannot trampoline into this repo.
+    with tempfile.TemporaryDirectory(prefix="cursor_pyhard_") as td:
+        return cursor_cli.chat(model, prompt, mode="ask", workspace=td)
+
+
+def chat(model: str, prompt: str) -> dict[str, Any]:
+    if PROVIDER in ("cursor", "cursor-cli", "agent"):
+        return chat_cursor(model, prompt)
+    if PROVIDER != "ollama":
+        raise SystemExit(f"Unknown BENCH_PROVIDER={PROVIDER!r} (use ollama|cursor)")
+    return chat_ollama(model, prompt)
 
 
 def extract_python(text: str) -> str:
@@ -1250,19 +1276,33 @@ def main() -> None:
     summary_path = OUT_DIR / f"{TAG}_pyhard_{time.strftime('%Y%m%d_%H%M%S')}.json"
     log_path.write_text("", encoding="utf-8")
     log(log_path, f"Python hard bench {time.strftime('%Y-%m-%d %H:%M:%S %z')}\n")
-    log(log_path, f"model={MODEL}\npython={PYTHON}\nversion={sys.version}\noptions={OPTIONS}\n")
+    log(
+        log_path,
+        f"provider={PROVIDER}\nmodel={MODEL}\npython={PYTHON}\nversion={sys.version}\n"
+        f"options={OPTIONS}\n",
+    )
 
     try:
         warm = chat(MODEL, "Reply with exactly: OK")
-        with urllib.request.urlopen("http://127.0.0.1:11434/api/ps", timeout=30) as resp:
-            ps = json.loads(resp.read().decode())
-        m = next((x for x in ps.get("models") or [] if x.get("name") == MODEL or x.get("model") == MODEL), None)
-        size = (m["size"] / 2**30) if m else 0
-        ctx = m.get("context_length", "?") if m else "?"
+        extra = ""
+        if PROVIDER == "ollama":
+            with urllib.request.urlopen("http://127.0.0.1:11434/api/ps", timeout=30) as resp:
+                ps = json.loads(resp.read().decode())
+            m = next(
+                (
+                    x
+                    for x in ps.get("models") or []
+                    if x.get("name") == MODEL or x.get("model") == MODEL
+                ),
+                None,
+            )
+            size = (m["size"] / 2**30) if m else 0
+            ctx = m.get("context_length", "?") if m else "?"
+            extra = f" ctx={ctx} size_gib={size:.1f}"
         log(
             log_path,
             f"warmup ok wall={warm['wall_s']:.1f}s load={warm['load_s']:.1f}s "
-            f"eval_tokens={warm['eval_tokens']} ctx={ctx} size_gib={size:.1f}\n",
+            f"eval_tokens={warm['eval_tokens']}{extra}\n",
         )
     except Exception as e:
         log(log_path, f"warmup ERROR: {e}\n")
@@ -1276,6 +1316,7 @@ def main() -> None:
             mx = g["max_score"] or task.max_score
             row = {
                 "model": MODEL,
+                "provider": PROVIDER,
                 "task": task.id,
                 "title": task.title,
                 "ok": g["ok"],

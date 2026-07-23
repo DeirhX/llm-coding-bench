@@ -1,6 +1,6 @@
 # llm-coding-bench
 
-Local LLM coding / architecture benches for [Ollama](https://ollama.com) models.
+LLM coding / architecture benches for local [Ollama](https://ollama.com) models **and** [Cursor Agent CLI](https://cursor.com/docs/cli/overview) cloud models.
 
 Suites:
 
@@ -13,41 +13,86 @@ Suites:
 
 ## Requirements
 
+**Ollama backend**
+
 - [Ollama](https://ollama.com) with models pulled locally
-- Python **3.14+** (used for pyhard / archbench graders)
-- Ruby (for Ruby benches)
-- `curl` / network to `localhost:11434`
+- Network to `localhost:11434`
 
-Results from the M5 Max laptop runs (Jul 2026) live under `results/` (compare markdown + `*_latest.json` summaries).
+**Cursor backend**
 
-## Quick start
+- Cursor Agent CLI (`agent`) — `curl https://cursor.com/install -fsS | bash`
+- Authenticated account — `agent login` / `agent status`
+- Model IDs from `agent models` or `./list_cursor_models.sh`
+
+**Shared**
+
+- Python **3.14+** (pyhard / archbench graders)
+- Ruby (Ruby benches only)
+
+Results live under `results/` (override with `BENCH_OUT`).
+
+## Quick start (Ollama)
 
 ```bash
-# Pyhard (default num_ctx/num_predict via env)
 export BENCH_MODEL='qwen3-coder:30b-a3b-fp16'
 export BENCH_TAG='30b_pyhard'
 python3.14 hard_bench_py.py
 
-# Archbench
 cd archbench
 export BENCH_MODEL='qwen3-coder-next:q8_0'
-export BENCH_TAG='next_arch'
 python3.14 arch_bench.py
+```
 
-# Claim probe (after arch, for ties)
-export BENCH_MODEL='qwen3-coder-next:q8_0'
-export BENCH_TAG='next_claim'
-python3.14 claim_bench.py
+## Cursor Agent CLI backend
 
-# Self-tests (no model)
+Set `BENCH_PROVIDER=cursor` and a Cursor model id (`composer-2.5`, `gpt-5.4-mini-medium`, …).
+
+```bash
+# list models for your account
+./list_cursor_models.sh
+
+# pyhard via Cursor ask-mode (isolated empty workspace)
+./run_cursor_pyhard.sh composer-2.5
+
+# archbench via Cursor ask-mode (workspace = archbench/fixture/shopapi)
+./run_cursor_arch.sh composer-2.5
+
+# or manually
+BENCH_PROVIDER=cursor BENCH_MODEL='composer-2.5' python3.14 hard_bench_py.py
+BENCH_PROVIDER=cursor BENCH_MODEL='composer-2.5' \
+  BENCH_TASKS=tenant_invoice_isolation python3.14 archbench/arch_bench.py
+```
+
+How it works:
+
+- Invokes `agent -p --output-format json --mode ask --model <id> --trust`
+- Prompt is passed on stdin (avoids ARG_MAX issues)
+- Pyhard uses a throwaway empty `--workspace` so the agent cannot edit this repo
+- Archbench points `--workspace` at `archbench/fixture/shopapi` and swaps the Ollama `<arch_tool>` preamble for Cursor-native tool instructions
+- Usage tokens come from the CLI JSON `usage` object when present
+
+Useful Cursor env knobs:
+
+| Env | Default | Meaning |
+|---|---|---|
+| `BENCH_PROVIDER` | `ollama` | `ollama` or `cursor` |
+| `BENCH_CURSOR_MODE` | `ask` | CLI `--mode` (`ask` / `plan`) |
+| `BENCH_CURSOR_TIMEOUT` | `1800` | seconds per invocation |
+| `BENCH_CURSOR_FORCE` | `0` | pass `--force` / yolo |
+| `CURSOR_AGENT_BIN` | (`agent` on PATH) | override binary path |
+
+## Self-tests
+
+```bash
 BENCH_SELFTEST=1 python3.14 hard_bench_py.py
 BENCH_SELFTEST=1 python3.14 archbench/arch_bench.py
 BENCH_SELFTEST=1 python3.14 archbench/claim_bench.py
+python3.14 bench_lib/test_cursor_cli.py
 ```
 
-Useful env knobs: `BENCH_NUM_CTX`, `BENCH_NUM_PREDICT`, `BENCH_TEMPERATURE`, `BENCH_TASKS`, `BENCH_THINK`.
+Other knobs: `BENCH_NUM_CTX`, `BENCH_NUM_PREDICT`, `BENCH_TEMPERATURE`, `BENCH_TASKS`, `BENCH_THINK`, `BENCH_OUT`, `BENCH_TAG`.
 
-## Published compare notes
+## Published compare notes (Ollama, Jul 2026)
 
 - `results/compare_hard_64k.md` — Ruby hard
 - `results/compare_pyhard_64k.md` — Pyhard @16k predict
@@ -58,5 +103,5 @@ Useful env knobs: `BENCH_NUM_CTX`, `BENCH_NUM_PREDICT`, `BENCH_TEMPERATURE`, `BE
 
 ## Notes
 
-- Archbench tool protocol uses `<arch_tool>` / `<arch_final>` tags (not `<tool_call>`) so Qwen tool parsers do not EOF the server.
-- LaunchAgent / absolute-path wrapper scripts under `run_*.sh` assume macOS + `$HOME/.ollama/bench` historically; point them at this repo or run the Python/Ruby entrypoints directly.
+- Archbench’s Ollama tool protocol uses `<arch_tool>` / `<arch_final>` (not `<tool_call>`) so Qwen tool parsers do not EOF the server.
+- Older `run_*.sh` wrappers may still mention `$HOME/.ollama/bench`; prefer repo-relative entrypoints / `BENCH_OUT`.

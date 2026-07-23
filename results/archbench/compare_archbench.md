@@ -29,6 +29,7 @@ Tie cluster (claim probe): qwen3.5:35b-a3b-coding-bf16, qwen3.6:35b-a3b-coding-b
 | gpt-oss:120b | 15/18 | 13 | 2 | 0 | 232.75 |
 | north-mini-code-1.0:bf16 | 7/18 | 7 | 8 | 0 | 17.1 |
 | qwen3-coder:30b-a3b-fp16 | 3/18 | 0 | 0 | 15 | 31.84 |
+| llama3.3:70b-instruct-q8_0 | — | — | — | — | abandoned (hung) |
 
 ## Per-task scores
 

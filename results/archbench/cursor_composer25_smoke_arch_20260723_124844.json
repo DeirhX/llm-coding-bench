@@ -1,0 +1,26 @@
+[
+  {
+    "model": "composer-2.5",
+    "provider": "cursor",
+    "task": "review_cache_on_paid",
+    "title": "Review: cache vs status change (I4)",
+    "family": "review",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "evidence 0/1; missing=['service/order_service.py']",
+    "answer": {},
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 18.54,
+    "prompt_tokens": 12988,
+    "eval_tokens": 1262,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1552,
+    "session_id": "cde09dc7-9793-4674-b014-29ab49d0665a"
+  }
+]

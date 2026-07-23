@@ -1,9 +1,10 @@
 #!/usr/bin/env python3.14
-"""Tools-first architecture / call-chain benchmark for local Ollama models.
+"""Tools-first architecture / call-chain benchmark (Ollama or Cursor Agent CLI).
 
 Usage:
   BENCH_SELFTEST=1 python3.14 arch_bench.py
   BENCH_MODEL='qwen3-coder-next:q8_0' python3.14 arch_bench.py
+  BENCH_PROVIDER=cursor BENCH_MODEL='composer-2.5' python3.14 arch_bench.py
   BENCH_MODEL='...' BENCH_TAG='next_arch' BENCH_TASKS='chain_delete_order,tenant_invoice_isolation' python3.14 arch_bench.py
 """
 
@@ -20,21 +21,34 @@ from pathlib import Path
 from typing import Any
 
 _ROOT = Path(__file__).resolve().parent
+_REPO = _ROOT.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
 
-from tasks import SELFTEST_TRAJECTORIES, Task, build_tasks  # noqa: E402
+from bench_lib.paths import results_dir  # noqa: E402
+from tasks import (  # noqa: E402
+    SELFTEST_TRAJECTORIES,
+    Task,
+    build_tasks,
+    prompt_for_provider,
+)
 from tools import ToolSession  # noqa: E402
 
-OUT_DIR = Path.home() / ".ollama" / "bench" / "results" / "archbench"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR = results_dir("archbench")
 
 SELFTEST = os.environ.get("BENCH_SELFTEST") == "1"
+PROVIDER = os.environ.get("BENCH_PROVIDER", "ollama").strip().lower()
 MODEL = "selftest" if SELFTEST else os.environ.get("BENCH_MODEL", "")
+_TAG_BASE = re.sub(r"[^a-zA-Z0-9._-]", "_", MODEL or "model")
 TAG = os.environ.get(
     "BENCH_TAG",
-    "selftest_arch" if SELFTEST else re.sub(r"[^a-zA-Z0-9._-]", "_", MODEL or "model") + "_arch",
+    "selftest_arch"
+    if SELFTEST
+    else f"{'cursor_' if PROVIDER in ('cursor', 'cursor-cli', 'agent') else ''}{_TAG_BASE}_arch",
 )
+FIXTURE = _ROOT / "fixture" / "shopapi"
 
 OPTIONS = {
     "temperature": float(os.environ.get("BENCH_TEMPERATURE", "0.1")),
@@ -149,10 +163,17 @@ def parse_final_answer(text: str) -> dict[str, Any] | None:
     if not blob:
         # last resort: outermost JSON object in content
         m3 = re.search(r"\{[\s\S]*\}", text)
-        if m3 and ("chain" in m3.group(0) or "citations" in m3.group(0) or "root_cause" in m3.group(0) or "touch_files" in m3.group(0) or "violated" in m3.group(0) or "findings" in m3.group(0) or "enforced_at" in m3.group(0)):
+        if m3 and ("chain" in m3.group(0) or "citations" in m3.group(0) or "root_cause" in m3.group(0) or "touch_files" in m3.group(0) or "violated" in m3.group(0) or "findings" in m3.group(0) or "enforced_at" in m3.group(0) or "i4_holds" in m3.group(0)):
             blob = m3.group(0)
     if not blob:
         return None
+    # Cursor (and some Ollama models) nest a ```json fence inside <arch_final>
+    fence = _FENCE_JSON.search(blob)
+    if fence:
+        blob = fence.group(1).strip()
+    else:
+        blob = re.sub(r"^```(?:json)?\s*", "", blob.strip(), flags=re.I)
+        blob = re.sub(r"\s*```$", "", blob.strip())
     try:
         obj = json.loads(blob)
         return obj if isinstance(obj, dict) else None
@@ -165,6 +186,57 @@ def parse_final_answer(text: str) -> dict[str, Any] | None:
             return obj if isinstance(obj, dict) else None
         except json.JSONDecodeError:
             return None
+
+
+def run_agent_cursor(task: Task) -> dict[str, Any]:
+    """Single-shot Cursor Agent ask-mode over the shopapi workspace."""
+    from bench_lib import cursor_cli
+
+    prompt = prompt_for_provider(task.prompt, "cursor")
+    resp = cursor_cli.chat(
+        MODEL,
+        prompt,
+        mode=os.environ.get("BENCH_CURSOR_MODE", "ask"),
+        workspace=FIXTURE,
+    )
+    content = resp.get("content") or ""
+    final = parse_final_answer(content) or {}
+    # Evidence scoring uses citations; synthesize reads from cited paths.
+    session = ToolSession(max_calls=MAX_TOOL_CALLS)
+    for c in final.get("citations") or []:
+        if isinstance(c, str) and c.strip():
+            path = c.split(":")[0].replace("fixture/shopapi/", "").replace("shopapi/", "")
+            if path.endswith(".py") or path.endswith(".md"):
+                session.files_read.add(path)
+    for f in task.required_files:
+        # soft credit only if already cited; graders use cite OR read
+        pass
+    grade = task.grade(final, session)
+    return {
+        "model": MODEL,
+        "provider": "cursor",
+        "task": task.id,
+        "title": task.title,
+        "family": task.family,
+        "ok": bool(grade.get("ok")),
+        "score": int(grade.get("score") or 0),
+        "max_score": int(grade.get("max_score") or task.max_score),
+        "grade_detail": grade.get("detail"),
+        "answer": final,
+        "tool_calls": None,
+        "files_read": sorted(session.files_read),
+        "tool_trace": [],
+        "wall_s": round(float(resp.get("wall_s") or 0), 2),
+        "prompt_tokens": int(resp.get("prompt_tokens") or 0),
+        "eval_tokens": int(resp.get("eval_tokens") or 0),
+        "rounds": 1,
+        "done_reason": resp.get("done_reason"),
+        "num_ctx": OPTIONS["num_ctx"],
+        "num_predict": OPTIONS["num_predict"],
+        "last_content_chars": len(content),
+        "session_id": resp.get("session_id"),
+        "raw_content": content,
+    }
 
 
 def run_agent_ollama(task: Task) -> dict[str, Any]:
@@ -237,6 +309,7 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
     grade = task.grade(final or {}, session)
     return {
         "model": MODEL,
+        "provider": "ollama",
         "task": task.id,
         "title": task.title,
         "family": task.family,
@@ -257,6 +330,14 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
         "num_predict": OPTIONS["num_predict"],
         "last_content_chars": len(last_content),
     }
+
+
+def run_agent(task: Task) -> dict[str, Any]:
+    if PROVIDER in ("cursor", "cursor-cli", "agent"):
+        return run_agent_cursor(task)
+    if PROVIDER != "ollama":
+        raise SystemExit(f"Unknown BENCH_PROVIDER={PROVIDER!r} (use ollama|cursor)")
+    return run_agent_ollama(task)
 
 
 def run_agent_selftest(task: Task) -> dict[str, Any]:
@@ -355,21 +436,32 @@ def main() -> int:
 
     # warmup
     try:
-        chat(MODEL, [{"role": "user", "content": "Reply with the single word: pong"}])
+        if PROVIDER in ("cursor", "cursor-cli", "agent"):
+            from bench_lib import cursor_cli
+
+            cursor_cli.chat(
+                MODEL,
+                "Reply with the single word: pong",
+                mode="ask",
+                workspace=FIXTURE,
+            )
+        else:
+            chat(MODEL, [{"role": "user", "content": "Reply with the single word: pong"}])
     except Exception as e:  # noqa: BLE001
         print(f"warmup failed: {e}", file=sys.stderr)
         return 2
 
     with out_log.open("a", encoding="utf-8") as log:
-        log.write(f"\n==== archbench {MODEL} tag={TAG} {stamp} ====\n")
+        log.write(f"\n==== archbench provider={PROVIDER} {MODEL} tag={TAG} {stamp} ====\n")
         for t in tasks:
             print(f"-- {t.id} ...", flush=True)
             log.write(f"-- {t.id} ...\n")
             try:
-                r = run_agent_ollama(t)
+                r = run_agent(t)
             except Exception as e:  # noqa: BLE001
                 r = {
                     "model": MODEL,
+                    "provider": PROVIDER,
                     "task": t.id,
                     "title": t.title,
                     "ok": False,

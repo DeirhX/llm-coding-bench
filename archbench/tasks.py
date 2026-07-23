@@ -416,6 +416,32 @@ Rules:
 - no markdown outside the tags once you start tool calls
 """
 
+# For Cursor Agent CLI: native read/grep tools replace the arch_tool protocol.
+CURSOR_PREAMBLE = """You are exploring a small Python service repo called shopapi
+(workspace root = shopapi). You MUST use your built-in tools to inspect the code
+before answering. Do not invent file paths.
+
+When you have enough evidence, finish with a single JSON object (optionally inside
+a ```json fence) matching the task schema. You may wrap it as:
+<arch_final>
+{...}
+</arch_final>
+
+Rules:
+- citations must be "relative/path.py:symbol_or_label"
+- unsupported guesses score poorly
+- prefer reading the real files over speculation
+"""
+
+
+def prompt_for_provider(prompt: str, provider: str) -> str:
+    """Swap the Ollama tool-protocol preamble for Cursor-native instructions."""
+    if provider in ("cursor", "cursor-cli", "agent"):
+        if prompt.startswith(SYSTEM_PREAMBLE):
+            return CURSOR_PREAMBLE + prompt[len(SYSTEM_PREAMBLE) :]
+        return CURSOR_PREAMBLE + "\n\n" + prompt
+    return prompt
+
 
 def build_tasks() -> list[Task]:
     return [
