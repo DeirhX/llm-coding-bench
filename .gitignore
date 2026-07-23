@@ -6,6 +6,7 @@ __pycache__/
 results/**/*.log
 results/**/*__code.py
 results/**/*.txt
+results/REPORT.md
 .venv/
 .env
 *.pid

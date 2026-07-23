@@ -1,0 +1,83 @@
+# Claim probe assignment — true/false traps over shopapi.
+# gold: true|false. difficulty: easy|medium|hard (hint for authors, not graded).
+claims:
+  - id: c01
+    text: "handle_delete_order calls order_service.cancel_order."
+    gold: true
+    difficulty: easy
+  - id: c02
+    text: "cancel_order invalidates the order cache."
+    gold: true
+    difficulty: easy
+  - id: c03
+    text: "mark_paid invalidates the order cache."
+    gold: false
+    difficulty: hard
+  - id: c04
+    text: "get_invoice checks that invoice.tenant_id matches the current tenant."
+    gold: false
+    difficulty: hard
+  - id: c05
+    text: "list_invoices scopes results with list_by_tenant."
+    gold: true
+    difficulty: easy
+  - id: c06
+    text: "admin_export_invoices returns invoices for all tenants."
+    gold: true
+    difficulty: easy
+  - id: c07
+    text: "handle_payment_webhook records processed_webhooks before inserting OrderPaid into the outbox."
+    gold: false
+    difficulty: hard
+  - id: c08
+    text: "outbox_worker.process_once acknowledges an outbox row before calling publish."
+    gold: true
+    difficulty: medium
+  - id: c09
+    text: "list_orders avoids per-order get_order calls (no N+1)."
+    gold: false
+    difficulty: hard
+  - id: c10
+    text: "README invariant I1 is violated by cancel_order (no outbox write)."
+    gold: false
+    difficulty: hard
+  - id: c11
+    text: "cancel_order_legacy is invoked on the DELETE /orders/{id} request path."
+    gold: false
+    difficulty: hard
+  - id: c12
+    text: "soft_delete sets order status to cancelled."
+    gold: true
+    difficulty: easy
+  - id: c13
+    text: "order_service.get_order returns cached rows without re-checking tenant_id on cache hit."
+    gold: true
+    difficulty: hard
+  - id: c14
+    text: "webhook_retry.retry_payment_webhook bypasses payment_service and writes outbox directly."
+    gold: false
+    difficulty: hard
+  - id: c15
+    text: "invoice_repo.get_by_id filters by tenant_id."
+    gold: false
+    difficulty: easy
+  - id: c16
+    text: "In cancel_order, outbox.insert(OrderCancelled) runs before order_repo.soft_delete."
+    gold: false
+    difficulty: hard
+  - id: c17
+    text: "get_order re-validates tenant_id against the current tenant on every cache hit."
+    gold: false
+    difficulty: hard
+  - id: c18
+    text: "handle_payment_webhook calls order_service.mark_paid after inserting OrderPaid into the outbox."
+    gold: true
+    difficulty: hard
+  - id: c19
+    text: "outbox_worker.process_once acks an outbox row only after publish succeeds."
+    gold: false
+    difficulty: hard
+  - id: c20
+    text: "invoice_service.admin_export_invoices scopes results to the current tenant."
+    gold: false
+    difficulty: medium
