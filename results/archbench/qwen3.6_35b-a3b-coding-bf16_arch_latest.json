@@ -1,0 +1,1100 @@
+[
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "task": "chain_delete_order",
+    "title": "Call chain: DELETE /orders/{id}",
+    "family": "call_chain",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "chain 5/5; effects 3/3; evidence 2/2",
+    "answer": {
+      "chain": [
+        "api.orders.handle_delete_order",
+        "pkg.auth.authenticate",
+        "pkg.tenant.set_tenant",
+        "service.order_service.cancel_order",
+        "pkg.tenant.require_tenant",
+        "store.order_repo.get",
+        "store.order_repo.soft_delete",
+        "pkg.events.order_cancelled",
+        "store.outbox.insert",
+        "store.cache.invalidate_order",
+        "pkg.auth.clear_auth",
+        "pkg.tenant.set_tenant"
+      ],
+      "side_effects": [
+        "Auth context set for tenant",
+        "Order row soft-deleted in database",
+        "OrderCancelled event persisted to outbox table",
+        "Order cache entry invalidated"
+      ],
+      "citations": [
+        "api/orders.py:handle_delete_order",
+        "pkg/auth.py:authenticate",
+        "pkg/tenant.py:set_tenant",
+        "service/order_service.py:cancel_order",
+        "pkg/tenant.py:require_tenant",
+        "store/order_repo.py:get",
+        "store/order_repo.py:soft_delete",
+        "pkg/events.py:order_cancelled",
+        "store/outbox.py:insert",
+        "store/cache.py:invalidate_order",
+        "pkg/auth.py:clear_auth"
+      ]
+    },
+    "tool_calls": 10,
+    "files_read": [
+      "api/orders.py",
+      "pkg/auth.py",
+      "pkg/events.py",
+      "pkg/tenant.py",
+      "service/order_service.py",
+      "store/cache.py",
+      "store/order_repo.py",
+      "store/outbox.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/auth.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/events.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 19.78,
+    "prompt_tokens": 26595,
+    "eval_tokens": 1014,
+    "rounds": 11,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2739
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "task": "chain_payment_webhook",
+    "title": "Call chain: POST /webhooks/payment",
+    "family": "call_chain",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "hops 4/5; payment_effect=1; evidence 2/2",
+    "answer": {
+      "chain": [
+        "api.webhooks.handle_payment_webhook",
+        "pkg.auth.authenticate",
+        "service.payment_service.handle_payment_webhook",
+        "store.db.put",
+        "pkg.events.order_paid",
+        "store.outbox.insert",
+        "service.order_service.mark_paid",
+        "store.order_repo.update_status",
+        "pkg.auth.clear_auth"
+      ],
+      "side_effects": [
+        "Insert payment record into payments table",
+        "Insert OrderPaid event into outbox table",
+        "Insert OrderStatusChanged event into outbox table",
+        "Update order status to 'paid' in orders table",
+        "Mark webhook ID as processed in processed_webhooks table"
+      ],
+      "citations": [
+        "api/webhooks.py:handle_payment_webhook",
+        "pkg/auth.py:authenticate",
+        "service/payment_service.py:handle_payment_webhook",
+        "store/db.py:put",
+        "pkg/events.py:order_paid",
+        "store/outbox.py:insert",
+        "service/order_service.py:mark_paid",
+        "store/order_repo.py:update_status",
+        "pkg/auth.py:clear_auth"
+      ]
+    },
+    "tool_calls": 11,
+    "files_read": [
+      "api/webhooks.py",
+      "pkg/auth.py",
+      "pkg/events.py",
+      "pkg/tenant.py",
+      "service/order_service.py",
+      "service/payment_service.py",
+      "store/db.py",
+      "store/order_repo.py",
+      "store/outbox.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "webhooks/payment",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/events.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/auth.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 21.19,
+    "prompt_tokens": 30832,
+    "eval_tokens": 1047,
+    "rounds": 12,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2743
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "task": "tenant_invoice_isolation",
+    "title": "Tenant isolation for invoices",
+    "family": "invariant",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "enforced/bypass scoring; evidence 2/2; enf='service.invoice_service.list_invoices' by='service.invoice_service.get_invoice | service.invoice_service.admin_export_invoices'",
+    "answer": {
+      "enforced_at": [
+        "service.invoice_service.list_invoices"
+      ],
+      "bypasses": [
+        "service.invoice_service.get_invoice",
+        "service.invoice_service.admin_export_invoices"
+      ],
+      "citations": [
+        "service/invoice_service.py:list_invoices",
+        "service/invoice_service.py:get_invoice",
+        "service/invoice_service.py:admin_export_invoices"
+      ]
+    },
+    "tool_calls": 9,
+    "files_read": [
+      "README.md",
+      "api/invoices.py",
+      "pkg/auth.py",
+      "pkg/tenant.py",
+      "service/invoice_service.py",
+      "store/invoice_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "invoice",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/auth.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 13.44,
+    "prompt_tokens": 23783,
+    "eval_tokens": 624,
+    "rounds": 10,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1514
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "task": "invariant_doc_vs_code",
+    "title": "Which README invariants fail?",
+    "family": "invariant",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "violated=['I2', 'I3', 'I4']; evidence 3/3",
+    "answer": {
+      "violated_invariants": [
+        "I2",
+        "I3",
+        "I4"
+      ],
+      "evidence": {
+        "I2": "get_invoice in invoice_service.py retrieves invoices by ID without checking tenant_id, bypassing tenant scoping. admin_export_invoices also exports all tenants' invoices.",
+        "I3": "handle_payment_webhook in payment_service.py inserts the outbox event before marking the webhook as processed, creating a race/crash window that can lead to duplicate OrderPaid events.",
+        "I4": "mark_paid in order_service.py updates the order status to 'paid' but fails to invalidate the corresponding cache entry, unlike cancel_order which does."
+      },
+      "citations": [
+        "service/invoice_service.py:get_invoice",
+        "service/invoice_service.py:admin_export_invoices",
+        "service/payment_service.py:handle_payment_webhook",
+        "service/order_service.py:mark_paid"
+      ]
+    },
+    "tool_calls": 9,
+    "files_read": [
+      "README.md",
+      "api/invoices.py",
+      "api/orders.py",
+      "api/webhooks.py",
+      "service/invoice_service.py",
+      "service/order_service.py",
+      "service/payment_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 19.78,
+    "prompt_tokens": 19065,
+    "eval_tokens": 1038,
+    "rounds": 10,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 3062
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "task": "review_list_orders_n1",
+    "title": "Review: list_orders performance smell",
+    "family": "review",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "evidence 1/1; false_auth=False",
+    "answer": {
+      "findings": [
+        {
+          "id": "n_plus_1_in_list_orders",
+          "severity": "high",
+          "summary": "The list_orders function exhibits an N+1 query pattern. It fetches a list of orders and then calls get_order for each, resulting in additional database queries per order instead of fetching all necessary data in a single query or batch."
+        },
+        {
+          "id": "missing_cache_invalidation_in_mark_paid",
+          "severity": "medium",
+          "summary": "The mark_paid function updates the order status but fails to invalidate the corresponding cache entry. This can lead to stale data being served for orders that have been marked as paid, unlike cancel_order which correctly invalidates the cache."
+        }
+      ],
+      "max_severity": "high",
+      "auth_ok": true,
+      "citations": [
+        "service/order_service.py:list_orders",
+        "service/order_service.py:get_order",
+        "service/order_service.py:mark_paid",
+        "service/order_service.py:cancel_order",
+        "store/order_repo.py:list_by_tenant",
+        "store/order_repo.py:get",
+        "store/cache.py:invalidate_order",
+        "pkg/tenant.py:require_tenant"
+      ]
+    },
+    "tool_calls": 10,
+    "files_read": [
+      "pkg/tenant.py",
+      "service/order_service.py",
+      "store/cache.py",
+      "store/order_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "invalidate_order",
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "invalidate",
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "def list_by_tenant",
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 19.27,
+    "prompt_tokens": 30650,
+    "eval_tokens": 967,
+    "rounds": 11,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2587
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "task": "review_cache_on_paid",
+    "title": "Review: cache vs status change (I4)",
+    "family": "review",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "evidence 1/1",
+    "answer": {
+      "i4_holds": false,
+      "findings": [
+        {
+          "summary": "The mark_paid function in service/order_service.py updates the order status to 'paid' but does not call cache.invalidate_order(order_id) to invalidate the cache entry. This violates invariant I4 which states that order cache entries must be invalidated on any status change. The cancel_order function correctly invalidates the cache, but mark_paid does not.",
+          "severity": "high"
+        }
+      ],
+      "citations": [
+        "service/order_service.py:mark_paid",
+        "service/order_service.py:45",
+        "service/order_service.py:54",
+        "README.md:I4"
+      ]
+    },
+    "tool_calls": 6,
+    "files_read": [
+      "README.md",
+      "service/order_service.py",
+      "store/cache.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "mark_paid",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": "service/order_service.py",
+          "pattern": "cache\\.invalidate"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 7.54,
+    "prompt_tokens": 8780,
+    "eval_tokens": 348,
+    "rounds": 7,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 652
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "task": "incident_duplicate_order_paid",
+    "title": "Incident: duplicate OrderPaid",
+    "family": "incident",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "evidence 1/1",
+    "answer": {
+      "root_cause": "In handle_payment_webhook, the outbox event is inserted before the webhook id is marked as processed. If a crash or failure occurs between insertion and marking, a retry will re-insert a duplicate event because the idempotency check fails.",
+      "fix_function": "service.payment_service.handle_payment_webhook",
+      "fix_functions": [
+        "service.payment_service.handle_payment_webhook"
+      ],
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:48",
+        "service/payment_service.py:51"
+      ]
+    },
+    "tool_calls": 8,
+    "files_read": [
+      "service/payment_service.py",
+      "store/outbox.py",
+      "worker/outbox_worker.py",
+      "worker/webhook_retry.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "worker"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/webhook_retry.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 16.29,
+    "prompt_tokens": 15476,
+    "eval_tokens": 828,
+    "rounds": 9,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2445
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "task": "incident_outbox_ack_order",
+    "title": "Incident: lost outbox events",
+    "family": "incident",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "evidence 1/1",
+    "answer": {
+      "root_cause": "The worker calls outbox.ack() before publish() succeeds. If the publisher crashes or raises an exception after acking but before completing, the event is marked as acknowledged but never published, causing it to disappear permanently since it is no longer claimed by future batches.",
+      "fix_function": "worker.outbox_worker.process_once",
+      "citations": [
+        "worker/outbox_worker.py:process_once",
+        "worker/outbox_worker.py:22",
+        "worker/outbox_worker.py:23",
+        "store/outbox.py:ack"
+      ]
+    },
+    "tool_calls": 13,
+    "files_read": [
+      "store/outbox.py",
+      "worker/outbox_worker.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "worker"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "process_once",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "claim_batch",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "publish",
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "ack",
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "mark_published",
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "claim_batch",
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "def claim_batch",
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 12.97,
+    "prompt_tokens": 28036,
+    "eval_tokens": 552,
+    "rounds": 14,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 554
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "task": "redesign_webhook_idempotency",
+    "title": "Constrained fix: webhook idempotency",
+    "family": "redesign",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "files=['service/payment_service.py']; evidence 1/1",
+    "answer": {
+      "touch_files": [
+        "service/payment_service.py"
+      ],
+      "plan_steps": [
+        "In service/payment_service.py, move the _mark_processed(webhook_id) call from after the side effects to before the outbox.insert and order_service.mark_paid calls.",
+        "This ensures that the webhook ID is recorded as processed before any state changes (outbox event insertion, order status update) are made, preventing duplicate processing on retry after a crash."
+      ],
+      "idempotency_change": "Move _mark_processed(webhook_id) to execute before outbox.insert(order_paid(...)) and order_service.mark_paid(...).",
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:48",
+        "service/payment_service.py:51"
+      ]
+    },
+    "tool_calls": 16,
+    "files_read": [
+      "api/invoices.py",
+      "api/orders.py",
+      "api/webhooks.py",
+      "pkg/auth.py",
+      "pkg/events.py",
+      "pkg/tenant.py",
+      "service/invoice_service.py",
+      "service/order_service.py",
+      "service/payment_service.py",
+      "store/cache.py",
+      "store/db.py",
+      "store/invoice_repo.py",
+      "store/order_repo.py",
+      "store/outbox.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/events.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/auth.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 24.01,
+    "prompt_tokens": 66149,
+    "eval_tokens": 1103,
+    "rounds": 17,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2714
+  }
+]

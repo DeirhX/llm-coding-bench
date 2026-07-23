@@ -1,0 +1,9 @@
+{
+  "model": "north-mini-code-1.0:bf16",
+  "tag": "north-mini-code-1.0_bf16_arch",
+  "score": 4,
+  "max_score": 90,
+  "pass": 0,
+  "tasks": 9,
+  "path": "/Users/deirh/.ollama/bench/results/archbench/north-mini-code-1.0_bf16_arch_20260723_110401.json"
+}

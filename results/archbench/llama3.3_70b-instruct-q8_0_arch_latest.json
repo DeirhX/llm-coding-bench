@@ -1,0 +1,691 @@
+[
+  {
+    "model": "llama3.3:70b-instruct-q8_0",
+    "task": "chain_delete_order",
+    "title": "Call chain: DELETE /orders/{id}",
+    "family": "call_chain",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "chain 4/5; effects 2/3; evidence 2/2",
+    "answer": {
+      "chain": [
+        "api.orders.handle_delete_order",
+        "service.order_service.cancel_order",
+        "store.order_repo.soft_delete",
+        "store.outbox.insert"
+      ],
+      "side_effects": [
+        "auth checked",
+        "order cancelled",
+        "cache invalidated",
+        "outbox updated"
+      ],
+      "citations": [
+        "api/orders.py:handle_delete_order",
+        "service/order_service.py:cancel_order",
+        "store/order_repo.py:soft_delete"
+      ]
+    },
+    "tool_calls": 8,
+    "files_read": [
+      "api/orders.py",
+      "service/order_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "DELETE /orders/",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "order_service.cancel_order"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "cancel_order"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "order_repo.soft_delete"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "soft_delete"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 62.82,
+    "prompt_tokens": 11457,
+    "eval_tokens": 319,
+    "rounds": 9,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 393
+  },
+  {
+    "model": "llama3.3:70b-instruct-q8_0",
+    "task": "chain_payment_webhook",
+    "title": "Call chain: POST /webhooks/payment",
+    "family": "call_chain",
+    "ok": false,
+    "score": 6,
+    "max_score": 10,
+    "grade_detail": "hops 2/5; payment_effect=1; evidence 2/2",
+    "answer": {
+      "chain": [
+        "api.webhooks.handle_payment_webhook",
+        "service.payment_service.handle_payment_webhook"
+      ],
+      "side_effects": [
+        "outbox.insert",
+        "order_service.mark_paid",
+        "db.put"
+      ],
+      "citations": [
+        "api/webhooks.py:handle_payment_webhook",
+        "service/payment_service.py:handle_payment_webhook"
+      ]
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "api/webhooks.py",
+      "service/payment_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "handle_payment_webhook"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 41.24,
+    "prompt_tokens": 5621,
+    "eval_tokens": 213,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 317
+  },
+  {
+    "model": "llama3.3:70b-instruct-q8_0",
+    "task": "tenant_invoice_isolation",
+    "title": "Tenant isolation for invoices",
+    "family": "invariant",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "enforced/bypass scoring; evidence 1/2; missing=['store/invoice_repo.py']; enf='service/invoice_service.py:list_invoices | pkg/tenant.py:require_tenant' by='service/invoice_service.py:get_invoice | service/invoice_service.py:admin_export_invoices'",
+    "answer": {
+      "enforced_at": [
+        "service/invoice_service.py:list_invoices",
+        "pkg/tenant.py:require_tenant"
+      ],
+      "bypasses": [
+        "service/invoice_service.py:get_invoice",
+        "service/invoice_service.py:admin_export_invoices"
+      ],
+      "citations": [
+        "service/invoice_service.py:10",
+        "pkg/tenant.py:25",
+        "service/invoice_service.py:16",
+        "service/invoice_service.py:25"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "service/invoice_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "tenant",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "require_tenant"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 49.4,
+    "prompt_tokens": 8368,
+    "eval_tokens": 218,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 370
+  },
+  {
+    "model": "llama3.3:70b-instruct-q8_0",
+    "task": "invariant_doc_vs_code",
+    "title": "Which README invariants fail?",
+    "family": "invariant",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "violated=['I2', 'I3', 'I4']; evidence 3/3",
+    "answer": {
+      "violated_invariants": [
+        "I2",
+        "I3",
+        "I4"
+      ],
+      "evidence": {
+        "I2": "Invoice reads are not tenant-scoped, as indicated by comments in invoice_service.py",
+        "I3": "Payment webhooks are not idempotent, as indicated by comments in payment_service.py and webhook_retry.py",
+        "I4": "Order cache entries are not invalidated on status change, as indicated by a comment in order_service.py"
+      },
+      "citations": [
+        "service/invoice_service.py:get_invoice",
+        "service/payment_service.py:admin_export_invoices",
+        "worker/webhook_retry.py",
+        "service/order_service.py:mark_paid"
+      ]
+    },
+    "tool_calls": 8,
+    "files_read": [
+      "README.md",
+      "service/invoice_service.py",
+      "service/order_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "I2",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "I1",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "outbox event",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "I3|I4",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 82.48,
+    "prompt_tokens": 11615,
+    "eval_tokens": 414,
+    "rounds": 9,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 622
+  },
+  {
+    "model": "llama3.3:70b-instruct-q8_0",
+    "task": "review_list_orders_n1",
+    "title": "Review: list_orders performance smell",
+    "family": "review",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "evidence 1/1; false_auth=False",
+    "answer": {
+      "findings": [
+        {
+          "id": "n_plus_1",
+          "severity": "medium",
+          "summary": "N+1 query issue in list_orders function"
+        },
+        {
+          "id": "cache_invalidation",
+          "severity": "high",
+          "summary": "Cache invalidation missing in mark_paid function"
+        }
+      ],
+      "max_severity": "high",
+      "auth_ok": true,
+      "citations": [
+        "service/order_service.py:list_orders",
+        "service/order_service.py:mark_paid",
+        "store/order_repo.py:list_by_tenant"
+      ]
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "service/order_service.py",
+      "store/order_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "require_tenant\\(\\)",
+          "path": "service/order_service.py",
+          "ignore_case": false
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "list_orders"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "cache.invalidate_order\\(order_id\\)",
+          "path": "service/order_service.py",
+          "ignore_case": false
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 62.55,
+    "prompt_tokens": 9014,
+    "eval_tokens": 315,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 508
+  },
+  {
+    "model": "llama3.3:70b-instruct-q8_0",
+    "task": "review_cache_on_paid",
+    "title": "Review: cache vs status change (I4)",
+    "family": "review",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "evidence 1/1",
+    "answer": {
+      "i4_holds": false,
+      "findings": [
+        {
+          "summary": "Cache is not invalidated when order status is changed to paid in mark_paid function",
+          "severity": "high"
+        }
+      ],
+      "citations": [
+        "service/order_service.py:mark_paid",
+        "README.md:I4"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "README.md",
+      "service/order_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "mark_paid",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 40.07,
+    "prompt_tokens": 4069,
+    "eval_tokens": 193,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 283
+  },
+  {
+    "model": "llama3.3:70b-instruct-q8_0",
+    "task": "incident_duplicate_order_paid",
+    "title": "Incident: duplicate OrderPaid",
+    "family": "incident",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "evidence 1/1",
+    "answer": {
+      "root_cause": "Writing outbox OrderPaid event before recording webhook idempotency",
+      "fix_function": "service.payment_service.handle_payment_webhook",
+      "fix_functions": [
+        "service.payment_service.handle_payment_webhook"
+      ],
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_mark_processed"
+      ]
+    },
+    "tool_calls": 3,
+    "files_read": [
+      "service/payment_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "OrderPaid",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 35.01,
+    "prompt_tokens": 3079,
+    "eval_tokens": 172,
+    "rounds": 4,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 371
+  },
+  {
+    "model": "llama3.3:70b-instruct-q8_0",
+    "task": "incident_outbox_ack_order",
+    "title": "Incident: lost outbox events",
+    "family": "incident",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "evidence 1/1",
+    "answer": {
+      "root_cause": "acknowledging outbox event before publishing",
+      "fix_function": "worker.outbox_worker.process_once",
+      "citations": [
+        "worker/outbox_worker.py:process_once",
+        "worker/outbox_worker.py:22"
+      ]
+    },
+    "tool_calls": 3,
+    "files_read": [
+      "worker/outbox_worker.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "outbox|publisher",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 34.76,
+    "prompt_tokens": 4360,
+    "eval_tokens": 154,
+    "rounds": 4,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 235
+  },
+  {
+    "model": "llama3.3:70b-instruct-q8_0",
+    "task": "redesign_webhook_idempotency",
+    "title": "Constrained fix: webhook idempotency",
+    "family": "redesign",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "files=['service/payment_service.py']; evidence 1/1",
+    "answer": {
+      "touch_files": [
+        "service/payment_service.py"
+      ],
+      "plan_steps": [
+        "Move the call to _mark_processed before outbox.insert and order_service.mark_paid",
+        "This ensures that if a crash occurs after idempotency is recorded, no duplicate OrderPaid will be inserted"
+      ],
+      "idempotency_change": "_mark_processed moves before outbox.insert and order_service.mark_paid",
+      "citations": [
+        "service/payment_service.py:_mark_processed",
+        "service/payment_service.py:handle_payment_webhook"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "service/payment_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "OrderPaid",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "_mark_processed"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 47.26,
+    "prompt_tokens": 4831,
+    "eval_tokens": 234,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 517
+  }
+]

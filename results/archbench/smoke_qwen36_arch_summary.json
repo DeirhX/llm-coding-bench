@@ -1,0 +1,9 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-bf16",
+  "tag": "smoke_qwen36_arch",
+  "score": 10,
+  "max_score": 10,
+  "pass": 1,
+  "tasks": 1,
+  "path": "/Users/deirh/.ollama/bench/results/archbench/smoke_qwen36_arch_20260723_105248.json"
+}

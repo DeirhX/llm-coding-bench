@@ -1,0 +1,9 @@
+{
+  "model": "devstral:24b-small-2505-fp16",
+  "tag": "devstral_24b-small-2505-fp16_arch",
+  "score": 78,
+  "max_score": 90,
+  "pass": 8,
+  "tasks": 9,
+  "path": "/Users/deirh/.ollama/bench/results/archbench/devstral_24b-small-2505-fp16_arch_20260723_091929.json"
+}

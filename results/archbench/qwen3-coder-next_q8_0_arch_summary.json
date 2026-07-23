@@ -1,0 +1,9 @@
+{
+  "model": "qwen3-coder-next:q8_0",
+  "tag": "qwen3-coder-next_q8_0_arch",
+  "score": 84,
+  "max_score": 90,
+  "pass": 9,
+  "tasks": 9,
+  "path": "/Users/deirh/.ollama/bench/results/archbench/qwen3-coder-next_q8_0_arch_20260723_105335.json"
+}

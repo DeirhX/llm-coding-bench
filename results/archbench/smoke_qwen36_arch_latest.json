@@ -1,0 +1,104 @@
+[
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "task": "tenant_invoice_isolation",
+    "title": "Tenant isolation for invoices",
+    "family": "invariant",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "enforced/bypass scoring; evidence 2/2; enf='service/invoice_service.py:list_invoices' by='service/invoice_service.py:get_invoice | service/invoice_service.py:admin_export_invoices'",
+    "answer": {
+      "enforced_at": [
+        "service/invoice_service.py:list_invoices"
+      ],
+      "bypasses": [
+        "service/invoice_service.py:get_invoice",
+        "service/invoice_service.py:admin_export_invoices"
+      ],
+      "citations": [
+        "service/invoice_service.py:list_invoices",
+        "service/invoice_service.py:get_invoice",
+        "service/invoice_service.py:admin_export_invoices",
+        "store/invoice_repo.py:get_by_id",
+        "store/invoice_repo.py:export_all"
+      ]
+    },
+    "tool_calls": 8,
+    "files_read": [
+      "README.md",
+      "api/invoices.py",
+      "pkg/auth.py",
+      "pkg/tenant.py",
+      "service/invoice_service.py",
+      "store/invoice_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "invoice",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/auth.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 13.69,
+    "prompt_tokens": 19391,
+    "eval_tokens": 648,
+    "rounds": 9,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1715
+  }
+]

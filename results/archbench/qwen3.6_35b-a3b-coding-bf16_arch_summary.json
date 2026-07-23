@@ -1,0 +1,9 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-bf16",
+  "tag": "qwen3.6_35b-a3b-coding-bf16_arch",
+  "score": 84,
+  "max_score": 90,
+  "pass": 9,
+  "tasks": 9,
+  "path": "/Users/deirh/.ollama/bench/results/archbench/qwen3.6_35b-a3b-coding-bf16_arch_20260723_110115.json"
+}

@@ -1,0 +1,125 @@
+{
+  "model": "qwen3-coder:30b-a3b-fp16",
+  "bench": "claim",
+  "tag": "qwen3-coder_30b-a3b-fp16_claim",
+  "score": 3,
+  "max_score": 18,
+  "correct": 0,
+  "wrong": 0,
+  "missing": 15,
+  "evidence_bonus": 3,
+  "files_read": [
+    "api/invoices.py",
+    "api/orders.py",
+    "api/webhooks.py",
+    "service/invoice_service.py",
+    "service/legacy_order.py",
+    "service/order_service.py",
+    "service/payment_service.py",
+    "worker/outbox_worker.py",
+    "worker/webhook_retry.py"
+  ],
+  "per_claim": [
+    {
+      "id": "c01",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c02",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c03",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c04",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c05",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c06",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c07",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c08",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c09",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c10",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c11",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c12",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c13",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c14",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c15",
+      "gold": false,
+      "got": null,
+      "ok": false
+    }
+  ],
+  "ok": false,
+  "detail": "0/15 correct, wrong=0, missing=15, ev=+3",
+  "answer": null,
+  "tool_calls": 40,
+  "wall_s": 31.84,
+  "prompt_tokens": 199328,
+  "eval_tokens": 1164,
+  "rounds": 40,
+  "done_reason": "stop",
+  "num_ctx": 65536,
+  "num_predict": 8192
+}

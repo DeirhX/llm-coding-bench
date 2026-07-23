@@ -1,0 +1,9 @@
+{
+  "model": "gpt-oss:120b",
+  "tag": "gpt-oss_120b_arch",
+  "score": 62,
+  "max_score": 90,
+  "pass": 4,
+  "tasks": 9,
+  "path": "/Users/deirh/.ollama/bench/results/archbench/gpt-oss_120b_arch_20260723_090436.json"
+}

@@ -1,0 +1,9 @@
+{
+  "model": "llama3.3:70b-instruct-q8_0",
+  "tag": "llama3.3_70b-instruct-q8_0_arch",
+  "score": 78,
+  "max_score": 90,
+  "pass": 8,
+  "tasks": 9,
+  "path": "/Users/deirh/.ollama/bench/results/archbench/llama3.3_70b-instruct-q8_0_arch_20260723_110859.json"
+}

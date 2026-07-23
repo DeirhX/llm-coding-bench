@@ -1,0 +1,120 @@
+{
+  "model": "deepseek-r1:70b-llama-distill-q8_0",
+  "skipped": true,
+  "reason": "user skip \u2014 zero tool use / unusable on arch protocol",
+  "partial": [
+    {
+      "model": "deepseek-r1:70b-llama-distill-q8_0",
+      "task": "chain_delete_order",
+      "title": "Call chain: DELETE /orders/{id}",
+      "family": "call_chain",
+      "ok": false,
+      "score": 1,
+      "max_score": 10,
+      "grade_detail": "chain 0/5; effects 1/3; evidence 0/2; missing=['api/orders.py', 'service/order_service.py']",
+      "answer": {
+        "chain": [
+          "app.delete_order",
+          "auth.get_current_user",
+          "repositories.OrderRepository.delete"
+        ],
+        "side_effects": [
+          "Deletes order from database"
+        ],
+        "citations": [
+          "app.py:delete_order",
+          "auth.py:get_current_user",
+          "repositories.py:OrderRepository.delete"
+        ]
+      },
+      "tool_calls": 0,
+      "files_read": [],
+      "tool_trace": [],
+      "wall_s": 75.06,
+      "prompt_tokens": 281,
+      "eval_tokens": 463,
+      "rounds": 1,
+      "done_reason": "stop",
+      "num_ctx": 65536,
+      "num_predict": 8192,
+      "last_content_chars": 329
+    },
+    {
+      "model": "deepseek-r1:70b-llama-distill-q8_0",
+      "task": "chain_payment_webhook",
+      "title": "Call chain: POST /webhooks/payment",
+      "family": "call_chain",
+      "ok": false,
+      "score": 0,
+      "max_score": 10,
+      "grade_detail": "hops 0/5; payment_effect=0; evidence 0/2; missing=['api/webhooks.py', 'service/payment_service.py']",
+      "answer": {
+        "chain": [
+          "app.py:route(/webhooks/payment)",
+          "webhooks.service.create_webhook",
+          "models.Webhook.__init__",
+          "session.add",
+          "session.commit",
+          "publish_webhook_creation"
+        ],
+        "side_effects": [
+          "Database insertion of new webhook",
+          "Publishing webhook creation event"
+        ],
+        "citations": [
+          "app.py:route(/webhooks/payment)",
+          "webhooks/service.py:create_webhook",
+          "models.py:Webhook.__init__"
+        ]
+      },
+      "tool_calls": 0,
+      "files_read": [],
+      "tool_trace": [],
+      "wall_s": 80.94,
+      "prompt_tokens": 261,
+      "eval_tokens": 527,
+      "rounds": 1,
+      "done_reason": "stop",
+      "num_ctx": 65536,
+      "num_predict": 8192,
+      "last_content_chars": 472
+    },
+    {
+      "model": "deepseek-r1:70b-llama-distill-q8_0",
+      "task": "tenant_invoice_isolation",
+      "title": "Tenant isolation for invoices",
+      "family": "invariant",
+      "ok": false,
+      "score": 0,
+      "max_score": 10,
+      "grade_detail": "enforced/bypass scoring; evidence 0/2; missing=['service/invoice_service.py', 'store/invoice_repo.py']; enf='services.invoice_service.get_invoice | services.invoice_service.get_invoices' by='utils.background_tasks.process_invoices | models.invoice.invoice.export_to_csv'",
+      "answer": {
+        "enforced_at": [
+          "services.invoice_service.get_invoice",
+          "services.invoice_service.get_invoices"
+        ],
+        "bypasses": [
+          "utils.background_tasks.process_invoices",
+          "models.invoice.Invoice.export_to_csv"
+        ],
+        "citations": [
+          "services/invoice_service.py:get_invoice",
+          "services/invoice_service.py:get_invoices",
+          "utils/background_tasks.py:process_invoices",
+          "models/invoice.py:export_to_csv"
+        ]
+      },
+      "tool_calls": 0,
+      "files_read": [],
+      "tool_trace": [],
+      "wall_s": 97.52,
+      "prompt_tokens": 288,
+      "eval_tokens": 631,
+      "rounds": 1,
+      "done_reason": "stop",
+      "num_ctx": 65536,
+      "num_predict": 8192,
+      "last_content_chars": 459
+    }
+  ]
+}

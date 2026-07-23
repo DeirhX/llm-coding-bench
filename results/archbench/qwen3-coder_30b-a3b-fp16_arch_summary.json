@@ -1,0 +1,9 @@
+{
+  "model": "qwen3-coder:30b-a3b-fp16",
+  "tag": "qwen3-coder_30b-a3b-fp16_arch",
+  "score": 83,
+  "max_score": 90,
+  "pass": 9,
+  "tasks": 9,
+  "path": "/Users/deirh/.ollama/bench/results/archbench/qwen3-coder_30b-a3b-fp16_arch_20260723_105728.json"
+}
