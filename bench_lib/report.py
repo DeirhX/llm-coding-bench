@@ -277,6 +277,11 @@ def format_markdown(runs: list[RunSummary]) -> str:
         "",
         f"Source: `{source}`",
         "",
+        "> **Harness eras:** Cursor gap-queue runs after 2026-07-23 17:19 CEST are "
+        "**post-harness** (temp repohard workspace, full patches, claim c01–c20, "
+        "arch `required_files` from assignment). Older `*_latest.json` may be "
+        "**pre-harness** — see `results/POST_HARNESS.md`. Do not mix eras in one cell.",
+        "",
     ]
     for bench, group in _group_by_bench(runs).items():
         lines += [

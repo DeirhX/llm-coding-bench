@@ -34,7 +34,7 @@ CASES = {
         ),
         "cases": [
             ("const_eq", "got = unify(1, 1); assert got is not None"),
-            ("var_const", "got = unify(('var','X'), 3); assert got is not None and deep_subst(('var','X'), got) == 3"),
+            ("var_const_env", "got = unify(('var','X'), 3, {'Y': 1}); assert got is not None and deep_subst(('var','X'), got) == 3 and deep_subst(('var','Y'), got) == 1"),
             ("alias", "got = unify(('var','X'), ('var','Y')); assert got is not None and deep_subst(('var','X'), got) == deep_subst(('var','Y'), got)"),
             ("fn_bind", "got = unify(('fn','f',[('var','X'),1]), ('fn','f',[2,1])); assert got is not None and deep_subst(('var','X'), got) == 2"),
             ("fn_nested", "got = unify(('fn','f',[('var','X')]), ('fn','f',[('fn','g',[1])])); assert got is not None and deep_subst(('var','X'), got) == ('fn','g',[1])"),
@@ -70,7 +70,7 @@ CASES = {
             ("where_ne", "assert execute_select(tables, \"SELECT id FROM users WHERE name != 'Bob'\") == [{'id': 1}, {'id': 3}]"),
             ("join_where", "assert execute_select(tables, \"SELECT users.name, orders.total FROM users JOIN orders ON users.id = orders.user_id WHERE orders.total >= 40\") == [{'users.name': 'Ann', 'orders.total': 50}, {'users.name': 'Bob', 'orders.total': 40}, {'users.name': 'Cy', 'orders.total': 40}]"),
             ("join_and", "assert execute_select(tables, \"SELECT orders.id FROM users JOIN orders ON users.id = orders.user_id WHERE users.name = 'Ann' AND orders.total < 10\") == [{'orders.id': 11}]"),
-            ("select_all", "assert execute_select(tables, \"SELECT id FROM users\") == [{'id': 1}, {'id': 2}, {'id': 3}]"),
+            ("bare_join", "assert execute_select(tables, \"SELECT name, total FROM users JOIN orders ON users.id = orders.user_id WHERE total >= 50\") == [{'name': 'Ann', 'total': 50}]"),
             ("join_filter", "assert execute_select(tables, \"SELECT users.id, orders.id FROM users JOIN orders ON users.id = orders.user_id WHERE users.age = 20\") == [{'users.id': 2, 'orders.id': 12}]"),
             ("where_and", "assert execute_select(tables, \"SELECT name FROM users WHERE age >= 30 AND name != 'Cy'\") == [{'name': 'Ann'}]"),
         ],

@@ -222,7 +222,7 @@ def setup_function(_=None):
     )
 
 
-def test_concurrent_same_webhook_single_payment():
+def test_duplicate_webhook_sequential_single_payment():
     payload = {
         "webhook_id": "wh-1",
         "tenant_id": "t1",
@@ -230,6 +230,45 @@ def test_concurrent_same_webhook_single_payment():
         "account_id": "a1",
         "amount_cents": 500,
     }
+    r1 = handle_payment_webhook(payload)
+    r2 = handle_payment_webhook(payload)
+    # Assignment requires idempotent side effects, not a specific status string.
+    assert r1.get("status") == "ok"
+    pays = payment_repo.list_by_invoice("inv1")
+    assert len(pays) == 1, pays
+    ent = entitlement_repo.get("a1")
+    assert ent is not None and ent["plan"] == "pro"
+    inv = invoice_repo.get("inv1")
+    assert inv["status"] == "paid"
+    # Replay must not create another payment (status may be "ok" or "duplicate").
+    assert r2 is not None
+    pays2 = payment_repo.list_by_invoice("inv1")
+    assert len(pays2) == 1, pays2
+
+
+def test_concurrent_same_webhook_single_payment():
+    payload = {
+        "webhook_id": "wh-conc",
+        "tenant_id": "t1",
+        "invoice_id": "inv1",
+        "account_id": "a1",
+        "amount_cents": 500,
+    }
+    # reset invoice/payments for this case
+    db.reset()
+    cache.reset()
+    account_repo.upsert({"id": "a1", "tenant_id": "t1", "name": "A"})
+    invoice_repo.upsert(
+        {
+            "id": "inv1",
+            "tenant_id": "t1",
+            "account_id": "a1",
+            "amount_cents": 500,
+            "currency": "USD",
+            "status": "open",
+            "lines": [],
+        }
+    )
     barriers = threading.Barrier(8)
     errors: list[BaseException] = []
 
@@ -255,7 +294,6 @@ def test_concurrent_same_webhook_single_payment():
 
 
 def test_distinct_webhooks_still_work():
-    # second invoice
     invoice_repo.upsert(
         {
             "id": "inv2",
@@ -276,7 +314,6 @@ def test_distinct_webhooks_still_work():
             "amount_cents": 500,
         }
     )
-    # reset invoice1 already paid — use inv2
     handle_payment_webhook(
         {
             "webhook_id": "wh-b",
@@ -507,16 +544,25 @@ def test_admin_can_export_any():
 
 
 def test_internal_route_blocks_cross_tenant():
-    resp = handle(
-        "GET",
-        "/internal/export",
-        headers={"X-Tenant-Id": "t_attacker"},
-        body={"tenant_id": "t_victim"},
-    )
-    assert resp.get("status") in (403, None) or "error" in resp or resp.get("status") == 403
-    # also accept raised path turned into error by handle — if handle doesn't catch, call service
+    """Security property: non-admin must not receive victim invoices.
+
+    Accept 403/error response, a raised PermissionError from the service layer,
+    or a 200 that contains no victim rows. Mapping PermissionError→403 in
+    api/internal is nice-to-have, not required for full credit.
+    """
+    try:
+        resp = handle(
+            "GET",
+            "/internal/export",
+            headers={"X-Tenant-Id": "t_attacker"},
+            body={"tenant_id": "t_victim"},
+        )
+    except PermissionError:
+        return
     if resp.get("status") == 200:
         assert all(r["tenant_id"] != "t_victim" for r in resp.get("invoices", []))
+        return
+    assert resp.get("status") == 403 or "error" in resp
 ''',
     "client_contract_drift": '''
 from __future__ import annotations

@@ -28,11 +28,13 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from bench_lib.assignment import load_markdown_assignment  # noqa: E402
+from bench_lib.ollama_chat import chat as ollama_chat  # noqa: E402
 from bench_lib.ollama_think import (  # noqa: E402
-    apply_think,
     default_num_predict,
+    format_think_combined,
     grade_from_response,
     parse_think,
+    save_task_transcript,
     thinking_enabled,
 )
 from bench_lib.paths import results_dir  # noqa: E402
@@ -88,44 +90,21 @@ class Task:
 
 
 def chat_ollama(model: str, prompt: str) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "model": model,
-        "stream": False,
-        "messages": [{"role": "user", "content": prompt}],
-        "options": OPTIONS,
-    }
-    # Top-level think only (never inside options — Ollama ignores that).
-    # Default OFF. BENCH_THINK=1|true|low|medium|high|max enables thinking.
-    apply_think(body, THINK)
-    req = urllib.request.Request(
-        "http://127.0.0.1:11434/api/chat",
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    # Stream + keep_alive=-1 + stall retry — see bench_lib/ollama_chat.py.
+    resp = ollama_chat(
+        model,
+        [{"role": "user", "content": prompt}],
+        options=OPTIONS,
+        think=THINK,
     )
-    t0 = time.perf_counter()
-    with urllib.request.urlopen(req, timeout=3600) as resp:
-        data = json.loads(resp.read().decode())
-    wall = time.perf_counter() - t0
-    msg = data.get("message") or {}
-    content = msg.get("content") or ""
-    thinking = msg.get("thinking") or ""
-    # Grade answer content; keep combined only for logs/artifacts.
+    content = resp.get("content") or ""
+    thinking = resp.get("thinking") or ""
     grade_text = grade_from_response(content, thinking, scrape_thinking=False)
-    combined = content if not thinking else f"<think>\n{thinking}\n</think>\n{content}"
-    eval_duration = float(data.get("eval_duration") or 0)
-    eval_count = float(data.get("eval_count") or 0)
+    combined = format_think_combined(content, thinking)
     return {
-        "content": content,
-        "thinking": thinking,
+        **resp,
         "grade_text": grade_text,
         "combined": combined,
-        "wall_s": wall,
-        "load_s": float(data.get("load_duration") or 0) / 1e9,
-        "prompt_tokens": int(data.get("prompt_eval_count") or 0),
-        "eval_tokens": int(data.get("eval_count") or 0),
-        "toks_per_s": (eval_count / (eval_duration / 1e9)) if eval_duration > 0 else 0.0,
-        "done_reason": data.get("done_reason"),
         "provider": "ollama",
         "think": THINK,
     }
@@ -136,12 +115,16 @@ def chat_cursor(model: str, prompt: str) -> dict[str, Any]:
 
     # Isolated empty workspace so ask-mode cannot trampoline into this repo.
     with tempfile.TemporaryDirectory(prefix="cursor_pyhard_") as td:
-        resp = cursor_cli.chat(model, prompt, mode="ask", workspace=td)
+        from bench_lib.task_timeout import cursor_timeout_s
+
+        resp = cursor_cli.chat(
+            model, prompt, mode="ask", workspace=td, timeout_s=cursor_timeout_s()
+        )
     # Normalize to ollama-shaped fields used by the runner.
     content = resp.get("content") or ""
     thinking = resp.get("thinking") or ""
     resp.setdefault("grade_text", grade_from_response(content, thinking))
-    resp.setdefault("combined", content if not thinking else f"<think>\n{thinking}\n</think>\n{content}")
+    resp.setdefault("combined", format_think_combined(content, thinking))
     resp.setdefault("think", THINK)
     return resp
 
@@ -594,9 +577,9 @@ def unify(a, b, env=None):
 '''.strip()
 
 REF_SQL = r'''
-import re
-
 def execute_select(tables: dict, query: str):
+    import re
+
     q = " ".join(query.strip().split())
     m = re.match(
         r"SELECT (.+?) FROM (\w+)(?: JOIN (\w+) ON (\w+)\.(\w+) = (\w+)\.(\w+))?(?: WHERE (.+))?$",
@@ -948,12 +931,13 @@ def deep_subst(t, env):
         return ("fn", t[1], [deep_subst(a, env) for a in t[2]])
     return t
 
+# (a, b, expected_bindings_or_"alias", seed_env_or_None)
 cases_ok = [
-    (1, 1, {}),
-    (("var", "X"), 3, {"X": 3}),
-    (("var", "X"), ("var", "Y"), "alias"),
-    (("fn", "f", [("var", "X"), 1]), ("fn", "f", [2, 1]), {"X": 2}),
-    (("fn", "f", [("var", "X")]), ("fn", "f", [("fn", "g", [1])]), {"X": ("fn", "g", [1])}),
+    (1, 1, {}, None),
+    (("var", "X"), 3, {"X": 3}, {"Y": 1}),  # preserve/extend provided env
+    (("var", "X"), ("var", "Y"), "alias", None),
+    (("fn", "f", [("var", "X"), 1]), ("fn", "f", [2, 1]), {"X": 2}, None),
+    (("fn", "f", [("var", "X")]), ("fn", "f", [("fn", "g", [1])]), {"X": ("fn", "g", [1])}, None),
 ]
 cases_bad = [
     (1, 2),
@@ -965,9 +949,12 @@ cases_bad = [
 pass_n = 0
 for i, item in enumerate(cases_ok):
     try:
-        a, b, exp = item
-        got = unify(a, b)
+        a, b, exp, seed = item
+        got = unify(a, b) if seed is None else unify(a, b, dict(seed))
         assert isinstance(got, dict), f"ok case {i}: expected dict got {type(got).__name__}: {got!r}"
+        if seed is not None:
+            for k, v in seed.items():
+                assert k in got and deep_subst(("var", k), got) == deep_subst(v, got), f"ok case {i} seed"
         if exp == "alias":
             assert deep_subst(("var", "X"), got) == deep_subst(("var", "Y"), got)
         else:
@@ -1020,7 +1007,11 @@ cases = [
         "SELECT orders.id FROM users JOIN orders ON users.id = orders.user_id WHERE users.name = 'Ann' AND orders.total < 10",
         [{"orders.id": 11}],
     ),
-    ("SELECT id FROM users", [{"id": 1}, {"id": 2}, {"id": 3}]),
+    # bare columns must resolve when unambiguous across joined tables
+    (
+        "SELECT name, total FROM users JOIN orders ON users.id = orders.user_id WHERE total >= 50",
+        [{"name": "Ann", "total": 50}],
+    ),
     (
         "SELECT users.id, orders.id FROM users JOIN orders ON users.id = orders.user_id WHERE users.age = 20",
         [{"users.id": 2, "orders.id": 12}],
@@ -1262,8 +1253,11 @@ def main() -> None:
                 "num_predict": OPTIONS["num_predict"],
                 "python": sys.version.split()[0],
             }
+            transcript_path = save_task_transcript(
+                OUT_DIR, TAG, task.id, resp.get("combined") or grade_src
+            )
+            row["transcript"] = str(transcript_path)
             results.append(row)
-            (OUT_DIR / f"{TAG}__{task.id}.txt").write_text(resp.get("combined") or grade_src, encoding="utf-8")
             (OUT_DIR / f"{TAG}__{task.id}__code.py").write_text(g.get("code") or "", encoding="utf-8")
             log(log_path, json.dumps(row, indent=2) + "\n")
         except Exception as e:

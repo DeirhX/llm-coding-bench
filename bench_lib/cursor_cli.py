@@ -105,11 +105,12 @@ def chat(
     """One-shot Cursor Agent invocation. Returns a normalized chat-like dict."""
     agent = find_agent()
     mode = mode or os.environ.get("BENCH_CURSOR_MODE", "ask")
-    timeout_s = float(
-        timeout_s
-        if timeout_s is not None
-        else os.environ.get("BENCH_CURSOR_TIMEOUT", "1800")
-    )
+    if timeout_s is None:
+        from bench_lib.task_timeout import cursor_timeout_s
+
+        timeout_s = cursor_timeout_s()
+    else:
+        timeout_s = float(timeout_s)
     if force is None:
         force = os.environ.get("BENCH_CURSOR_FORCE", "0") == "1"
 

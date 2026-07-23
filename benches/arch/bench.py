@@ -26,7 +26,14 @@ _REPO = _ROOT.parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from bench_lib.ollama_think import apply_think, default_num_predict, parse_think  # noqa: E402
+from bench_lib.ollama_chat import chat as ollama_chat  # noqa: E402
+from bench_lib.ollama_think import (  # noqa: E402
+    RoundTranscript,
+    default_num_predict,
+    format_think_combined,
+    parse_think,
+    save_task_transcript,
+)
 from bench_lib.paths import results_dir  # noqa: E402
 from benches.arch.tasks import (  # noqa: E402
     SELFTEST_TRAJECTORIES,
@@ -64,59 +71,8 @@ HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 
 
 def chat(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "model": model,
-        "stream": False,
-        "messages": messages,
-        "options": OPTIONS,
-    }
-    # Default OFF for agent loops. BENCH_THINK=1|medium|… enables thinking.
-    apply_think(body, THINK)
-    data_bytes = json.dumps(body).encode()
-    t0 = time.perf_counter()
-    last_err: Exception | None = None
-    data: dict[str, Any] | None = None
-    for attempt in range(1, 6):
-        req = urllib.request.Request(
-            f"{HOST}/api/chat",
-            data=data_bytes,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=3600) as resp:
-                data = json.loads(resp.read().decode())
-            break
-        except urllib.error.HTTPError as e:
-            last_err = e
-            body_err = e.read().decode("utf-8", errors="replace")
-            # Protocol/parser poison (Qwen tool_call EOF) — fail fast after one retry
-            if e.code == 500 and "EOF" in body_err and attempt >= 2:
-                break
-            # Ollama often 500s while swapping large models; back off and retry.
-            time.sleep(min(30, 2 ** attempt))
-        except urllib.error.URLError as e:
-            last_err = e
-            time.sleep(min(30, 2 ** attempt))
-    if data is None:
-        raise last_err or RuntimeError("chat failed")
-    wall = time.perf_counter() - t0
-    msg = data.get("message") or {}
-    content = msg.get("content") or ""
-    thinking = msg.get("thinking") or ""
-    eval_duration = float(data.get("eval_duration") or 0)
-    eval_count = float(data.get("eval_count") or 0)
-    return {
-        "content": content,
-        "thinking": thinking,
-        "wall_s": wall,
-        "load_s": float(data.get("load_duration") or 0) / 1e9,
-        "prompt_tokens": int(data.get("prompt_eval_count") or 0),
-        "eval_tokens": int(data.get("eval_count") or 0),
-        "toks_per_s": (eval_count / (eval_duration / 1e9)) if eval_duration > 0 else 0.0,
-        "done_reason": data.get("done_reason"),
-        "raw": data,
-    }
+    # Retries / stall / keep_alive handled in ollama_chat (EOF still retried there).
+    return ollama_chat(model, messages, options=OPTIONS, think=THINK)
 
 
 # Avoid <tool_call> — Ollama's Qwen3.5/3.6 parsers 500 with {"error":"EOF"} on that tag.
@@ -191,6 +147,7 @@ def parse_final_answer(text: str) -> dict[str, Any] | None:
 def run_agent_cursor(task: Task) -> dict[str, Any]:
     """Single-shot Cursor Agent ask-mode over the shopapi workspace."""
     from bench_lib import cursor_cli
+    from bench_lib.task_timeout import cursor_timeout_s
 
     prompt = prompt_for_provider(task.prompt, "cursor")
     resp = cursor_cli.chat(
@@ -198,13 +155,18 @@ def run_agent_cursor(task: Task) -> dict[str, Any]:
         prompt,
         mode=os.environ.get("BENCH_CURSOR_MODE", "ask"),
         workspace=FIXTURE,
+        timeout_s=cursor_timeout_s(),
     )
     content = resp.get("content") or ""
+    thinking = resp.get("thinking") or ""
     final = parse_final_answer(content) or {}
     # Do NOT invent files_read from citations — evidence requires real tool reads.
     # Cursor ask-mode does not expose a tool trace here, so evidence points stay 0.
     session = ToolSession(max_calls=MAX_TOOL_CALLS)
     grade = task.grade(final, session)
+    transcript_path = save_task_transcript(
+        OUT_DIR, TAG, task.id, format_think_combined(content, thinking)
+    )
     return {
         "model": MODEL,
         "provider": "cursor",
@@ -227,15 +189,20 @@ def run_agent_cursor(task: Task) -> dict[str, Any]:
         "num_ctx": OPTIONS["num_ctx"],
         "num_predict": OPTIONS["num_predict"],
         "last_content_chars": len(content),
+        "thinking_chars": len(thinking),
+        "transcript": str(transcript_path),
         "session_id": resp.get("session_id"),
         "raw_content": content,
     }
 
 
 def run_agent_ollama(task: Task) -> dict[str, Any]:
+    from bench_lib.task_timeout import task_timeout_s
+
     session = ToolSession(max_calls=MAX_TOOL_CALLS)
     messages = [{"role": "user", "content": task.prompt}]
     tool_trace: list[dict[str, Any]] = []
+    transcript = RoundTranscript()
     totals = {
         "wall_s": 0.0,
         "prompt_tokens": 0,
@@ -245,8 +212,15 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
     }
     final: dict[str, Any] | None = None
     last_content = ""
+    deadline = time.perf_counter() + task_timeout_s()
+    timed_out = False
 
     for round_i in range(MAX_ROUNDS):
+        if time.perf_counter() >= deadline:
+            timed_out = True
+            totals["done_reason"] = "task_timeout"
+            transcript.add_note("TIMEOUT: exceeded BENCH_TASK_TIMEOUT_S")
+            break
         totals["rounds"] = round_i + 1
         resp = chat(MODEL, messages)
         totals["wall_s"] += resp["wall_s"]
@@ -256,7 +230,15 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
         # Do not promote thinking→content: empty content usually means num_predict
         # exhaustion mid-think; substituting the trace poisons the tool protocol.
         content = resp["content"] or ""
+        thinking = resp.get("thinking") or ""
         last_content = content
+        transcript.add_round(
+            round_i + 1,
+            thinking=thinking,
+            content=content,
+            done_reason=resp.get("done_reason"),
+            eval_tokens=resp.get("eval_tokens"),
+        )
         messages.append({"role": "assistant", "content": content})
 
         final = parse_final_answer(content)
@@ -267,15 +249,12 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
         if call is None:
             # nudge once if model forgot protocol
             if round_i < MAX_ROUNDS - 1:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "Protocol error: emit either one <arch_tool>{...}</arch_tool> "
-                            "or a <arch_final>{...}</arch_final> JSON object. No other chatter."
-                        ),
-                    }
+                nudge = (
+                    "Protocol error: emit either one <arch_tool>{...}</arch_tool> "
+                    "or a <arch_final>{...}</arch_final> JSON object. No other chatter."
                 )
+                transcript.add_note(nudge)
+                messages.append({"role": "user", "content": nudge})
                 continue
             break
 
@@ -283,6 +262,7 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
         args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
         result = session.dispatch(name, args)
         tool_trace.append({"name": name, "arguments": args, "result_ok": result.get("ok")})
+        transcript.add_tool(name, args, result.get("ok"))
         messages.append(
             {
                 "role": "user",
@@ -300,6 +280,14 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
             )
 
     grade = task.grade(final or {}, session)
+    if timed_out:
+        grade = {
+            **grade,
+            "ok": False,
+            "score": 0,
+            "detail": f"TIMEOUT: exceeded BENCH_TASK_TIMEOUT_S; partial {grade.get('detail')}",
+        }
+    transcript_path = transcript.save(OUT_DIR, TAG, task.id)
     return {
         "model": MODEL,
         "provider": "ollama",
@@ -322,6 +310,9 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
         "num_ctx": OPTIONS["num_ctx"],
         "num_predict": OPTIONS["num_predict"],
         "last_content_chars": len(last_content),
+        "thinking_chars": transcript.thinking_chars,
+        "transcript": str(transcript_path),
+        "raw_content": last_content,
     }
 
 
@@ -425,18 +416,29 @@ def main() -> int:
     stamp = time.strftime("%Y%m%d_%H%M%S")
     out_json = OUT_DIR / f"{TAG}_{stamp}.json"
     out_log = OUT_DIR / f"{TAG}.log"
+    latest_path = OUT_DIR / f"{TAG}_latest.json"
+    merge_latest = os.environ.get("BENCH_MERGE_LATEST", "0") == "1"
     results: list[dict[str, Any]] = []
+    if merge_latest and latest_path.is_file():
+        try:
+            prev = json.loads(latest_path.read_text(encoding="utf-8"))
+            if isinstance(prev, list):
+                results = [r for r in prev if isinstance(r, dict) and r.get("task")]
+        except (OSError, json.JSONDecodeError):
+            results = []
 
     # warmup
     try:
         if PROVIDER in ("cursor", "cursor-cli", "agent"):
             from bench_lib import cursor_cli
+            from bench_lib.task_timeout import cursor_timeout_s
 
             cursor_cli.chat(
                 MODEL,
                 "Reply with the single word: pong",
                 mode="ask",
                 workspace=FIXTURE,
+                timeout_s=min(120.0, cursor_timeout_s()),
             )
         else:
             chat(MODEL, [{"role": "user", "content": "Reply with the single word: pong"}])
@@ -444,31 +446,41 @@ def main() -> int:
         print(f"warmup failed: {e}", file=sys.stderr)
         return 2
 
+    done_ids = {str(r.get("task")) for r in results}
     with out_log.open("a", encoding="utf-8") as log:
         log.write(f"\n==== archbench provider={PROVIDER} {MODEL} tag={TAG} {stamp} ====\n")
         for t in tasks:
+            if merge_latest and t.id in done_ids:
+                print(f"-- {t.id} ... skip (merged)", flush=True)
+                continue
             print(f"-- {t.id} ...", flush=True)
             log.write(f"-- {t.id} ...\n")
             try:
                 r = run_agent(t)
             except Exception as e:  # noqa: BLE001
+                name = type(e).__name__
+                detail = f"ERROR: {name}: {e}"
+                if name == "TimeoutExpired" or "timed out" in str(e).lower():
+                    detail = f"TIMEOUT: exceeded BENCH_TASK_TIMEOUT_S / Cursor timeout ({e})"
                 r = {
                     "model": MODEL,
                     "provider": PROVIDER,
                     "task": t.id,
                     "title": t.title,
+                    "family": t.family,
                     "ok": False,
                     "score": 0,
                     "max_score": t.max_score,
-                    "grade_detail": f"ERROR: {type(e).__name__}: {e}",
+                    "grade_detail": detail,
+                    "done_reason": "task_timeout" if detail.startswith("TIMEOUT") else "error",
                 }
+            # replace prior row for this task id when merging
+            results = [x for x in results if x.get("task") != t.id]
             results.append(r)
             print(json.dumps({k: r[k] for k in r if k not in ("tool_trace", "answer")}, indent=2))
             log.write(json.dumps(r, indent=2) + "\n")
             out_json.write_text(json.dumps(results, indent=2), encoding="utf-8")
-            (OUT_DIR / f"{TAG}_latest.json").write_text(
-                json.dumps(results, indent=2), encoding="utf-8"
-            )
+            latest_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
     total = sum(r.get("score", 0) for r in results)
     mx = sum(r.get("max_score", 0) for r in results)

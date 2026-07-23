@@ -124,7 +124,7 @@ def write_compare(board: list[dict], tied: list[str], claims: dict[str, dict]) -
         lines.append("")
     if claims:
         lines += [
-            "## Claim probe (15 T/F + evidence)",
+            "## Claim probe (20 T/F + evidence)",
             "",
             "| Model | Score | Correct | Wrong | Missing | Wall s |",
             "|---|---:|---:|---:|---:|---:|",
@@ -198,15 +198,18 @@ def _judgment(board: list[dict], claims: dict[str, dict], tied: list[str]) -> st
     if claims:
         crow = sorted(claims.values(), key=lambda c: (-(c.get("score") or 0), c.get("wall_s") or 0))
         best = crow[0]
+        n_claims = int(best.get("max_score") or best.get("total") or 20)
         parts.append(
             f"Claim probe leader: **{best.get('model')}** "
-            f"{best.get('correct')}/{15} correct (score {best.get('score')}/{best.get('max_score')})."
+            f"{best.get('correct')}/{n_claims} correct (score {best.get('score')}/{best.get('max_score')})."
         )
         # where they disagree on hard negatives
         hard = ["c03", "c04", "c07", "c09", "c11", "c13", "c15", "c16", "c17", "c19"]
         # summarize average correct
         avg = sum(c.get("correct") or 0 for c in claims.values()) / max(1, len(claims))
-        parts.append(f"Claim probe mean correct: {avg:.1f}/15 — this is the discriminative ruler when arch scores cluster.")
+        parts.append(
+            f"Claim probe mean correct: {avg:.1f}/{n_claims} — this is the discriminative ruler when arch scores cluster."
+        )
     elif tied:
         parts.append(
             f"Arch scores clustered ({', '.join(tied)}); claim probe was indicated but produced no results."

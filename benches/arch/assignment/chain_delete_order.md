@@ -14,4 +14,5 @@ Return JSON:
   "side_effects": ["short strings"],
   "citations": ["path.py:symbol", ...]
 }
-Include auth, service, repo/outbox/cache steps that actually run on success.
+Include service, repo/outbox/cache steps that actually run on success.
+Mention auth/middleware only if it appears on that success path.

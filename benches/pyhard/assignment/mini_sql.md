@@ -17,7 +17,7 @@ SELECT col[, col...] FROM t1
 
 Where each cond is: <atom> <op> <atom>
 ops: = != > < >= <=
-atom: table.col OR bare col OR integer OR 'string'
+atom: table.col OR bare col (must be unambiguous among present tables) OR integer OR 'string'
 
 JOIN is inner join only.
 Return a list of dicts whose keys are exactly the selected column expressions

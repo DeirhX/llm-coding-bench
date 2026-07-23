@@ -28,7 +28,14 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from bench_lib.assignment import load_simple_claims_yaml  # noqa: E402
-from bench_lib.ollama_think import apply_think, default_num_predict, parse_think  # noqa: E402
+from bench_lib.ollama_chat import chat as ollama_chat  # noqa: E402
+from bench_lib.ollama_think import (  # noqa: E402
+    RoundTranscript,
+    default_num_predict,
+    format_think_combined,
+    parse_think,
+    save_task_transcript,
+)
 from bench_lib.paths import results_dir  # noqa: E402
 from benches.shopapi.tools import FIXTURE_ROOT, ToolSession  # noqa: E402
 
@@ -62,42 +69,12 @@ _CLAIMS_RAW = load_simple_claims_yaml(_CLAIMS_PATH)
 CLAIMS: list[tuple[str, str, bool]] = [
     (str(c["id"]), str(c["text"]), bool(c["gold"])) for c in _CLAIMS_RAW
 ]
-if len(CLAIMS) < 15:
+if len(CLAIMS) < 20:
     raise SystemExit(f"claims.yaml looks empty/broken: {len(CLAIMS)} claims from {_CLAIMS_PATH}")
 
 
 def chat(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "model": model,
-        "stream": False,
-        "messages": messages,
-        "options": OPTIONS,
-    }
-    apply_think(body, THINK)
-    req = urllib.request.Request(
-        f"{HOST}/api/chat",
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    t0 = time.perf_counter()
-    with urllib.request.urlopen(req, timeout=3600) as resp:
-        data = json.loads(resp.read().decode())
-    wall = time.perf_counter() - t0
-    msg = data.get("message") or {}
-    content = msg.get("content") or ""
-    thinking = msg.get("thinking") or ""
-    eval_duration = float(data.get("eval_duration") or 0)
-    eval_count = float(data.get("eval_count") or 0)
-    return {
-        "content": content,
-        "thinking": thinking,
-        "wall_s": wall,
-        "prompt_tokens": int(data.get("prompt_eval_count") or 0),
-        "eval_tokens": int(data.get("eval_count") or 0),
-        "toks_per_s": (eval_count / (eval_duration / 1e9)) if eval_duration > 0 else 0.0,
-        "done_reason": data.get("done_reason"),
-    }
+    return ollama_chat(model, messages, options=OPTIONS, think=THINK)
 
 
 _TOOL_RE = re.compile(
@@ -296,6 +273,7 @@ def run_selftest() -> int:
 def run_model_ollama() -> dict[str, Any]:
     session = ToolSession(max_calls=MAX_TOOL_CALLS)
     messages = [{"role": "user", "content": PROMPT}]
+    transcript = RoundTranscript()
     totals = {"wall_s": 0.0, "prompt_tokens": 0, "eval_tokens": 0, "rounds": 0, "done_reason": None}
     final = None
     for round_i in range(MAX_ROUNDS):
@@ -306,20 +284,28 @@ def run_model_ollama() -> dict[str, Any]:
         totals["eval_tokens"] += resp["eval_tokens"]
         totals["done_reason"] = resp["done_reason"]
         content = resp["content"] or ""
+        thinking = resp.get("thinking") or ""
+        transcript.add_round(
+            round_i + 1,
+            thinking=thinking,
+            content=content,
+            done_reason=resp.get("done_reason"),
+            eval_tokens=resp.get("eval_tokens"),
+        )
         messages.append({"role": "assistant", "content": content})
         final = parse_final(content)
         if final is not None and parse_tool_call(content) is None:
             break
         call = parse_tool_call(content)
         if call is None:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": "Emit one <arch_tool> or <arch_final> with all c01..c15 booleans.",
-                }
-            )
+            nudge = "Emit one <arch_tool> or <arch_final> with all c01..c20 booleans."
+            transcript.add_note(nudge)
+            messages.append({"role": "user", "content": nudge})
             continue
-        result = session.dispatch(str(call.get("name") or ""), call.get("arguments") or {})
+        name = str(call.get("name") or "")
+        args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+        result = session.dispatch(name, args)
+        transcript.add_tool(name, args, result.get("ok"))
         messages.append(
             {
                 "role": "user",
@@ -327,6 +313,7 @@ def run_model_ollama() -> dict[str, Any]:
             }
         )
     grade = grade_answers(final, session)
+    transcript_path = transcript.save(OUT_DIR, TAG, "claim")
     return {
         "model": MODEL,
         "provider": "ollama",
@@ -342,6 +329,8 @@ def run_model_ollama() -> dict[str, Any]:
         "done_reason": totals["done_reason"],
         "num_ctx": OPTIONS["num_ctx"],
         "num_predict": OPTIONS["num_predict"],
+        "thinking_chars": transcript.thinking_chars,
+        "transcript": str(transcript_path),
     }
 
 
@@ -355,10 +344,14 @@ def run_model_cursor() -> dict[str, Any]:
         workspace=FIXTURE,
     )
     content = resp.get("content") or ""
+    thinking = resp.get("thinking") or ""
     final = parse_final(content)
     # Evidence requires real tool reads; Cursor ask-mode has no tool trace → ev=0.
     session = ToolSession(max_calls=MAX_TOOL_CALLS)
     grade = grade_answers(final, session)
+    transcript_path = save_task_transcript(
+        OUT_DIR, TAG, "claim", format_think_combined(content, thinking)
+    )
     return {
         "model": MODEL,
         "provider": "cursor",
@@ -374,6 +367,8 @@ def run_model_cursor() -> dict[str, Any]:
         "done_reason": resp.get("done_reason"),
         "num_ctx": OPTIONS["num_ctx"],
         "num_predict": OPTIONS["num_predict"],
+        "thinking_chars": len(thinking),
+        "transcript": str(transcript_path),
         "raw_content": content,
         "session_id": resp.get("session_id"),
     }

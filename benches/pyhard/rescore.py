@@ -37,7 +37,8 @@ GRADERS = {
     "mini_sql": B.grade_sql,
 }
 
-# Per-task scores from results/pyhard_failure_autopsy.md + session notes (gpt-oss).
+# Last-resort only: used when __code.py / .txt artifacts are missing.
+# Prefer regrading from artifacts; do not add new overrides for runs that have them.
 AUTOPSY_OVERRIDES: dict[str, dict[str, tuple[int, int]]] = {
     "qwen3-coder-next_q8_0_pyhard_pyhard_latest.json": {
         "unify": (7, 10),

@@ -8,6 +8,22 @@ from typing import Any, Callable
 
 from benches.shopapi.tools import ToolSession
 
+_ASSIGN_DIR = Path(__file__).resolve().parent / "assignment"
+_REQ_CACHE: dict[str, list[str]] = {}
+
+
+def _req_files(task_id: str) -> list[str]:
+    """Evidence file list from assignment frontmatter (single source of truth)."""
+    if task_id not in _REQ_CACHE:
+        from bench_lib.assignment import load_markdown_assignment
+
+        meta, _ = load_markdown_assignment(_ASSIGN_DIR / f"{task_id}.md")
+        req = meta.get("required_files") or []
+        if isinstance(req, str):
+            req = [req]
+        _REQ_CACHE[task_id] = list(req)
+    return _REQ_CACHE[task_id]
+
 
 def _norm_sym(s: str) -> str:
     s = str(s).strip()
@@ -158,7 +174,7 @@ def grade_delete_chain(answer: dict[str, Any], session: ToolSession) -> dict[str
             eff_hit += 1
     eff_max = 3
 
-    ev_pts, ev_d = _evidence_points(a, session, ["api/orders.py", "service/order_service.py"])
+    ev_pts, ev_d = _evidence_points(a, session, _req_files("chain_delete_order"))
     # weights: chain 5, effects 3, evidence 2 = 10
     score = round(chain_score / chain_max * 5) + round(eff_hit / eff_max * 3) + ev_pts
     detail = f"{chain_d}; effects {eff_hit}/{eff_max}; {ev_d}"
@@ -181,9 +197,7 @@ def grade_payment_chain(answer: dict[str, Any], session: ToolSession) -> dict[st
     # If model listed payment_service twice and skipped api, ordered score drops — good.
     effects = " | ".join(_as_list(a.get("side_effects"))).lower()
     eff = 1 if any(t in effects for t in ("payment", "charge", "db.put", "payments")) else 0
-    ev_pts, ev_d = _evidence_points(
-        a, session, ["api/webhooks.py", "service/payment_service.py"]
-    )
+    ev_pts, ev_d = _evidence_points(a, session, _req_files("chain_payment_webhook"))
     score = hit + eff + ev_pts  # max 5+1+2=8 → scale to 10
     raw_max = 8
     score10 = round(score / raw_max * 10)
@@ -211,9 +225,7 @@ def grade_tenant_invoice(answer: dict[str, Any], session: ToolSession) -> dict[s
         by_pts += 3
     if "admin_export" in bypasses or "export_all" in bypasses:
         by_pts += 3
-    ev_pts, ev_d = _evidence_points(
-        a, session, ["service/invoice_service.py", "store/invoice_repo.py"]
-    )
+    ev_pts, ev_d = _evidence_points(a, session, _req_files("tenant_invoice_isolation"))
     score = min(4, enf_pts + 2) // 1  # messy
     score = 0
     score += 2 if ("list_invoices" in enforced or "list_by_tenant" in enforced) else 0
@@ -250,7 +262,7 @@ def grade_review_n_plus_one(answer: dict[str, Any], session: ToolSession) -> dic
     sev = str(a.get("max_severity") or a.get("severity") or "").lower()
     if sev in ("medium", "med", "high", "warning", "p2", "p3"):
         pts += 2
-    ev_pts, ev_d = _evidence_points(a, session, ["service/order_service.py"])
+    ev_pts, ev_d = _evidence_points(a, session, _req_files("review_list_orders_n1"))
     pts += ev_pts
     return {"score": min(10, pts), "max_score": 10, "detail": f"{ev_d}; false_auth={false_auth}", "ok": pts >= 8}
 
@@ -265,7 +277,7 @@ def grade_review_cache_i4(answer: dict[str, Any], session: ToolSession) -> dict[
         pts += 3
     if "invalidate" in blob and ("missing" in blob or "not" in blob or "bug" in blob or "fail" in blob):
         pts += 3
-    ev_pts, ev_d = _evidence_points(a, session, ["service/order_service.py"])
+    ev_pts, ev_d = _evidence_points(a, session, _req_files("review_cache_on_paid"))
     pts += ev_pts
     return {"score": min(10, pts), "max_score": 10, "detail": ev_d, "ok": pts >= 8}
 
@@ -291,7 +303,7 @@ def grade_incident_duplicate_paid(answer: dict[str, Any], session: ToolSession) 
     fix = " | ".join(_as_list(a.get("fix_functions")) + [_norm_sym(a.get("fix_function") or "")]).lower()
     if "handle_payment_webhook" in fix or "payment_service" in fix:
         pts += 3
-    ev_pts, ev_d = _evidence_points(a, session, ["service/payment_service.py"])
+    ev_pts, ev_d = _evidence_points(a, session, _req_files("incident_duplicate_order_paid"))
     pts += ev_pts
     # penalize wrong blame on outbox_worker only
     if "outbox_worker" in blob and "handle_payment_webhook" not in blob and "payment_service" not in blob:
@@ -315,7 +327,7 @@ def grade_constrained_idempotency(answer: dict[str, Any], session: ToolSession) 
         pts += 3
     if "kafka" in plan or "rabbit" in plan or "redis streams" in plan or "new broker" in plan:
         pts = max(0, pts - 4)
-    ev_pts, ev_d = _evidence_points(a, session, ["service/payment_service.py"])
+    ev_pts, ev_d = _evidence_points(a, session, _req_files("redesign_webhook_idempotency"))
     pts += ev_pts
     return {"score": min(10, pts), "max_score": 10, "detail": f"files={sorted(files)}; {ev_d}", "ok": pts >= 8}
 
@@ -330,7 +342,7 @@ def grade_outbox_ack_bug(answer: dict[str, Any], session: ToolSession) -> dict[s
         pts += 3
     if "publish" in blob and "ack" in blob:
         pts += 1
-    ev_pts, ev_d = _evidence_points(a, session, ["worker/outbox_worker.py"])
+    ev_pts, ev_d = _evidence_points(a, session, _req_files("incident_outbox_ack_order"))
     pts += ev_pts
     return {"score": min(10, pts), "max_score": 10, "detail": ev_d, "ok": pts >= 8}
 
@@ -362,11 +374,7 @@ def grade_invariant_doc_vs_code(answer: dict[str, Any], session: ToolSession) ->
         pts += 2
     else:
         pts += 0  # false positive
-    ev_pts, ev_d = _evidence_points(
-        a,
-        session,
-        ["README.md", "service/payment_service.py", "service/invoice_service.py"],
-    )
+    ev_pts, ev_d = _evidence_points(a, session, _req_files("invariant_doc_vs_code"))
     pts += ev_pts
     return {
         "score": min(10, pts),
@@ -436,8 +444,6 @@ def prompt_for_provider(prompt: str, provider: str) -> str:
         return CURSOR_PREAMBLE + "\n\n" + prompt
     return prompt
 
-
-_ASSIGN_DIR = Path(__file__).resolve().parent / "assignment"
 
 _GRADERS: dict[str, Callable[[dict[str, Any], ToolSession], dict[str, Any]]] = {
     "chain_delete_order": grade_delete_chain,
