@@ -1,0 +1,76 @@
+[
+  {
+    "model": "composer-2.5",
+    "provider": "cursor",
+    "task": "chain_delete_order",
+    "title": "Call chain: DELETE /orders/{id}",
+    "family": "call_chain",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "chain 5/5; effects 3/3; evidence 2/2",
+    "answer": {
+      "chain": [
+        "api.orders.handle_delete_order",
+        "pkg.auth.authenticate",
+        "pkg.tenant.set_tenant",
+        "service.order_service.cancel_order",
+        "pkg.tenant.require_tenant",
+        "store.order_repo.get",
+        "store.order_repo.soft_delete",
+        "store.db.put",
+        "pkg.events.order_cancelled",
+        "store.outbox.insert",
+        "store.db.put",
+        "store.cache.invalidate_order",
+        "pkg.auth.clear_auth",
+        "pkg.tenant.set_tenant"
+      ],
+      "side_effects": [
+        "Set in-request tenant context from X-Tenant-Id / X-User-Id headers",
+        "Validate order exists and belongs to current tenant",
+        "Soft-delete order row (deleted=true, status=cancelled) in orders table",
+        "Insert OrderCancelled outbox row (acked=false, published=false)",
+        "Remove order:{id} from in-memory cache",
+        "Clear tenant context after handler completes"
+      ],
+      "citations": [
+        "api/orders.py:handle_delete_order",
+        "pkg/auth.py:authenticate",
+        "pkg/tenant.py:set_tenant",
+        "service/order_service.py:cancel_order",
+        "pkg/tenant.py:require_tenant",
+        "store/order_repo.py:get",
+        "store/order_repo.py:soft_delete",
+        "store/db.py:put",
+        "pkg/events.py:order_cancelled",
+        "store/outbox.py:insert",
+        "store/cache.py:invalidate_order",
+        "pkg/auth.py:clear_auth"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [
+      "api/orders.py",
+      "pkg/auth.py",
+      "pkg/events.py",
+      "pkg/tenant.py",
+      "service/order_service.py",
+      "store/cache.py",
+      "store/db.py",
+      "store/order_repo.py",
+      "store/outbox.py"
+    ],
+    "tool_trace": [],
+    "wall_s": 43.47,
+    "prompt_tokens": 18913,
+    "eval_tokens": 2849,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1660,
+    "session_id": "55f16ecd-57e1-486d-a89e-d597ee4ab8b5",
+    "raw_content": "Tracing DELETE `/orders/{id}` through the codebase \u2014 I'll map the handler chain and any durable side effects.\nDELETE `/orders/{id}` is handled by `handle_delete_order`, which authenticates, delegates to `cancel_order` (soft-delete + outbox + cache), then clears auth. `legacy_order.py` is explicitly decoy code and not on this path.\n\n<arch_final>\n```json\n{\n  \"chain\": [\n    \"api.orders.handle_delete_order\",\n    \"pkg.auth.authenticate\",\n    \"pkg.tenant.set_tenant\",\n    \"service.order_service.cancel_order\",\n    \"pkg.tenant.require_tenant\",\n    \"store.order_repo.get\",\n    \"store.order_repo.soft_delete\",\n    \"store.db.put\",\n    \"pkg.events.order_cancelled\",\n    \"store.outbox.insert\",\n    \"store.db.put\",\n    \"store.cache.invalidate_order\",\n    \"pkg.auth.clear_auth\",\n    \"pkg.tenant.set_tenant\"\n  ],\n  \"side_effects\": [\n    \"Set in-request tenant context from X-Tenant-Id / X-User-Id headers\",\n    \"Validate order exists and belongs to current tenant\",\n    \"Soft-delete order row (deleted=true, status=cancelled) in orders table\",\n    \"Insert OrderCancelled outbox row (acked=false, published=false)\",\n    \"Remove order:{id} from in-memory cache\",\n    \"Clear tenant context after handler completes\"\n  ],\n  \"citations\": [\n    \"api/orders.py:handle_delete_order\",\n    \"pkg/auth.py:authenticate\",\n    \"pkg/tenant.py:set_tenant\",\n    \"service/order_service.py:cancel_order\",\n    \"pkg/tenant.py:require_tenant\",\n    \"store/order_repo.py:get\",\n    \"store/order_repo.py:soft_delete\",\n    \"store/db.py:put\",\n    \"pkg/events.py:order_cancelled\",\n    \"store/outbox.py:insert\",\n    \"store/cache.py:invalidate_order\",\n    \"pkg/auth.py:clear_auth\"\n  ]\n}\n```\n</arch_final>"
+  }
+]
