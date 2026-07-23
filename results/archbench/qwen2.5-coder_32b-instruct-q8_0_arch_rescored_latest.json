@@ -1,0 +1,762 @@
+[
+  {
+    "model": "qwen2.5-coder:32b-instruct-q8_0",
+    "task": "chain_delete_order",
+    "title": "Call chain: DELETE /orders/{id}",
+    "family": "call_chain",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; effects 3/3; evidence(reads) 2/2",
+    "answer": {
+      "chain": [
+        "api.orders.handle_delete_order",
+        "pkg.auth.authenticate",
+        "service.order_service.cancel_order",
+        "pkg.tenant.require_tenant",
+        "store.order_repo.get",
+        "store.order_repo.soft_delete",
+        "store.outbox.insert",
+        "pkg.events.order_cancelled",
+        "store.cache.invalidate_order"
+      ],
+      "side_effects": [
+        "auth.clear_auth",
+        "soft delete order in database",
+        "insert OrderCancelled event into outbox",
+        "invalidate order cache"
+      ],
+      "citations": [
+        "api/orders.py:handle_delete_order",
+        "pkg/auth.py:authenticate",
+        "service/order_service.py:cancel_order",
+        "pkg/tenant.py:require_tenant",
+        "store/order_repo.py:get",
+        "store/order_repo.py:soft_delete",
+        "store/outbox.py:insert",
+        "pkg/events.py:order_cancelled",
+        "store/cache.py:invalidate_order"
+      ]
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "api/orders.py",
+      "service/order_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "cancel_order"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 29.25,
+    "prompt_tokens": 5684,
+    "eval_tokens": 307,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 865,
+    "rescored": true,
+    "score_before": 10
+  },
+  {
+    "model": "qwen2.5-coder:32b-instruct-q8_0",
+    "task": "chain_payment_webhook",
+    "title": "Call chain: POST /webhooks/payment",
+    "family": "call_chain",
+    "ok": false,
+    "score": 5,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 2/5; payment_effect=0; evidence(reads) 2/2",
+    "answer": {
+      "chain": [
+        "api.webhooks.handle_payment_webhook",
+        "service.payment_service.handle_payment_webhook"
+      ],
+      "side_effects": [
+        "outbox.insert(order_paid)",
+        "order_service.mark_paid"
+      ],
+      "citations": [
+        "api/webhooks.py:handle_payment_webhook",
+        "service/payment_service.py:handle_payment_webhook"
+      ]
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "api/webhooks.py",
+      "service/payment_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "handle_payment_webhook"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 17.42,
+    "prompt_tokens": 5065,
+    "eval_tokens": 176,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 335,
+    "rescored": true,
+    "score_before": 5
+  },
+  {
+    "model": "qwen2.5-coder:32b-instruct-q8_0",
+    "task": "tenant_invoice_isolation",
+    "title": "Tenant isolation for invoices",
+    "family": "invariant",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "enforced/bypass scoring; evidence(reads) 0/2; unread=['service/invoice_service.py', 'store/invoice_repo.py']; enf='service.invoice_service.list_by_tenant | store.invoice_repo.list_by_tenant' by='service.invoice_service.get_invoice_without_checking_tenant_id | service.invoice_service.export_all_tenants_invoices'",
+    "answer": {
+      "enforced_at": [
+        "service.invoice_service.list_by_tenant",
+        "store.invoice_repo.list_by_tenant"
+      ],
+      "bypasses": [
+        "service.invoice_service.get_invoice_without_checking_tenant_id",
+        "service.invoice_service.export_all_tenants_invoices"
+      ],
+      "citations": [
+        "service/invoice_service.py:11",
+        "service/invoice_service.py:15",
+        "service/invoice_service.py:24",
+        "store/invoice_repo.py:9",
+        "README.md:8"
+      ]
+    },
+    "tool_calls": 2,
+    "files_read": [],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "tenant.*invoice|invoice.*tenant",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 14.8,
+    "prompt_tokens": 1613,
+    "eval_tokens": 171,
+    "rounds": 3,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 450,
+    "rescored": true,
+    "score_before": 10
+  },
+  {
+    "model": "qwen2.5-coder:32b-instruct-q8_0",
+    "task": "invariant_doc_vs_code",
+    "title": "Which README invariants fail?",
+    "family": "invariant",
+    "ok": false,
+    "score": 7,
+    "max_score": 10,
+    "grade_detail": "violated=['I2', 'I3']; evidence(reads) 1/3; unread=['service/payment_service.py', 'service/invoice_service.py']",
+    "answer": {
+      "violated_invariants": [
+        "I2",
+        "I3"
+      ],
+      "evidence": {
+        "I2": "The code does not scope invoice reads to the tenant, as indicated by 'require_tenant()  # ensures caller is authenticated, but does not scope' in service/invoice_service.py:16.",
+        "I3": "There is no explicit evidence of idempotency handling for payment webhooks. The comment only mentions recording webhook idempotency after writing the outbox event in service/payment_service.py:23."
+      },
+      "citations": [
+        "service/invoice_service.py:16",
+        "service/payment_service.py:23"
+      ]
+    },
+    "tool_calls": 13,
+    "files_read": [
+      "README.md"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {},
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "outbox event",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "tenant-scoped",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "idempotent",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "invalidate.*order cache",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "outbox event",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "outbox.*event",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "tenant-scoped",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "tenant.*scope",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "idempotent",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "idempotent.*webhook",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "webhook.*idempotency",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 44.88,
+    "prompt_tokens": 16751,
+    "eval_tokens": 505,
+    "rounds": 14,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 587,
+    "rescored": true,
+    "score_before": 8
+  },
+  {
+    "model": "qwen2.5-coder:32b-instruct-q8_0",
+    "task": "review_list_orders_n1",
+    "title": "Review: list_orders performance smell",
+    "family": "review",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1; false_auth=False",
+    "answer": {
+      "findings": [
+        {
+          "id": "n_plus_1",
+          "severity": "medium",
+          "summary": "The list_orders function performs an N+1 query by calling get_order for each order, leading to multiple database/cache accesses."
+        }
+      ],
+      "max_severity": "medium",
+      "auth_ok": true,
+      "citations": [
+        "service/order_service.py:list_orders",
+        "service/order_service.py:get_order",
+        "api/orders.py:handle_list_orders",
+        "pkg/auth.py:authenticate",
+        "pkg/tenant.py:require_tenant"
+      ]
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "api/orders.py",
+      "pkg/auth.py",
+      "pkg/tenant.py",
+      "service/order_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "get_order"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/auth.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 24.64,
+    "prompt_tokens": 9798,
+    "eval_tokens": 237,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 528,
+    "rescored": true,
+    "score_before": 9
+  },
+  {
+    "model": "qwen2.5-coder:32b-instruct-q8_0",
+    "task": "review_cache_on_paid",
+    "title": "Review: cache vs status change (I4)",
+    "family": "review",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1",
+    "answer": {
+      "i4_holds": false,
+      "findings": [
+        {
+          "summary": "The mark_paid function does not invalidate the cache when an order status is changed to paid, violating README invariant I4.",
+          "severity": "high"
+        }
+      ],
+      "citations": [
+        "service/order_service.py:55"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "README.md",
+      "service/order_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "mark_paid",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 16.35,
+    "prompt_tokens": 4043,
+    "eval_tokens": 155,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 279,
+    "rescored": true,
+    "score_before": 9
+  },
+  {
+    "model": "qwen2.5-coder:32b-instruct-q8_0",
+    "task": "incident_duplicate_order_paid",
+    "title": "Incident: duplicate OrderPaid",
+    "family": "incident",
+    "ok": false,
+    "score": 7,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1",
+    "answer": {
+      "root_cause": "The outbox event 'OrderPaid' is inserted before marking the webhook as processed in the database, leading to potential duplicate events if a crash occurs between these operations.",
+      "fix_function": "service.payment_service.handle_payment_webhook",
+      "fix_functions": [
+        "service.payment_service.handle_payment_webhook"
+      ],
+      "citations": [
+        "worker/outbox_worker.py:10",
+        "worker/webhook_retry.py:9",
+        "pkg/events.py:20",
+        "service/payment_service.py:22",
+        "service/payment_service.py:23",
+        "service/payment_service.py:25",
+        "README.md:9"
+      ]
+    },
+    "tool_calls": 8,
+    "files_read": [
+      "service/payment_service.py",
+      "worker/outbox_worker.py",
+      "worker/webhook_retry.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "worker"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/webhook_retry.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "process_once"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "retry_payment_webhook"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "OrderPaid",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 30.8,
+    "prompt_tokens": 11009,
+    "eval_tokens": 314,
+    "rounds": 9,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 613,
+    "rescored": true,
+    "score_before": 6
+  },
+  {
+    "model": "qwen2.5-coder:32b-instruct-q8_0",
+    "task": "incident_outbox_ack_order",
+    "title": "Incident: lost outbox events",
+    "family": "incident",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1",
+    "answer": {
+      "root_cause": "The outbox event is acknowledged before the publish operation, which can lead to data loss if the publisher crashes mid-batch.",
+      "fix_function": "worker.outbox_worker.process_once",
+      "citations": [
+        "worker/outbox_worker.py:process_once",
+        "worker/outbox_worker.py:22"
+      ]
+    },
+    "tool_calls": 3,
+    "files_read": [
+      "worker/outbox_worker.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "worker"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 12.63,
+    "prompt_tokens": 2281,
+    "eval_tokens": 135,
+    "rounds": 4,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 321,
+    "rescored": true,
+    "score_before": 9
+  },
+  {
+    "model": "qwen2.5-coder:32b-instruct-q8_0",
+    "task": "redesign_webhook_idempotency",
+    "title": "Constrained fix: webhook idempotency",
+    "family": "redesign",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "files=['service/payment_service.py']; evidence(reads) 1/1",
+    "answer": {
+      "touch_files": [
+        "service/payment_service.py"
+      ],
+      "plan_steps": [
+        "Move the call to _mark_processed(webhook_id) before inserting the OrderPaid event in the outbox."
+      ],
+      "idempotency_change": "_mark_processed(webhook_id) moves before outbox.insert(order_paid(...))",
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_mark_processed"
+      ]
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "api/webhooks.py",
+      "service/payment_service.py",
+      "store/db.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 20.32,
+    "prompt_tokens": 6153,
+    "eval_tokens": 196,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 423,
+    "rescored": true,
+    "score_before": 9
+  }
+]

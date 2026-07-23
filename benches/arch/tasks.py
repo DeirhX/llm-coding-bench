@@ -53,7 +53,7 @@ def _evidence_bonus(
     session: ToolSession,
     required_files: list[str],
 ) -> tuple[int, int, str]:
-    """Up to len(required_files) points for files actually read via tools.
+    """Count of required files actually read via tools.
 
     Citations alone do NOT count — that was a free lunch, especially on Cursor
     where cites were previously injected into ``files_read``.
@@ -71,6 +71,30 @@ def _evidence_bonus(
     if missing:
         detail += f"; unread={missing}"
     return score, len(required_files), detail
+
+
+def _evidence_points(
+    answer: dict[str, Any],
+    session: ToolSession,
+    required_files: list[str],
+    max_pts: int = 2,
+) -> tuple[int, str]:
+    """Map file-read evidence onto ``max_pts`` without a hidden score ceiling.
+
+    - If fewer required files than ``max_pts`` (typical single-file tasks), scale so
+      reading all of them earns full credit. Old ``min(2, ev_s)`` made 10/10
+      unreachable whenever only one file was required (suite ceiling 85/90).
+    - If enough required files exist, keep ``min(max_pts, reads)`` so reading any
+      ``max_pts`` of them still earns full evidence (same as before for 2–3 file tasks).
+    """
+    ev_s, ev_max, ev_d = _evidence_bonus(answer, session, required_files)
+    if ev_max <= 0 or max_pts <= 0:
+        return 0, ev_d
+    if ev_max >= max_pts:
+        pts = min(max_pts, ev_s)
+    else:
+        pts = int(round(ev_s / ev_max * max_pts))
+    return pts, ev_d
 
 
 def _ordered_hop_score(chain: list[str], hops: list[list[str]]) -> tuple[int, int, str]:
@@ -134,9 +158,9 @@ def grade_delete_chain(answer: dict[str, Any], session: ToolSession) -> dict[str
             eff_hit += 1
     eff_max = 3
 
-    ev_s, _, ev_d = _evidence_bonus(a, session, ["api/orders.py", "service/order_service.py"])
+    ev_pts, ev_d = _evidence_points(a, session, ["api/orders.py", "service/order_service.py"])
     # weights: chain 5, effects 3, evidence 2 = 10
-    score = round(chain_score / chain_max * 5) + round(eff_hit / eff_max * 3) + min(2, ev_s)
+    score = round(chain_score / chain_max * 5) + round(eff_hit / eff_max * 3) + ev_pts
     detail = f"{chain_d}; effects {eff_hit}/{eff_max}; {ev_d}"
     return {"score": score, "max_score": 10, "detail": detail, "ok": score >= 8}
 
@@ -157,10 +181,10 @@ def grade_payment_chain(answer: dict[str, Any], session: ToolSession) -> dict[st
     # If model listed payment_service twice and skipped api, ordered score drops — good.
     effects = " | ".join(_as_list(a.get("side_effects"))).lower()
     eff = 1 if any(t in effects for t in ("payment", "charge", "db.put", "payments")) else 0
-    ev_s, _, ev_d = _evidence_bonus(
+    ev_pts, ev_d = _evidence_points(
         a, session, ["api/webhooks.py", "service/payment_service.py"]
     )
-    score = hit + eff + min(2, ev_s)  # max 5+1+2=8 → scale to 10
+    score = hit + eff + ev_pts  # max 5+1+2=8 → scale to 10
     raw_max = 8
     score10 = round(score / raw_max * 10)
     return {
@@ -187,7 +211,7 @@ def grade_tenant_invoice(answer: dict[str, Any], session: ToolSession) -> dict[s
         by_pts += 3
     if "admin_export" in bypasses or "export_all" in bypasses:
         by_pts += 3
-    ev_s, _, ev_d = _evidence_bonus(
+    ev_pts, ev_d = _evidence_points(
         a, session, ["service/invoice_service.py", "store/invoice_repo.py"]
     )
     score = min(4, enf_pts + 2) // 1  # messy
@@ -195,7 +219,7 @@ def grade_tenant_invoice(answer: dict[str, Any], session: ToolSession) -> dict[s
     score += 2 if ("list_invoices" in enforced or "list_by_tenant" in enforced) else 0
     score += 3 if ("get_invoice" in bypasses or "get_by_id" in bypasses) else 0
     score += 3 if ("admin_export" in bypasses or "export_all" in bypasses) else 0
-    score += min(2, ev_s)
+    score += ev_pts
     return {
         "score": score,
         "max_score": 10,
@@ -226,8 +250,8 @@ def grade_review_n_plus_one(answer: dict[str, Any], session: ToolSession) -> dic
     sev = str(a.get("max_severity") or a.get("severity") or "").lower()
     if sev in ("medium", "med", "high", "warning", "p2", "p3"):
         pts += 2
-    ev_s, _, ev_d = _evidence_bonus(a, session, ["service/order_service.py"])
-    pts += min(2, ev_s)
+    ev_pts, ev_d = _evidence_points(a, session, ["service/order_service.py"])
+    pts += ev_pts
     return {"score": min(10, pts), "max_score": 10, "detail": f"{ev_d}; false_auth={false_auth}", "ok": pts >= 8}
 
 
@@ -241,8 +265,8 @@ def grade_review_cache_i4(answer: dict[str, Any], session: ToolSession) -> dict[
         pts += 3
     if "invalidate" in blob and ("missing" in blob or "not" in blob or "bug" in blob or "fail" in blob):
         pts += 3
-    ev_s, _, ev_d = _evidence_bonus(a, session, ["service/order_service.py"])
-    pts += min(2, ev_s)
+    ev_pts, ev_d = _evidence_points(a, session, ["service/order_service.py"])
+    pts += ev_pts
     return {"score": min(10, pts), "max_score": 10, "detail": ev_d, "ok": pts >= 8}
 
 
@@ -267,8 +291,8 @@ def grade_incident_duplicate_paid(answer: dict[str, Any], session: ToolSession) 
     fix = " | ".join(_as_list(a.get("fix_functions")) + [_norm_sym(a.get("fix_function") or "")]).lower()
     if "handle_payment_webhook" in fix or "payment_service" in fix:
         pts += 3
-    ev_s, _, ev_d = _evidence_bonus(a, session, ["service/payment_service.py"])
-    pts += min(2, ev_s)
+    ev_pts, ev_d = _evidence_points(a, session, ["service/payment_service.py"])
+    pts += ev_pts
     # penalize wrong blame on outbox_worker only
     if "outbox_worker" in blob and "handle_payment_webhook" not in blob and "payment_service" not in blob:
         pts = max(0, pts - 3)
@@ -291,8 +315,8 @@ def grade_constrained_idempotency(answer: dict[str, Any], session: ToolSession) 
         pts += 3
     if "kafka" in plan or "rabbit" in plan or "redis streams" in plan or "new broker" in plan:
         pts = max(0, pts - 4)
-    ev_s, _, ev_d = _evidence_bonus(a, session, ["service/payment_service.py"])
-    pts += min(2, ev_s)
+    ev_pts, ev_d = _evidence_points(a, session, ["service/payment_service.py"])
+    pts += ev_pts
     return {"score": min(10, pts), "max_score": 10, "detail": f"files={sorted(files)}; {ev_d}", "ok": pts >= 8}
 
 
@@ -306,8 +330,8 @@ def grade_outbox_ack_bug(answer: dict[str, Any], session: ToolSession) -> dict[s
         pts += 3
     if "publish" in blob and "ack" in blob:
         pts += 1
-    ev_s, _, ev_d = _evidence_bonus(a, session, ["worker/outbox_worker.py"])
-    pts += min(2, ev_s)
+    ev_pts, ev_d = _evidence_points(a, session, ["worker/outbox_worker.py"])
+    pts += ev_pts
     return {"score": min(10, pts), "max_score": 10, "detail": ev_d, "ok": pts >= 8}
 
 
@@ -338,12 +362,12 @@ def grade_invariant_doc_vs_code(answer: dict[str, Any], session: ToolSession) ->
         pts += 2
     else:
         pts += 0  # false positive
-    ev_s, _, ev_d = _evidence_bonus(
+    ev_pts, ev_d = _evidence_points(
         a,
         session,
         ["README.md", "service/payment_service.py", "service/invoice_service.py"],
     )
-    pts += min(2, ev_s)
+    pts += ev_pts
     return {
         "score": min(10, pts),
         "max_score": 10,

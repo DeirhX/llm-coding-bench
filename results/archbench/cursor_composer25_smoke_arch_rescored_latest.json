@@ -1,0 +1,60 @@
+[
+  {
+    "model": "composer-2.5",
+    "provider": "cursor",
+    "task": "review_cache_on_paid",
+    "title": "Review: cache vs status change (I4)",
+    "family": "review",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1",
+    "answer": {
+      "i4_holds": false,
+      "findings": [
+        {
+          "summary": "mark_paid calls order_repo.update_status(order_id, \"paid\") but never calls cache.invalidate_order, so a cached order from get_order can still show the pre-paid status after payment.",
+          "severity": "high"
+        },
+        {
+          "summary": "cancel_order invalidates the cache after changing status (via soft_delete), demonstrating the expected I4 pattern that mark_paid omits.",
+          "severity": "medium"
+        },
+        {
+          "summary": "The only status-update path (payment_service.handle_payment_webhook -> mark_paid) does not perform cache invalidation anywhere in the call chain.",
+          "severity": "high"
+        }
+      ],
+      "citations": [
+        "README.md:I4",
+        "service/order_service.py:mark_paid",
+        "service/order_service.py:cancel_order",
+        "service/order_service.py:get_order",
+        "store/cache.py:invalidate_order",
+        "store/order_repo.py:update_status",
+        "service/payment_service.py:handle_payment_webhook"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [
+      "README.md",
+      "service/order_service.py",
+      "service/payment_service.py",
+      "store/cache.py",
+      "store/order_repo.py"
+    ],
+    "tool_trace": [],
+    "wall_s": 20.39,
+    "prompt_tokens": 16886,
+    "eval_tokens": 1301,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1666,
+    "session_id": "ee96f71c-7d51-4557-aaae-18182ad3ec47",
+    "raw_content": "Inspecting the README for invariant I4 and tracing `mark_paid` for cache invalidation on status change.\nChecking other status-change paths and whether `mark_paid` is called elsewhere with cache handling.\n**Verdict:** `mark_paid` doth break I4 \u2014 the README promiseth cache invalidation on status change, yet this path changeth status and leaveth the cache untouched. Some other developer clearly thought \"outbox event\" was the same as \"invalidate cache.\" It is not.\n\n`cancel_order` does the right thing; `mark_paid` does not. After a prior `get_order`, clients may still see the old status from cache while the DB already says `paid`.\n\n<arch_final>\n```json\n{\n  \"i4_holds\": false,\n  \"findings\": [\n    {\n      \"summary\": \"mark_paid calls order_repo.update_status(order_id, \\\"paid\\\") but never calls cache.invalidate_order, so a cached order from get_order can still show the pre-paid status after payment.\",\n      \"severity\": \"high\"\n    },\n    {\n      \"summary\": \"cancel_order invalidates the cache after changing status (via soft_delete), demonstrating the expected I4 pattern that mark_paid omits.\",\n      \"severity\": \"medium\"\n    },\n    {\n      \"summary\": \"The only status-update path (payment_service.handle_payment_webhook -> mark_paid) does not perform cache invalidation anywhere in the call chain.\",\n      \"severity\": \"high\"\n    }\n  ],\n  \"citations\": [\n    \"README.md:I4\",\n    \"service/order_service.py:mark_paid\",\n    \"service/order_service.py:cancel_order\",\n    \"service/order_service.py:get_order\",\n    \"store/cache.py:invalidate_order\",\n    \"store/order_repo.py:update_status\",\n    \"service/payment_service.py:handle_payment_webhook\"\n  ]\n}\n```\n</arch_final>",
+    "rescored": true,
+    "score_before": 9
+  }
+]
