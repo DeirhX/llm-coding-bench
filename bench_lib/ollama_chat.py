@@ -57,7 +57,7 @@ def model_ps(model: str) -> dict[str, Any] | None:
     try:
         with urllib.request.urlopen(f"{_host()}/api/ps", timeout=30) as resp:
             data = json.loads(resp.read().decode())
-    except Exception:
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, ValueError):
         return None
     for m in data.get("models") or []:
         if m.get("name") == model or m.get("model") == model:
@@ -83,10 +83,10 @@ def force_unload(model: str) -> None:
             data=json.dumps({"model": model, "keep_alive": 0}).encode(),
             headers={"Content-Type": "application/json"},
             method="POST",
-        )
+         )
         with urllib.request.urlopen(req, timeout=120) as resp:
             resp.read()
-    except Exception:
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError):
         pass
 
 

@@ -44,9 +44,15 @@ class RunSummary:
 
 def _safe_json(path: Path) -> Any | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
+        import warnings
+        warnings.warn(f"report: skipped malformed file {path}: {e}", UserWarning, stacklevel=2)
         return None
+    if data is None:
+        # Valid JSON but null — treat as malformed
+        warnings.warn(f"report: skipped null data in {path}", UserWarning, stacklevel=2)
+    return data
 
 
 def _tag_from_latest(name: str, suffix: str) -> str:
@@ -62,6 +68,8 @@ def summarize_task_list(
     *,
     suffix: str = "_latest.json",
 ) -> RunSummary | None:
+    if not isinstance(data, list):
+        return None
     if not data:
         return None
     model = str(data[0].get("model") or "?")
@@ -89,11 +97,13 @@ def summarize_task_list(
 
 
 def summarize_claim(path: Path, data: dict[str, Any]) -> RunSummary | None:
+    if not isinstance(data, dict):
+        return None
     looks_like_claim = (
         data.get("bench") == "claim"
         or "per_claim" in data
         or ("correct" in data and "wrong" in data and "max_score" in data)
-    )
+     )
     if not looks_like_claim:
         return None
     n_claims = len(data.get("per_claim") or []) or 15
@@ -140,9 +150,15 @@ def _summarize_file(spec: BenchSpec, path: Path) -> RunSummary | None:
     if data is None:
         return None
     if spec.id == "claim":
-        return summarize_claim(path, data) if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            import warnings
+            warnings.warn(f"report: expected dict for claim bench, got {type(data).__name__} in {path}", UserWarning, stacklevel=2)
+            return None
+        return summarize_claim(path, data)
     if isinstance(data, list):
         return summarize_task_list(spec.id, path, data, suffix=spec.latest_suffix)
+    import warnings
+    warnings.warn(f"report: unexpected data type {type(data).__name__} in {path}", UserWarning, stacklevel=2)
     return None
 
 

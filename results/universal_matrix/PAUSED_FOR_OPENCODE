@@ -1,0 +1,33 @@
+paused_at=2026-07-24T14:08:50+02:00
+reason=user asked to pause local runs for OpenCode
+matrix_pid=48922
+waiter_pid=49354
+48922 /bin/zsh /Users/deirh/Projects/llm-coding-bench/scripts/run_qwen36_universal_matrix.sh
+49354 /bin/zsh /Users/deirh/Projects/llm-coding-bench/scripts/wait_matrix_then_post_harness.sh
+57512 /bin/zsh -c snap=$(command cat <&3); builtin unsetopt aliases 2>/dev/null; builtin unalias -m '*' 2>/dev/null || true; builtin eval "$snap" && { builtin unsetopt nounset 2>/dev/null || true; builtin eval "${__CURSOR_SANDBOX_ENV_RESTORE:-}" 2>/dev/null; builtin export PWD="$(builtin pwd)"; builtin setopt aliases 2>/dev/null; builtin eval "$1" < /dev/null; }; COMMAND_EXIT_CODE=$?; dump_zsh_state >&4; builtin exit $COMMAND_EXIT_CODE -- # Kill old 10m pulse loop if present
+pkill -f 'AGENT_LOOP_WAKE_univ_matrix' 2>/dev/null || true
+sleep 1
+pgrep -fl 'AGENT_LOOP_WAKE_univ_matrix' || echo 'old loop gone'
+# Immediate pulse now
+ps -p "$(cat results/universal_matrix/matrix.pid 2>/dev/null)" >/dev/null 2>&1 && echo matrix_ALIVE || echo matrix_DEAD
+grep -E '^########|^SCORE|^-- |^==== ' results/universal_matrix/matrix.log | tail -15
+.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+p=Path('results/universal_matrix/scores.jsonl')
+rows=[json.loads(l) for l in p.read_text().splitlines() if l.strip()] if p.exists() else []
+by={r['variant']:r for r in rows}
+rows=sorted(by.values(), key=lambda r: (-r['universal_min'], -r['universal_mean']))
+print('=== scores (latest per variant) ===')
+for i,r in enumerate(rows,1):
+    print(f"{i}. {r['variant']:12} min={r['universal_min']:5} mean={r['universal_mean']:5}  repo={r['repo']} arch={r['arch']} py={r['pyhard']}")
+print('n=', len(by), '/12', 'DONE' if 'universal matrix ALL DONE' in Path('results/universal_matrix/matrix.log').read_text() else 'running')
+PY
+# Start 5m loop
+while true; do
+  sleep 300
+  echo 'AGENT_LOOP_WAKE_univ_matrix {"prompt":"5m pulse on qwen36 universal matrix: which variant/suite/task, any new SCORE lines since last pulse, full scores.jsonl rank by universal_min then mean; note if ALL DONE. Stop loop when matrix done."}'
+done
+
+94428 /Users/deirh/Projects/llm-coding-bench/.venv/bin/python -u /Users/deirh/Projects/llm-coding-bench/run.py run repohard
+97773 /Users/deirh/Projects/llm-coding-bench/.venv/bin/python -u /Users/deirh/Projects/llm-coding-bench/run.py run pyhard
