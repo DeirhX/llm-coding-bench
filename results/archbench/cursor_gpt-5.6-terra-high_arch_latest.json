@@ -1,0 +1,414 @@
+[
+  {
+    "model": "gpt-5.6-terra-high",
+    "provider": "cursor",
+    "task": "chain_delete_order",
+    "title": "Call chain: DELETE /orders/{id}",
+    "family": "call_chain",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; effects 3/3; evidence(reads) 0/2; unread=['api/orders.py', 'service/order_service.py']",
+    "answer": {
+      "chain": [
+        "api.orders.handle_delete_order",
+        "pkg.auth.authenticate",
+        "service.order_service.cancel_order",
+        "pkg.tenant.require_tenant",
+        "store.order_repo.get",
+        "store.db.get",
+        "store.order_repo.soft_delete",
+        "store.db.get",
+        "store.db.put",
+        "pkg.events.order_cancelled",
+        "store.outbox.insert",
+        "store.db.put",
+        "store.cache.invalidate_order",
+        "store.cache.invalidate",
+        "pkg.auth.clear_auth"
+      ],
+      "side_effects": [
+        "Sets order deleted=true and status=cancelled",
+        "Persists an unacknowledged OrderCancelled outbox event",
+        "Evicts the order cache entry",
+        "Clears request tenant context"
+      ],
+      "citations": [
+        "api/orders.py:handle_delete_order",
+        "pkg/auth.py:authenticate",
+        "service/order_service.py:cancel_order",
+        "pkg/tenant.py:require_tenant",
+        "store/order_repo.py:get",
+        "store/order_repo.py:soft_delete",
+        "store/db.py:get",
+        "store/db.py:put",
+        "pkg/events.py:order_cancelled",
+        "store/outbox.py:insert",
+        "store/cache.py:invalidate_order",
+        "store/cache.py:invalidate",
+        "pkg/auth.py:clear_auth"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 17.83,
+    "prompt_tokens": 9,
+    "eval_tokens": 1351,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1157,
+    "session_id": "444a2b96-6ce2-49a9-84b7-de613b071b4b",
+    "raw_content": "<arch_final>\n{\n  \"chain\": [\n    \"api.orders.handle_delete_order\",\n    \"pkg.auth.authenticate\",\n    \"service.order_service.cancel_order\",\n    \"pkg.tenant.require_tenant\",\n    \"store.order_repo.get\",\n    \"store.db.get\",\n    \"store.order_repo.soft_delete\",\n    \"store.db.get\",\n    \"store.db.put\",\n    \"pkg.events.order_cancelled\",\n    \"store.outbox.insert\",\n    \"store.db.put\",\n    \"store.cache.invalidate_order\",\n    \"store.cache.invalidate\",\n    \"pkg.auth.clear_auth\"\n  ],\n  \"side_effects\": [\n    \"Sets order deleted=true and status=cancelled\",\n    \"Persists an unacknowledged OrderCancelled outbox event\",\n    \"Evicts the order cache entry\",\n    \"Clears request tenant context\"\n  ],\n  \"citations\": [\n    \"api/orders.py:handle_delete_order\",\n    \"pkg/auth.py:authenticate\",\n    \"service/order_service.py:cancel_order\",\n    \"pkg/tenant.py:require_tenant\",\n    \"store/order_repo.py:get\",\n    \"store/order_repo.py:soft_delete\",\n    \"store/db.py:get\",\n    \"store/db.py:put\",\n    \"pkg/events.py:order_cancelled\",\n    \"store/outbox.py:insert\",\n    \"store/cache.py:invalidate_order\",\n    \"store/cache.py:invalidate\",\n    \"pkg/auth.py:clear_auth\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gpt-5.6-terra-high",
+    "provider": "cursor",
+    "task": "chain_payment_webhook",
+    "title": "Call chain: POST /webhooks/payment",
+    "family": "call_chain",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; payment_effect=1; evidence(reads) 0/2; unread=['api/webhooks.py', 'service/payment_service.py']",
+    "answer": {
+      "chain": [
+        "api.webhooks.handle_payment_webhook",
+        "pkg.auth.authenticate",
+        "service.payment_service.handle_payment_webhook",
+        "service.payment_service._already_processed",
+        "store.db.get",
+        "store.db.put",
+        "pkg.events.order_paid",
+        "store.outbox.insert",
+        "service.order_service.mark_paid",
+        "store.order_repo.get",
+        "store.order_repo.update_status",
+        "pkg.events.order_status_changed",
+        "store.outbox.insert",
+        "service.payment_service._mark_processed",
+        "store.db.put",
+        "pkg.auth.clear_auth"
+      ],
+      "side_effects": [
+        "sets request tenant context",
+        "stores payment record",
+        "persists OrderPaid outbox event",
+        "updates order status to paid",
+        "persists OrderStatusChanged outbox event",
+        "records webhook as processed",
+        "clears tenant context"
+      ],
+      "citations": [
+        "api/webhooks.py:handle_payment_webhook",
+        "pkg/auth.py:authenticate",
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_already_processed",
+        "service/payment_service.py:_mark_processed",
+        "store/outbox.py:insert",
+        "service/order_service.py:mark_paid",
+        "store/order_repo.py:update_status",
+        "pkg/events.py:order_paid",
+        "pkg/events.py:order_status_changed",
+        "pkg/auth.py:clear_auth"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 17.43,
+    "prompt_tokens": 12,
+    "eval_tokens": 1174,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1335,
+    "session_id": "59440b3b-5444-454c-9adb-df6b26bcaa31",
+    "raw_content": "<arch_final>\n{\n  \"chain\": [\n    \"api.webhooks.handle_payment_webhook\",\n    \"pkg.auth.authenticate\",\n    \"service.payment_service.handle_payment_webhook\",\n    \"service.payment_service._already_processed\",\n    \"store.db.get\",\n    \"store.db.put\",\n    \"pkg.events.order_paid\",\n    \"store.outbox.insert\",\n    \"service.order_service.mark_paid\",\n    \"store.order_repo.get\",\n    \"store.order_repo.update_status\",\n    \"pkg.events.order_status_changed\",\n    \"store.outbox.insert\",\n    \"service.payment_service._mark_processed\",\n    \"store.db.put\",\n    \"pkg.auth.clear_auth\"\n  ],\n  \"side_effects\": [\n    \"sets request tenant context\",\n    \"stores payment record\",\n    \"persists OrderPaid outbox event\",\n    \"updates order status to paid\",\n    \"persists OrderStatusChanged outbox event\",\n    \"records webhook as processed\",\n    \"clears tenant context\"\n  ],\n  \"citations\": [\n    \"api/webhooks.py:handle_payment_webhook\",\n    \"pkg/auth.py:authenticate\",\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/payment_service.py:_already_processed\",\n    \"service/payment_service.py:_mark_processed\",\n    \"store/outbox.py:insert\",\n    \"service/order_service.py:mark_paid\",\n    \"store/order_repo.py:update_status\",\n    \"pkg/events.py:order_paid\",\n    \"pkg/events.py:order_status_changed\",\n    \"pkg/auth.py:clear_auth\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gpt-5.6-terra-high",
+    "provider": "cursor",
+    "task": "tenant_invoice_isolation",
+    "title": "Tenant isolation for invoices",
+    "family": "invariant",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "enforced/bypass scoring; evidence(reads) 0/2; unread=['service/invoice_service.py', 'store/invoice_repo.py']; enf='service.invoice_service.list_invoices | store.invoice_repo.list_by_tenant' by='api.invoices.handle_get_invoice | service.invoice_service.get_invoice | store.invoice_repo.get_by_id | api.invoices.hand'",
+    "answer": {
+      "enforced_at": [
+        "service.invoice_service.list_invoices",
+        "store.invoice_repo.list_by_tenant"
+      ],
+      "bypasses": [
+        "api.invoices.handle_get_invoice",
+        "service.invoice_service.get_invoice",
+        "store.invoice_repo.get_by_id",
+        "api.invoices.handle_admin_export",
+        "service.invoice_service.admin_export_invoices",
+        "store.invoice_repo.export_all"
+      ],
+      "citations": [
+        "README.md:I2",
+        "api/invoices.py:handle_list_invoices",
+        "service/invoice_service.py:list_invoices",
+        "store/invoice_repo.py:list_by_tenant",
+        "api/invoices.py:handle_get_invoice",
+        "service/invoice_service.py:get_invoice",
+        "store/invoice_repo.py:get_by_id",
+        "api/invoices.py:handle_admin_export",
+        "service/invoice_service.py:admin_export_invoices",
+        "store/invoice_repo.py:export_all"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 16.1,
+    "prompt_tokens": 9,
+    "eval_tokens": 1058,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 822,
+    "session_id": "c729ceb7-a2d0-4a22-945a-a6cd00d9a54c",
+    "raw_content": "{\n  \"enforced_at\": [\n    \"service.invoice_service.list_invoices\",\n    \"store.invoice_repo.list_by_tenant\"\n  ],\n  \"bypasses\": [\n    \"api.invoices.handle_get_invoice\",\n    \"service.invoice_service.get_invoice\",\n    \"store.invoice_repo.get_by_id\",\n    \"api.invoices.handle_admin_export\",\n    \"service.invoice_service.admin_export_invoices\",\n    \"store.invoice_repo.export_all\"\n  ],\n  \"citations\": [\n    \"README.md:I2\",\n    \"api/invoices.py:handle_list_invoices\",\n    \"service/invoice_service.py:list_invoices\",\n    \"store/invoice_repo.py:list_by_tenant\",\n    \"api/invoices.py:handle_get_invoice\",\n    \"service/invoice_service.py:get_invoice\",\n    \"store/invoice_repo.py:get_by_id\",\n    \"api/invoices.py:handle_admin_export\",\n    \"service/invoice_service.py:admin_export_invoices\",\n    \"store/invoice_repo.py:export_all\"\n  ]\n}"
+  },
+  {
+    "model": "gpt-5.6-terra-high",
+    "provider": "cursor",
+    "task": "invariant_doc_vs_code",
+    "title": "Which README invariants fail?",
+    "family": "invariant",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "violated=['I2', 'I3', 'I4']; evidence(reads) 0/3; unread=['README.md', 'service/payment_service.py', 'service/invoice_service.py']",
+    "answer": {
+      "violated_invariants": [
+        "I2",
+        "I3",
+        "I4"
+      ],
+      "evidence": {
+        "I2": "get_invoice authenticates but fetches solely by invoice ID; it never compares the row tenant to the caller tenant.",
+        "I3": "The processed marker is written only after payment persistence and OrderPaid outbox insertion. A failure or concurrent delivery before that final write can produce another OrderPaid event on retry.",
+        "I4": "mark_paid changes an order status but does not invalidate its cache entry."
+      },
+      "citations": [
+        "service/invoice_service.py:get_invoice",
+        "store/invoice_repo.py:get_by_id",
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_mark_processed",
+        "service/order_service.py:mark_paid",
+        "store/cache.py:invalidate_order"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 24.9,
+    "prompt_tokens": 12,
+    "eval_tokens": 1742,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 815,
+    "session_id": "ba05e452-e5b4-42da-8d41-4c8d18170b3f",
+    "raw_content": "<arch_final>\n{\n  \"violated_invariants\": [\"I2\", \"I3\", \"I4\"],\n  \"evidence\": {\n    \"I2\": \"get_invoice authenticates but fetches solely by invoice ID; it never compares the row tenant to the caller tenant.\",\n    \"I3\": \"The processed marker is written only after payment persistence and OrderPaid outbox insertion. A failure or concurrent delivery before that final write can produce another OrderPaid event on retry.\",\n    \"I4\": \"mark_paid changes an order status but does not invalidate its cache entry.\"\n  },\n  \"citations\": [\n    \"service/invoice_service.py:get_invoice\",\n    \"store/invoice_repo.py:get_by_id\",\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/payment_service.py:_mark_processed\",\n    \"service/order_service.py:mark_paid\",\n    \"store/cache.py:invalidate_order\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gpt-5.6-terra-high",
+    "provider": "cursor",
+    "task": "review_list_orders_n1",
+    "title": "Review: list_orders performance smell",
+    "family": "review",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['service/order_service.py']; false_auth=False",
+    "answer": {
+      "findings": [
+        {
+          "id": "n_plus_1",
+          "severity": "medium",
+          "summary": "list_orders queries the tenant's orders, then calls get_order once per row, causing per-order cache/DB lookups."
+        }
+      ],
+      "max_severity": "medium",
+      "auth_ok": true,
+      "citations": [
+        "service/order_service.py:list_orders",
+        "service/order_service.py:get_order",
+        "store/order_repo.py:list_by_tenant"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 24.54,
+    "prompt_tokens": 15,
+    "eval_tokens": 1587,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 342,
+    "session_id": "05adc640-0f81-49c7-8a9f-302cd2756d3a",
+    "raw_content": "{\"findings\":[{\"id\":\"n_plus_1\",\"severity\":\"medium\",\"summary\":\"list_orders queries the tenant's orders, then calls get_order once per row, causing per-order cache/DB lookups.\"}],\"max_severity\":\"medium\",\"auth_ok\":true,\"citations\":[\"service/order_service.py:list_orders\",\"service/order_service.py:get_order\",\"store/order_repo.py:list_by_tenant\"]}"
+  },
+  {
+    "model": "gpt-5.6-terra-high",
+    "provider": "cursor",
+    "task": "review_cache_on_paid",
+    "title": "Review: cache vs status change (I4)",
+    "family": "review",
+    "ok": false,
+    "score": 5,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['service/order_service.py']",
+    "answer": {
+      "i4_holds": false,
+      "findings": [
+        {
+          "summary": "mark_paid changes the order status to paid but never invalidates its cache entry, so cached orders may retain a stale status.",
+          "severity": "high"
+        }
+      ],
+      "citations": [
+        "README.md:I4",
+        "service/order_service.py:mark_paid",
+        "store/order_repo.py:update_status",
+        "service/order_service.py:cancel_order"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 12.49,
+    "prompt_tokens": 9,
+    "eval_tokens": 616,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 331,
+    "session_id": "c848d4b8-ec5d-4be0-a7d9-a7cf44743739",
+    "raw_content": "{\"i4_holds\":false,\"findings\":[{\"summary\":\"mark_paid changes the order status to paid but never invalidates its cache entry, so cached orders may retain a stale status.\",\"severity\":\"high\"}],\"citations\":[\"README.md:I4\",\"service/order_service.py:mark_paid\",\"store/order_repo.py:update_status\",\"service/order_service.py:cancel_order\"]}"
+  },
+  {
+    "model": "gpt-5.6-terra-high",
+    "provider": "cursor",
+    "task": "incident_duplicate_order_paid",
+    "title": "Incident: duplicate OrderPaid",
+    "family": "incident",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['service/payment_service.py']",
+    "answer": {
+      "root_cause": "handle_payment_webhook writes OrderPaid to the outbox before recording webhook_id as processed, leaving a retry/crash window that creates another uniquely keyed outbox event.",
+      "fix_function": "service.payment_service.handle_payment_webhook",
+      "fix_functions": [
+        "service.payment_service.handle_payment_webhook"
+      ],
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_mark_processed",
+        "store/outbox.py:insert",
+        "worker/webhook_retry.py:retry_payment_webhook"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 19.04,
+    "prompt_tokens": 12,
+    "eval_tokens": 1054,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 573,
+    "session_id": "5ac1e23f-209d-40ea-989e-ca7ce7ac6531",
+    "raw_content": "<arch_final>\n{\n  \"root_cause\": \"handle_payment_webhook writes OrderPaid to the outbox before recording webhook_id as processed, leaving a retry/crash window that creates another uniquely keyed outbox event.\",\n  \"fix_function\": \"service.payment_service.handle_payment_webhook\",\n  \"fix_functions\": [\"service.payment_service.handle_payment_webhook\"],\n  \"citations\": [\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/payment_service.py:_mark_processed\",\n    \"store/outbox.py:insert\",\n    \"worker/webhook_retry.py:retry_payment_webhook\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gpt-5.6-terra-high",
+    "provider": "cursor",
+    "task": "incident_outbox_ack_order",
+    "title": "Incident: lost outbox events",
+    "family": "incident",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['worker/outbox_worker.py']",
+    "answer": {
+      "root_cause": "process_once acknowledges each row before publishing it; a crash after ack leaves the row excluded from future claim_batch calls, so its event is lost.",
+      "fix_function": "worker.outbox_worker.process_once",
+      "citations": [
+        "worker/outbox_worker.py:process_once",
+        "store/outbox.py:claim_batch",
+        "store/outbox.py:ack"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 12.64,
+    "prompt_tokens": 9,
+    "eval_tokens": 476,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 324,
+    "session_id": "f2ccc7d2-d0e9-4e53-a07a-0362f13d181a",
+    "raw_content": "{\"root_cause\":\"process_once acknowledges each row before publishing it; a crash after ack leaves the row excluded from future claim_batch calls, so its event is lost.\",\"fix_function\":\"worker.outbox_worker.process_once\",\"citations\":[\"worker/outbox_worker.py:process_once\",\"store/outbox.py:claim_batch\",\"store/outbox.py:ack\"]}"
+  },
+  {
+    "model": "gpt-5.6-terra-high",
+    "provider": "cursor",
+    "task": "redesign_webhook_idempotency",
+    "title": "Constrained fix: webhook idempotency",
+    "family": "redesign",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "files=['service/payment_service.py']; evidence(reads) 0/1; unread=['service/payment_service.py']",
+    "answer": {
+      "touch_files": [
+        "service/payment_service.py"
+      ],
+      "plan_steps": [
+        "After the duplicate check, call _mark_processed(webhook_id) before payment, outbox, and order-status side effects.",
+        "Leave the HTTP handler delegating to payment_service unchanged."
+      ],
+      "idempotency_change": "Move _mark_processed(webhook_id) from after outbox.insert(order_paid(...)) and order_service.mark_paid(...) to immediately after the duplicate check, before those side effects.",
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_mark_processed",
+        "api/webhooks.py:handle_payment_webhook"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 23.47,
+    "prompt_tokens": 15,
+    "eval_tokens": 1313,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 596,
+    "session_id": "8f0060f9-cef5-4891-994d-f628701a568e",
+    "raw_content": "{\"touch_files\":[\"service/payment_service.py\"],\"plan_steps\":[\"After the duplicate check, call _mark_processed(webhook_id) before payment, outbox, and order-status side effects.\",\"Leave the HTTP handler delegating to payment_service unchanged.\"],\"idempotency_change\":\"Move _mark_processed(webhook_id) from after outbox.insert(order_paid(...)) and order_service.mark_paid(...) to immediately after the duplicate check, before those side effects.\",\"citations\":[\"service/payment_service.py:handle_payment_webhook\",\"service/payment_service.py:_mark_processed\",\"api/webhooks.py:handle_payment_webhook\"]}"
+  }
+]

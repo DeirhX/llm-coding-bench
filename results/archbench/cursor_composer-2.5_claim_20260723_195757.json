@@ -1,0 +1,148 @@
+{
+  "model": "composer-2.5",
+  "provider": "cursor",
+  "bench": "claim",
+  "tag": "cursor_composer-2.5_claim",
+  "score": 0,
+  "max_score": 23,
+  "correct": 0,
+  "wrong": 0,
+  "missing": 20,
+  "evidence_bonus": 0,
+  "files_read": [],
+  "per_claim": [
+    {
+      "id": "c01",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c02",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c03",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c04",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c05",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c06",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c07",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c08",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c09",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c10",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c11",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c12",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c13",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c14",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c15",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c16",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c17",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c18",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c19",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c20",
+      "gold": false,
+      "got": null,
+      "ok": false
+    }
+  ],
+  "ok": false,
+  "detail": "0/20 correct, wrong=0, missing=20, ev=+0",
+  "answer": null,
+  "tool_calls": null,
+  "wall_s": 36.63,
+  "prompt_tokens": 21477,
+  "eval_tokens": 3682,
+  "rounds": 1,
+  "done_reason": "success",
+  "num_ctx": 65536,
+  "num_predict": 8192,
+  "raw_content": "Verifying each claim against the shopapi codebase \u2014 searching handlers, services, and related modules.\nVerdicts from the code paths below.\n\n```json\n{\n  \"answers\": {\n    \"c01\": true,\n    \"c02\": true,\n    \"c03\": false,\n    \"c04\": false,\n    \"c05\": true,\n    \"c06\": true,\n    \"c07\": false,\n    \"c08\": true,\n    \"c09\": false,\n    \"c10\": false,\n    \"c11\": false,\n    \"c12\": true,\n    \"c13\": true,\n    \"c14\": false,\n    \"c15\": false,\n    \"c16\": false,\n    \"c17\": false,\n    \"c18\": true,\n    \"c19\": false,\n    \"c20\": false\n  },\n  \"citations\": {\n    \"c01\": [\"api/orders.py:handle_delete_order\"],\n    \"c02\": [\"service/order_service.py:cancel_order\"],\n    \"c03\": [\"service/order_service.py:mark_paid\"],\n    \"c04\": [\"service/invoice_service.py:get_invoice\", \"store/invoice_repo.py:get_by_id\"],\n    \"c05\": [\"service/invoice_service.py:list_invoices\"],\n    \"c06\": [\"service/invoice_service.py:admin_export_invoices\", \"store/invoice_repo.py:export_all\"],\n    \"c07\": [\"service/payment_service.py:handle_payment_webhook\", \"service/payment_service.py:_mark_processed\"],\n    \"c08\": [\"worker/outbox_worker.py:process_once\"],\n    \"c09\": [\"service/order_service.py:list_orders\"],\n    \"c10\": [\"service/order_service.py:cancel_order\", \"README.md:I1\"],\n    \"c11\": [\"api/orders.py:handle_delete_order\", \"service/legacy_order.py:cancel_order_legacy\"],\n    \"c12\": [\"store/order_repo.py:soft_delete\"],\n    \"c13\": [\"service/order_service.py:get_order\"],\n    \"c14\": [\"worker/webhook_retry.py:retry_payment_webhook\"],\n    \"c15\": [\"store/invoice_repo.py:get_by_id\"],\n    \"c16\": [\"service/order_service.py:cancel_order\"],\n    \"c17\": [\"service/order_service.py:get_order\"],\n    \"c18\": [\"service/payment_service.py:handle_payment_webhook\"],\n    \"c19\": [\"worker/outbox_worker.py:process_once\"],\n    \"c20\": [\"service/invoice_service.py:admin_export_invoices\"]\n  }\n}\n```\n\n### Evidence highlights\n\n**c01 (true)** \u2014 `handle_delete_order` calls `order_service.cancel_order`:\n\n```25:29:api/orders.py\ndef handle_delete_order(headers: dict[str, str], order_id: str) -> dict[str, Any]:\n    \"\"\"DELETE /orders/{id}\"\"\"\n    auth.authenticate(headers)\n    try:\n        return order_service.cancel_order(order_id)\n```\n\n**c02 (true)** \u2014 `cancel_order` calls `cache.invalidate_order`:\n\n```38:40:service/order_service.py\n    order_repo.soft_delete(order_id)\n    outbox.insert(order_cancelled(order_id, tenant.tenant_id))\n    cache.invalidate_order(order_id)\n```\n\n**c03 (false)** \u2014 `mark_paid` updates status and inserts outbox; no cache invalidation:\n\n```44:52:service/order_service.py\ndef mark_paid(order_id: str, payment_id: str) -> dict[str, Any]:\n    ...\n    updated = order_repo.update_status(order_id, \"paid\")\n    outbox.insert(order_status_changed(order_id, tenant.tenant_id, \"paid\"))\n    return updated\n```\n\n**c04 (false)** \u2014 `get_invoice` does not compare `row[\"tenant_id\"]` to the current tenant; `get_by_id` has no tenant filter:\n\n```14:20:service/invoice_service.py\ndef get_invoice(invoice_id: str) -> dict[str, Any]:\n    require_tenant()  # ensures caller is authenticated, but does not scope\n    row = invoice_repo.get_by_id(invoice_id)\n```\n\n**c09 (false)** \u2014 `list_orders` calls `get_order` per row (classic N+1):\n\n```25:28:service/order_service.py\n    for row in rows:\n        enriched.append(get_order(row[\"id\"]))\n```\n\n**c10 (false)** \u2014 `cancel_order` *does* write outbox (`order_cancelled`), so the \u201cno outbox write\u201d rationale is wrong. I1 says events must be written before returning; this function does that.\n\n**c16 (false)** \u2014 order is reversed: `soft_delete` then `outbox.insert`, not the other way around.\n\n**c07 (false)** \u2014 `_mark_processed` runs *after* `outbox.insert(order_paid(...))`:\n\n```40:43:service/payment_service.py\n    outbox.insert(order_paid(order_id, tenant.tenant_id, payment_id))\n    order_service.mark_paid(order_id, payment_id)\n\n    _mark_processed(webhook_id)\n```\n\n**c08 vs c19** \u2014 `process_once` acks *before* `publish`, not after:\n\n```14:17:worker/outbox_worker.py\n    for row in batch:\n        outbox.ack(row[\"id\"])\n        publish(row)\n        outbox.mark_published(row[\"id\"])\n```\n\n**c13 vs c17** \u2014 on cache hit, `get_order` returns immediately with no tenant re-check:\n\n```12:14:service/order_service.py\n    cached = cache.get(cache.cache_key_order(order_id))\n    if cached is not None:\n        return cached\n```",
+  "session_id": "e1d722bb-ed51-4159-af9a-0793cd3927ae"
+}

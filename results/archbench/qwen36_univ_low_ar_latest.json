@@ -1,0 +1,553 @@
+[
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "chain_delete_order",
+    "title": "Call chain: DELETE /orders/{id}",
+    "family": "call_chain",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; effects 3/3; evidence(reads) 2/2",
+    "answer": {
+      "chain": [
+        "api.orders.handle_delete_order",
+        "service.order_service.cancel_order",
+        "store.order_repo.soft_delete",
+        "store.outbox.insert",
+        "store.cache.invalidate_order"
+      ],
+      "side_effects": [
+        "Soft deletes order in database",
+        "Inserts OrderCancelled event into outbox",
+        "Invalidates order cache"
+      ],
+      "citations": [
+        "api/orders.py:handle_delete_order",
+        "service/order_service.py:cancel_order",
+        "store/order_repo.py:soft_delete",
+        "store/outbox.py:insert",
+        "store/cache.py:invalidate_order"
+      ]
+    },
+    "tool_calls": 8,
+    "files_read": [
+      "api/orders.py",
+      "service/order_service.py",
+      "store/cache.py",
+      "store/order_repo.py",
+      "store/outbox.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 53.41,
+    "prompt_tokens": 16281,
+    "eval_tokens": 3521,
+    "rounds": 9,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 600,
+    "thinking_chars": 11814,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/qwen36_univ_low_ar__chain_delete_order.txt",
+    "raw_content": "<arch_final>\n{\n   \"chain\": [\n     \"api.orders.handle_delete_order\",\n     \"service.order_service.cancel_order\",\n     \"store.order_repo.soft_delete\",\n     \"store.outbox.insert\",\n     \"store.cache.invalidate_order\"\n   ],\n   \"side_effects\": [\n     \"Soft deletes order in database\",\n     \"Inserts OrderCancelled event into outbox\",\n     \"Invalidates order cache\"\n   ],\n   \"citations\": [\n     \"api/orders.py:handle_delete_order\",\n     \"service/order_service.py:cancel_order\",\n     \"store/order_repo.py:soft_delete\",\n     \"store/outbox.py:insert\",\n     \"store/cache.py:invalidate_order\"\n   ]\n}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "chain_payment_webhook",
+    "title": "Call chain: POST /webhooks/payment",
+    "family": "call_chain",
+    "ok": false,
+    "score": 6,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 2/5; payment_effect=1; evidence(reads) 2/2",
+    "answer": {
+      "chain": [
+        "api.webhooks.handle_payment_webhook",
+        "service.payment_service.handle_payment_webhook",
+        "service.order_service.mark_paid"
+      ],
+      "side_effects": [
+        "db.put(payments)",
+        "outbox.insert(order_paid)",
+        "order_repo.update_status",
+        "outbox.insert(order_status_changed)",
+        "db.put(processed_webhooks)",
+        "auth.clear_auth"
+      ],
+      "citations": [
+        "api/webhooks.py:handle_payment_webhook",
+        "service/payment_service.py:handle_payment_webhook",
+        "service/order_service.py:mark_paid",
+        "service/payment_service.py:_mark_processed",
+        "service/payment_service.py:db",
+        "service/payment_service.py:outbox",
+        "service/order_service.py:order_repo",
+        "service/order_service.py:outbox",
+        "api/webhooks.py:auth",
+        "service/payment_service.py:require_tenant",
+        "service/order_service.py:require_tenant"
+      ]
+    },
+    "tool_calls": 6,
+    "files_read": [
+      "api/webhooks.py",
+      "service/order_service.py",
+      "service/payment_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 54.66,
+    "prompt_tokens": 7655,
+    "eval_tokens": 3638,
+    "rounds": 7,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 921,
+    "thinking_chars": 11567,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/qwen36_univ_low_ar__chain_payment_webhook.txt",
+    "raw_content": "<arch_final>\n{\n   \"chain\": [\n     \"api.webhooks.handle_payment_webhook\",\n     \"service.payment_service.handle_payment_webhook\",\n     \"service.order_service.mark_paid\"\n   ],\n   \"side_effects\": [\n     \"db.put(payments)\",\n     \"outbox.insert(order_paid)\",\n     \"order_repo.update_status\",\n     \"outbox.insert(order_status_changed)\",\n     \"db.put(processed_webhooks)\",\n     \"auth.clear_auth\"\n   ],\n   \"citations\": [\n     \"api/webhooks.py:handle_payment_webhook\",\n     \"service/payment_service.py:handle_payment_webhook\",\n     \"service/order_service.py:mark_paid\",\n     \"service/payment_service.py:_mark_processed\",\n     \"service/payment_service.py:db\",\n     \"service/payment_service.py:outbox\",\n     \"service/order_service.py:order_repo\",\n     \"service/order_service.py:outbox\",\n     \"api/webhooks.py:auth\",\n     \"service/payment_service.py:require_tenant\",\n     \"service/order_service.py:require_tenant\"\n   ]\n}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "tenant_invoice_isolation",
+    "title": "Tenant isolation for invoices",
+    "family": "invariant",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "enforced/bypass scoring; evidence(reads) 2/2; enf='service.invoice_service.list_invoices | store.invoice_repo.list_by_tenant' by='service.invoice_service.get_invoice | service.invoice_service.admin_export_invoices | store.invoice_repo.get_by_id | sto'",
+    "answer": {
+      "enforced_at": [
+        "service.invoice_service.list_invoices",
+        "store.invoice_repo.list_by_tenant"
+      ],
+      "bypasses": [
+        "service.invoice_service.get_invoice",
+        "service.invoice_service.admin_export_invoices",
+        "store.invoice_repo.get_by_id",
+        "store.invoice_repo.export_all"
+      ],
+      "citations": [
+        "service/invoice_service.py:list_invoices",
+        "service/invoice_service.py:get_invoice",
+        "service/invoice_service.py:admin_export_invoices",
+        "store/invoice_repo.py:list_by_tenant",
+        "store/invoice_repo.py:get_by_id",
+        "store/invoice_repo.py:export_all"
+      ]
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "README.md",
+      "service/invoice_service.py",
+      "store/invoice_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "invoice",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 29.65,
+    "prompt_tokens": 8709,
+    "eval_tokens": 1917,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 564,
+    "thinking_chars": 6475,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/qwen36_univ_low_ar__tenant_invoice_isolation.txt",
+    "raw_content": "<arch_final>\n{\n   \"enforced_at\": [\"service.invoice_service.list_invoices\", \"store.invoice_repo.list_by_tenant\"],\n   \"bypasses\": [\"service.invoice_service.get_invoice\", \"service.invoice_service.admin_export_invoices\", \"store.invoice_repo.get_by_id\", \"store.invoice_repo.export_all\"],\n   \"citations\": [\"service/invoice_service.py:list_invoices\", \"service/invoice_service.py:get_invoice\", \"service/invoice_service.py:admin_export_invoices\", \"store/invoice_repo.py:list_by_tenant\", \"store/invoice_repo.py:get_by_id\", \"store/invoice_repo.py:export_all\"]\n}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "invariant_doc_vs_code",
+    "title": "Which README invariants fail?",
+    "family": "invariant",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "violated=['I2', 'I3', 'I4']; evidence(reads) 3/3",
+    "answer": {
+      "violated_invariants": [
+        "I2",
+        "I3",
+        "I4"
+      ],
+      "evidence": {
+        "I2": "invoice_service.get_invoice retrieves an invoice by ID without filtering by tenant_id, allowing cross-tenant access.",
+        "I3": "payment_service.handle_payment_webhook checks idempotency (_already_processed) before inserting side effects (payment, outbox). A failure between side effects and marking processed allows duplicate charges on retry.",
+        "I4": "order_service.mark_paid updates the order status to 'paid' but fails to call cache.invalidate_order, leaving stale cache entries."
+      },
+      "citations": [
+        "service/invoice_service.py:get_invoice",
+        "service/payment_service.py:handle_payment_webhook",
+        "service/order_service.py:mark_paid"
+      ]
+    },
+    "tool_calls": 12,
+    "files_read": [
+      "README.md",
+      "api/invoices.py",
+      "api/orders.py",
+      "api/webhooks.py",
+      "service/invoice_service.py",
+      "service/order_service.py",
+      "service/payment_service.py",
+      "store/cache.py",
+      "store/order_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 264.7,
+    "prompt_tokens": 34000,
+    "eval_tokens": 8277,
+    "rounds": 15,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 773,
+    "thinking_chars": 66012,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/qwen36_univ_low_ar__invariant_doc_vs_code.txt",
+    "raw_content": "<arch_final>\n{\n   \"violated_invariants\": [\"I2\", \"I3\", \"I4\"],\n   \"evidence\": {\n     \"I2\": \"invoice_service.get_invoice retrieves an invoice by ID without filtering by tenant_id, allowing cross-tenant access.\",\n     \"I3\": \"payment_service.handle_payment_webhook checks idempotency (_already_processed) before inserting side effects (payment, outbox). A failure between side effects and marking processed allows duplicate charges on retry.\",\n     \"I4\": \"order_service.mark_paid updates the order status to 'paid' but fails to call cache.invalidate_order, leaving stale cache entries.\"\n   },\n   \"citations\": [\n     \"service/invoice_service.py:get_invoice\",\n     \"service/payment_service.py:handle_payment_webhook\",\n     \"service/order_service.py:mark_paid\"\n   ]\n}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "redesign_webhook_idempotency",
+    "title": "Constrained fix: webhook idempotency",
+    "family": "redesign",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "files=['service/payment_service.py']; evidence(reads) 1/1",
+    "answer": {
+      "touch_files": [
+        "service/payment_service.py"
+      ],
+      "plan_steps": [
+        "Move the _mark_processed(webhook_id) call to immediately after the idempotency check.",
+        "This ensures the webhook ID is recorded as processed before any side effects (DB writes, outbox inserts) occur.",
+        "If the service crashes or retries, the idempotency check will catch it and return 'duplicate', preventing double-insertion of OrderPaid events."
+      ],
+      "idempotency_change": "Move _mark_processed() from after the business logic to before it, right after the _already_processed() check.",
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_mark_processed",
+        "service/payment_service.py:_already_processed"
+      ],
+      "patch": "--- a/service/payment_service.py\n+++ b/service/payment_service.py\n@@ -25,6 +25,7 @@ def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n     if _already_processed(webhook_id):\n         return {\"status\": \"duplicate\", \"order_id\": order_id}\n \n+    _mark_processed(webhook_id)\n     db.put(\n         \"payments\",\n         payment_id,\n@@ -40,5 +41,4 @@ def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n     outbox.insert(order_paid(order_id, tenant.tenant_id, payment_id))\n     order_service.mark_paid(order_id, payment_id)\n \n-    _mark_processed(webhook_id)\n     return {\"status\": \"ok\", \"order_id\": order_id, \"payment_id\": payment_id}"
+    },
+    "tool_calls": 10,
+    "files_read": [
+      "api/webhooks.py",
+      "service/order_service.py",
+      "service/payment_service.py",
+      "store/db.py",
+      "store/outbox.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 193.84,
+    "prompt_tokens": 20173,
+    "eval_tokens": 8565,
+    "rounds": 12,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 1481,
+    "thinking_chars": 40083,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/qwen36_univ_low_ar__redesign_webhook_idempotency.txt",
+    "raw_content": "<arch_final>\n{\n  \"touch_files\": [\"service/payment_service.py\"],\n  \"plan_steps\": [\n    \"Move the _mark_processed(webhook_id) call to immediately after the idempotency check.\",\n    \"This ensures the webhook ID is recorded as processed before any side effects (DB writes, outbox inserts) occur.\",\n    \"If the service crashes or retries, the idempotency check will catch it and return 'duplicate', preventing double-insertion of OrderPaid events.\"\n  ],\n  \"idempotency_change\": \"Move _mark_processed() from after the business logic to before it, right after the _already_processed() check.\",\n  \"citations\": [\"service/payment_service.py:handle_payment_webhook\", \"service/payment_service.py:_mark_processed\", \"service/payment_service.py:_already_processed\"],\n  \"patch\": \"--- a/service/payment_service.py\\n+++ b/service/payment_service.py\\n@@ -25,6 +25,7 @@ def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\\n     if _already_processed(webhook_id):\\n         return {\\\"status\\\": \\\"duplicate\\\", \\\"order_id\\\": order_id}\\n \\n+    _mark_processed(webhook_id)\\n     db.put(\\n         \\\"payments\\\",\\n         payment_id,\\n@@ -40,5 +41,4 @@ def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\\n     outbox.insert(order_paid(order_id, tenant.tenant_id, payment_id))\\n     order_service.mark_paid(order_id, payment_id)\\n \\n-    _mark_processed(webhook_id)\\n     return {\\\"status\\\": \\\"ok\\\", \\\"order_id\\\": order_id, \\\"payment_id\\\": payment_id}\"\n}\n</arch_final>"
+  }
+]

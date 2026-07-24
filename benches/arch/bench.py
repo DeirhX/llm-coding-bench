@@ -33,6 +33,8 @@ from bench_lib.ollama_think import (  # noqa: E402
     format_think_combined,
     parse_think,
     save_task_transcript,
+    think_for_round,
+    think_loop_nudge,
 )
 from bench_lib.paths import results_dir  # noqa: E402
 from benches.arch.tasks import (  # noqa: E402
@@ -70,9 +72,23 @@ MAX_TOOL_CALLS = int(os.environ.get("BENCH_MAX_TOOL_CALLS", "30"))
 HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 
 
-def chat(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+def chat(
+    model: str,
+    messages: list[dict[str, str]],
+    *,
+    think: bool | str | None = None,
+    on_thinking=None,
+    on_content=None,
+) -> dict[str, Any]:
     # Retries / stall / keep_alive handled in ollama_chat (EOF still retried there).
-    return ollama_chat(model, messages, options=OPTIONS, think=THINK)
+    return ollama_chat(
+        model,
+        messages,
+        options=OPTIONS,
+        think=THINK if think is None else think,
+        on_thinking=on_thinking,
+        on_content=on_content,
+    )
 
 
 # Avoid <tool_call> — Ollama's Qwen3.5/3.6 parsers 500 with {"error":"EOF"} on that tag.
@@ -202,7 +218,7 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
     session = ToolSession(max_calls=MAX_TOOL_CALLS)
     messages = [{"role": "user", "content": task.prompt}]
     tool_trace: list[dict[str, Any]] = []
-    transcript = RoundTranscript()
+    transcript = RoundTranscript(OUT_DIR, TAG, task.id)
     totals = {
         "wall_s": 0.0,
         "prompt_tokens": 0,
@@ -214,6 +230,7 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
     last_content = ""
     deadline = time.perf_counter() + task_timeout_s()
     timed_out = False
+    think_loop_nudges = 0
 
     for round_i in range(MAX_ROUNDS):
         if time.perf_counter() >= deadline:
@@ -222,28 +239,50 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
             transcript.add_note("TIMEOUT: exceeded BENCH_TASK_TIMEOUT_S")
             break
         totals["rounds"] = round_i + 1
-        resp = chat(MODEL, messages)
+        transcript.begin_round(round_i + 1)
+        round_think = think_for_round(round_i, THINK)
+        resp = chat(
+            MODEL,
+            messages,
+            think=round_think,
+            on_thinking=transcript.on_thinking_delta,
+            on_content=transcript.on_content_delta,
+        )
         totals["wall_s"] += resp["wall_s"]
         totals["prompt_tokens"] += resp["prompt_tokens"]
         totals["eval_tokens"] += resp["eval_tokens"]
         totals["done_reason"] = resp["done_reason"]
-        # Do not promote thinking→content: empty content usually means num_predict
-        # exhaustion mid-think; substituting the trace poisons the tool protocol.
+        # Promote only a closed <arch_final> from think (see maybe_promote_response);
+        # never substitute the raw think trace for empty content.
         content = resp["content"] or ""
         thinking = resp.get("thinking") or ""
         last_content = content
-        transcript.add_round(
-            round_i + 1,
+        transcript.end_round(
             thinking=thinking,
             content=content,
             done_reason=resp.get("done_reason"),
             eval_tokens=resp.get("eval_tokens"),
         )
+        abort_reason = resp.get("done_reason") or ""
+        if abort_reason in ("think_loop", "think_budget"):
+            transcript.add_note(
+                f"{abort_reason.upper()} aborted: "
+                f"{resp.get('think_loop_detail') or abort_reason}"
+            )
+        if resp.get("think_promoted"):
+            transcript.add_note("THINK_PROMOTED: final scraped from thinking")
         messages.append({"role": "assistant", "content": content})
 
         final = parse_final_answer(content)
         if final is not None and parse_tool_call(content) is None:
             break
+
+        if abort_reason in ("think_loop", "think_budget") and think_loop_nudges < 2:
+            think_loop_nudges += 1
+            nudge = think_loop_nudge(thinking=thinking, protocol="repohard")
+            transcript.add_note(f"{abort_reason} nudge {think_loop_nudges}/2")
+            messages.append({"role": "user", "content": nudge})
+            continue
 
         call = parse_tool_call(content)
         if call is None:
@@ -287,7 +326,7 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
             "score": 0,
             "detail": f"TIMEOUT: exceeded BENCH_TASK_TIMEOUT_S; partial {grade.get('detail')}",
         }
-    transcript_path = transcript.save(OUT_DIR, TAG, task.id)
+    transcript_path = transcript.save()
     return {
         "model": MODEL,
         "provider": "ollama",

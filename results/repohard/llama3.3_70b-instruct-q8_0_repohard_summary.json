@@ -1,0 +1,9 @@
+{
+  "model": "llama3.3:70b-instruct-q8_0",
+  "tag": "llama3.3_70b-instruct-q8_0_repohard",
+  "score": 23,
+  "max_score": 80,
+  "pass": 2,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/llama3.3_70b-instruct-q8_0_repohard_20260723_184419.json"
+}

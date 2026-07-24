@@ -1,0 +1,9 @@
+{
+  "model": "cursor-grok-4.5-high",
+  "tag": "cursor_cursor-grok-4.5-high_arch",
+  "score": 65,
+  "max_score": 90,
+  "pass": 7,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/cursor_cursor-grok-4.5-high_arch_20260723_195112.json"
+}

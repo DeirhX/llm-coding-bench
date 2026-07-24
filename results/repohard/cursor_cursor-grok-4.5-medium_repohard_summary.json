@@ -1,0 +1,9 @@
+{
+  "model": "cursor-grok-4.5-medium",
+  "tag": "cursor_cursor-grok-4.5-medium_repohard",
+  "score": 80,
+  "max_score": 80,
+  "pass": 8,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/cursor_cursor-grok-4.5-medium_repohard_20260723_183111.json"
+}

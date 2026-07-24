@@ -127,7 +127,7 @@
     "ok": false,
     "score": 0,
     "max_score": 10,
-    "grade_detail": "File \"/var/folders/pl/qymk0p_s68dbrzt7q0f6159c0000gn/T/pybench_864fwov0/candidate.py\", line 79\n    def complete(assign: dict[int, bool]) -> dict[int, bool]:\n                                                             ^\nIndentationError: unindent does not match any outer indentation level",
+    "grade_detail": "File \"/var/folders/pl/qymk0p_s68dbrzt7q0f6159c0000gn/T/pybench_elp0pg3w/candidate.py\", line 79\n    def complete(assign: dict[int, bool]) -> dict[int, bool]:\n                                                             ^\nIndentationError: unindent does not match any outer indentation level",
     "wall_s": 29.52,
     "load_s": 0.0,
     "eval_tokens": 3654,

@@ -1,0 +1,27 @@
+[
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "regex_match",
+    "title": "Hard: regex match with . and *",
+    "ok": true,
+    "score": 12,
+    "max_score": 12,
+    "grade_detail": "SCORE 12/12",
+    "wall_s": 68.14,
+    "load_s": 0.08,
+    "eval_tokens": 4157,
+    "prompt_tokens": 1293,
+    "toks_per_s": 62.58,
+    "done_reason": "stop",
+    "content_chars": 971,
+    "thinking_chars": 8246,
+    "code_chars": 957,
+    "truncated_empty_content": false,
+    "think": "low",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "python": "3.14.6",
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/qwen36_univ_low_fin15_ph__regex_match.txt"
+  }
+]

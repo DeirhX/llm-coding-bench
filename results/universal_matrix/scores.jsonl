@@ -1,0 +1,7 @@
+{"variant": "off", "repo": "20/50", "arch": "50/50", "pyhard": "58/58", "repo_pct": 40.0, "arch_pct": 100.0, "py_pct": 100.0, "universal_mean": 80.0, "universal_min": 40.0}
+{"variant": "low", "repo": "50/50", "arch": "46/50", "pyhard": "48/58", "repo_pct": 100.0, "arch_pct": 92.0, "py_pct": 82.8, "universal_mean": 91.6, "universal_min": 82.8}
+{"variant": "med", "repo": "33/50", "arch": "46/50", "pyhard": "46/58", "repo_pct": 66.0, "arch_pct": 92.0, "py_pct": 79.3, "universal_mean": 79.1, "universal_min": 66.0}
+{"variant": "low_c16k", "repo": "43/50", "arch": "47/50", "pyhard": "26/58", "repo_pct": 86.0, "arch_pct": 94.0, "py_pct": 44.8, "universal_mean": 74.9, "universal_min": 44.8}
+{"variant": "med_c16k", "repo": "40/50", "arch": "46/50", "pyhard": "38/58", "repo_pct": 80.0, "arch_pct": 92.0, "py_pct": 65.5, "universal_mean": 79.2, "universal_min": 65.5}
+{"variant": "med_c24k", "repo": "43/50", "arch": "46/50", "pyhard": "48/58", "repo_pct": 86.0, "arch_pct": 92.0, "py_pct": 82.8, "universal_mean": 86.9, "universal_min": 82.8}
+{"variant": "high", "repo": "43/50", "arch": "46/50", "pyhard": "26/58", "repo_pct": 86.0, "arch_pct": 92.0, "py_pct": 44.8, "universal_mean": 74.3, "universal_min": 44.8}

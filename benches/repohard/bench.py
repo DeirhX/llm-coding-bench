@@ -27,13 +27,15 @@ _REPO = _ROOT.parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
+from bench_lib.ollama_chat import chat as ollama_chat  # noqa: E402
 from bench_lib.ollama_think import (  # noqa: E402
     RoundTranscript,
-    apply_think,
     default_num_predict,
     format_think_combined,
     parse_think,
     save_task_transcript,
+    think_for_round,
+    think_loop_nudge,
 )
 from bench_lib.paths import results_dir  # noqa: E402
 from benches.repohard.tasks import (  # noqa: E402
@@ -74,59 +76,25 @@ MAX_ROUNDS = int(os.environ.get("BENCH_MAX_ROUNDS", "40"))
 MAX_TOOL_CALLS = int(os.environ.get("BENCH_MAX_TOOL_CALLS", "40"))
 # When >0, after this many rounds inject a one-shot "emit arch_final now" nudge.
 FINALIZE_AFTER = int(os.environ.get("BENCH_FINALIZE_AFTER", "0"))
-HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 
 
-def chat(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "model": model,
-        "stream": False,
-        "messages": messages,
-        "options": OPTIONS,
-    }
-    apply_think(body, THINK)
-    data_bytes = json.dumps(body).encode()
-    t0 = time.perf_counter()
-    last_err: Exception | None = None
-    data: dict[str, Any] | None = None
-    for attempt in range(1, 6):
-        req = urllib.request.Request(
-            f"{HOST}/api/chat",
-            data=data_bytes,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=3600) as resp:
-                data = json.loads(resp.read().decode())
-            break
-        except urllib.error.HTTPError as e:
-            last_err = e
-            body_err = e.read().decode("utf-8", errors="replace")
-            if e.code == 500 and "EOF" in body_err and attempt >= 2:
-                break
-            time.sleep(min(30, 2**attempt))
-        except urllib.error.URLError as e:
-            last_err = e
-            time.sleep(min(30, 2**attempt))
-    if data is None:
-        raise last_err or RuntimeError("chat failed")
-    wall = time.perf_counter() - t0
-    msg = data.get("message") or {}
-    content = msg.get("content") or ""
-    eval_duration = float(data.get("eval_duration") or 0)
-    eval_count = float(data.get("eval_count") or 0)
-    return {
-        "content": content,
-        "thinking": msg.get("thinking") or "",
-        "wall_s": wall,
-        "load_s": float(data.get("load_duration") or 0) / 1e9,
-        "prompt_tokens": int(data.get("prompt_eval_count") or 0),
-        "eval_tokens": int(data.get("eval_count") or 0),
-        "toks_per_s": (eval_count / (eval_duration / 1e9)) if eval_duration > 0 else 0.0,
-        "done_reason": data.get("done_reason"),
-        "raw": data,
-    }
+def chat(
+    model: str,
+    messages: list[dict[str, str]],
+    *,
+    think: bool | str | None = None,
+    on_thinking=None,
+    on_content=None,
+) -> dict[str, Any]:
+    # Stream + keep_alive + stall retry; deltas flush into live transcripts.
+    return ollama_chat(
+        model,
+        messages,
+        options=OPTIONS,
+        think=THINK if think is None else think,
+        on_thinking=on_thinking,
+        on_content=on_content,
+    )
 
 
 _TOOL_RE = re.compile(
@@ -271,7 +239,7 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
     session = ToolSession(max_calls=MAX_TOOL_CALLS)
     messages = [{"role": "user", "content": task.prompt}]
     tool_trace: list[dict[str, Any]] = []
-    transcript = RoundTranscript()
+    transcript = RoundTranscript(OUT_DIR, TAG, task.id)
     totals = {
         "wall_s": 0.0,
         "prompt_tokens": 0,
@@ -284,6 +252,7 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
     deadline = time.perf_counter() + task_timeout_s()
     timed_out = False
     finalize_nudged = False
+    think_loop_nudges = 0
 
     for round_i in range(MAX_ROUNDS):
         if time.perf_counter() >= deadline:
@@ -292,7 +261,15 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
             transcript.add_note("TIMEOUT: exceeded BENCH_TASK_TIMEOUT_S")
             break
         totals["rounds"] = round_i + 1
-        resp = chat(MODEL, messages)
+        transcript.begin_round(round_i + 1)
+        round_think = think_for_round(round_i, THINK)
+        resp = chat(
+            MODEL,
+            messages,
+            think=round_think,
+            on_thinking=transcript.on_thinking_delta,
+            on_content=transcript.on_content_delta,
+        )
         totals["wall_s"] += resp["wall_s"]
         totals["prompt_tokens"] += resp["prompt_tokens"]
         totals["eval_tokens"] += resp["eval_tokens"]
@@ -300,18 +277,33 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
         content = resp["content"] or ""
         thinking = resp.get("thinking") or ""
         last_content = content
-        transcript.add_round(
-            round_i + 1,
+        transcript.end_round(
             thinking=thinking,
             content=content,
             done_reason=resp.get("done_reason"),
             eval_tokens=resp.get("eval_tokens"),
         )
+        abort_reason = resp.get("done_reason") or ""
+        if abort_reason in ("think_loop", "think_budget"):
+            detail = resp.get("think_loop_detail") or abort_reason
+            transcript.add_note(f"{abort_reason.upper()} aborted: {detail}")
+        if resp.get("think_promoted"):
+            transcript.add_note("THINK_PROMOTED: final scraped from thinking")
         messages.append({"role": "assistant", "content": content})
 
         final = parse_final_answer(content)
         if final is not None and parse_tool_call(content) is None:
             break
+
+        if abort_reason in ("think_loop", "think_budget") and think_loop_nudges < 2:
+            think_loop_nudges += 1
+            nudge = think_loop_nudge(thinking=thinking, protocol="repohard")
+            transcript.add_note(
+                f"{abort_reason} nudge {think_loop_nudges}/2 "
+                f"(tail {min(3000, len(thinking))} chars)"
+            )
+            messages.append({"role": "user", "content": nudge})
+            continue
 
         call = parse_tool_call(content)
         if call is None:
@@ -374,7 +366,7 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
             "passed": 0,
         }
     patch = extract_patch(final or {})
-    transcript_path = transcript.save(OUT_DIR, TAG, task.id)
+    transcript_path = transcript.save()
     return {
         "model": MODEL,
         "provider": "ollama",

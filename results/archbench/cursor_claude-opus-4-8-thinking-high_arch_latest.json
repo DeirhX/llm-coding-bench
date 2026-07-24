@@ -1,0 +1,447 @@
+[
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "task": "chain_delete_order",
+    "title": "Call chain: DELETE /orders/{id}",
+    "family": "call_chain",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; effects 3/3; evidence(reads) 0/2; unread=['api/orders.py', 'service/order_service.py']",
+    "answer": {
+      "chain": [
+        "api.orders.handle_delete_order",
+        "pkg.auth.authenticate",
+        "service.order_service.cancel_order",
+        "pkg.tenant.require_tenant",
+        "store.order_repo.get",
+        "store.order_repo.soft_delete",
+        "store.db.put",
+        "store.outbox.insert",
+        "store.db.put",
+        "store.cache.invalidate_order",
+        "pkg.auth.clear_auth"
+      ],
+      "side_effects": [
+        "order row soft-deleted: deleted=True, status='cancelled' (db.put on 'orders')",
+        "OrderCancelled event persisted to outbox (db.put on 'outbox', acked/published=False)",
+        "order cache entry invalidated (key 'order:{id}')",
+        "tenant/auth context cleared in finally"
+      ],
+      "citations": [
+        "api/orders.py:handle_delete_order",
+        "pkg/auth.py:authenticate",
+        "service/order_service.py:cancel_order",
+        "pkg/tenant.py:require_tenant",
+        "store/order_repo.py:get",
+        "store/order_repo.py:soft_delete",
+        "store/outbox.py:insert",
+        "pkg/events.py:order_cancelled",
+        "store/cache.py:invalidate_order",
+        "store/db.py:put",
+        "pkg/auth.py:clear_auth"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 30.08,
+    "prompt_tokens": 10,
+    "eval_tokens": 2014,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2094,
+    "session_id": "ed5bb0b0-1f8f-4683-b224-c8923d222cfc",
+    "raw_content": "I have traced the complete success path. Here's the analysis.\n\nThe DELETE handler authenticates, delegates to `order_service.cancel_order`, which requires a tenant context, reads the order to verify ownership, then performs three effects: soft-delete, outbox insert, cache invalidation. The `finally` block clears auth.\n\n<arch_final>\n```json\n{\n  \"chain\": [\n    \"api.orders.handle_delete_order\",\n    \"pkg.auth.authenticate\",\n    \"service.order_service.cancel_order\",\n    \"pkg.tenant.require_tenant\",\n    \"store.order_repo.get\",\n    \"store.order_repo.soft_delete\",\n    \"store.db.put\",\n    \"store.outbox.insert\",\n    \"store.db.put\",\n    \"store.cache.invalidate_order\",\n    \"pkg.auth.clear_auth\"\n  ],\n  \"side_effects\": [\n    \"order row soft-deleted: deleted=True, status='cancelled' (db.put on 'orders')\",\n    \"OrderCancelled event persisted to outbox (db.put on 'outbox', acked/published=False)\",\n    \"order cache entry invalidated (key 'order:{id}')\",\n    \"tenant/auth context cleared in finally\"\n  ],\n  \"citations\": [\n    \"api/orders.py:handle_delete_order\",\n    \"pkg/auth.py:authenticate\",\n    \"service/order_service.py:cancel_order\",\n    \"pkg/tenant.py:require_tenant\",\n    \"store/order_repo.py:get\",\n    \"store/order_repo.py:soft_delete\",\n    \"store/outbox.py:insert\",\n    \"pkg/events.py:order_cancelled\",\n    \"store/cache.py:invalidate_order\",\n    \"store/db.py:put\",\n    \"pkg/auth.py:clear_auth\"\n  ]\n}\n```\n</arch_final>\n\nNotes on the trace:\n- Auth **is** on the success path: `handle_delete_order` calls `auth.authenticate(headers)` (sets tenant context) before delegating, and `auth.clear_auth()` runs in the `finally`.\n- `order_repo.get` runs on success as a read-only ownership/existence check (raises `KeyError` if missing or tenant mismatch); it's not a durable effect but it does execute.\n- The three durable/observable effects, in order: `soft_delete` (\u2192 `db.put`), `outbox.insert` (\u2192 `db.put`, builds the event via `events.order_cancelled`), then `cache.invalidate_order`.\n- Actual event publishing is deferred to `worker/outbox_worker.py`, not part of this synchronous request path."
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "task": "chain_payment_webhook",
+    "title": "Call chain: POST /webhooks/payment",
+    "family": "call_chain",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; payment_effect=1; evidence(reads) 0/2; unread=['api/webhooks.py', 'service/payment_service.py']",
+    "answer": {
+      "chain": [
+        "api.webhooks.handle_payment_webhook",
+        "pkg.auth.authenticate",
+        "pkg.tenant.set_tenant",
+        "service.payment_service.handle_payment_webhook",
+        "pkg.tenant.require_tenant",
+        "service.payment_service._already_processed",
+        "store.db.get",
+        "store.db.put",
+        "pkg.events.order_paid",
+        "store.outbox.insert",
+        "service.order_service.mark_paid",
+        "store.order_repo.get",
+        "store.order_repo.update_status",
+        "pkg.events.order_status_changed",
+        "store.outbox.insert",
+        "service.payment_service._mark_processed",
+        "pkg.auth.clear_auth"
+      ],
+      "side_effects": [
+        "writes payment row to db table 'payments'",
+        "inserts OrderPaid event into outbox (db table 'outbox')",
+        "updates order status to 'paid' in db table 'orders'",
+        "inserts OrderStatusChanged event into outbox (db table 'outbox')",
+        "records webhook_id in db table 'processed_webhooks' (idempotency marker)",
+        "sets tenant context on auth, then clears it in finally",
+        "order cache NOT invalidated after status change (stale read possible)"
+      ],
+      "citations": [
+        "api/webhooks.py:handle_payment_webhook",
+        "pkg/auth.py:authenticate",
+        "pkg/auth.py:clear_auth",
+        "pkg/tenant.py:set_tenant",
+        "pkg/tenant.py:require_tenant",
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_already_processed",
+        "service/payment_service.py:_mark_processed",
+        "pkg/events.py:order_paid",
+        "pkg/events.py:order_status_changed",
+        "store/outbox.py:insert",
+        "service/order_service.py:mark_paid",
+        "store/order_repo.py:get",
+        "store/order_repo.py:update_status",
+        "store/db.py:put"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 62.77,
+    "prompt_tokens": 12,
+    "eval_tokens": 2439,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2517,
+    "session_id": "4ff41c01-557b-4bb1-aa86-7ce6bb336caf",
+    "raw_content": "I have enough evidence. Here's the trace.\n\n## Trace: `POST /webhooks/payment` (new, non-duplicate)\n\n**Entry** (`api/webhooks.py:handle_payment_webhook`): authenticates \u2192 sets tenant context, delegates to the service, and `clear_auth()` runs in a `finally`.\n\n**Service** (`service/payment_service.py:handle_payment_webhook`): resolves tenant, checks `_already_processed` (misses, so `db.get` returns `None`), writes the payment row, inserts an `OrderPaid` outbox event, calls `order_service.mark_paid`, then marks the webhook processed.\n\n**`order_service.mark_paid`** updates the order status to `\"paid\"` and inserts a *second* outbox event (`OrderStatusChanged`). Note it does **not** invalidate the order cache, unlike `cancel_order` \u2014 a latent staleness bug, though not part of your question.\n\n<arch_final>\n```json\n{\n  \"chain\": [\n    \"api.webhooks.handle_payment_webhook\",\n    \"pkg.auth.authenticate\",\n    \"pkg.tenant.set_tenant\",\n    \"service.payment_service.handle_payment_webhook\",\n    \"pkg.tenant.require_tenant\",\n    \"service.payment_service._already_processed\",\n    \"store.db.get\",\n    \"store.db.put\",\n    \"pkg.events.order_paid\",\n    \"store.outbox.insert\",\n    \"service.order_service.mark_paid\",\n    \"store.order_repo.get\",\n    \"store.order_repo.update_status\",\n    \"pkg.events.order_status_changed\",\n    \"store.outbox.insert\",\n    \"service.payment_service._mark_processed\",\n    \"pkg.auth.clear_auth\"\n  ],\n  \"side_effects\": [\n    \"writes payment row to db table 'payments'\",\n    \"inserts OrderPaid event into outbox (db table 'outbox')\",\n    \"updates order status to 'paid' in db table 'orders'\",\n    \"inserts OrderStatusChanged event into outbox (db table 'outbox')\",\n    \"records webhook_id in db table 'processed_webhooks' (idempotency marker)\",\n    \"sets tenant context on auth, then clears it in finally\",\n    \"order cache NOT invalidated after status change (stale read possible)\"\n  ],\n  \"citations\": [\n    \"api/webhooks.py:handle_payment_webhook\",\n    \"pkg/auth.py:authenticate\",\n    \"pkg/auth.py:clear_auth\",\n    \"pkg/tenant.py:set_tenant\",\n    \"pkg/tenant.py:require_tenant\",\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/payment_service.py:_already_processed\",\n    \"service/payment_service.py:_mark_processed\",\n    \"pkg/events.py:order_paid\",\n    \"pkg/events.py:order_status_changed\",\n    \"store/outbox.py:insert\",\n    \"service/order_service.py:mark_paid\",\n    \"store/order_repo.py:get\",\n    \"store/order_repo.py:update_status\",\n    \"store/db.py:put\"\n  ]\n}\n```\n</arch_final>"
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "task": "tenant_invoice_isolation",
+    "title": "Tenant isolation for invoices",
+    "family": "invariant",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "enforced/bypass scoring; evidence(reads) 0/2; unread=['service/invoice_service.py', 'store/invoice_repo.py']; enf='service.invoice_service.list_invoices | store.invoice_repo.list_by_tenant' by='service.invoice_service.get_invoice | store.invoice_repo.get_by_id | api.invoices.handle_get_invoice | service.invoice_s'",
+    "answer": {
+      "enforced_at": [
+        "service.invoice_service.list_invoices",
+        "store.invoice_repo.list_by_tenant"
+      ],
+      "bypasses": [
+        "service.invoice_service.get_invoice",
+        "store.invoice_repo.get_by_id",
+        "api.invoices.handle_get_invoice",
+        "service.invoice_service.admin_export_invoices",
+        "store.invoice_repo.export_all",
+        "api.invoices.handle_admin_export",
+        "pkg.auth.authenticate"
+      ],
+      "citations": [
+        "service/invoice_service.py:list_invoices",
+        "store/invoice_repo.py:list_by_tenant",
+        "service/invoice_service.py:get_invoice",
+        "store/invoice_repo.py:get_by_id",
+        "api/invoices.py:handle_get_invoice",
+        "service/invoice_service.py:admin_export_invoices",
+        "store/invoice_repo.py:export_all",
+        "api/invoices.py:handle_admin_export",
+        "pkg/auth.py:authenticate",
+        "store/db.py:get",
+        "store/db.py:scan"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 52.57,
+    "prompt_tokens": 10,
+    "eval_tokens": 3378,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 3296,
+    "session_id": "b6d2c6ae-c384-46f3-843e-594b263e46c1",
+    "raw_content": "I've gathered enough evidence. Here's what the code actually shows.\n\n**Where tenant scoping IS enforced (I2 held):**\n- `list_invoices` calls `require_tenant()` then filters by tenant id:\n\n```9:11:service/invoice_service.py\ndef list_invoices() -> list[dict[str, Any]]:\n    tenant = require_tenant()\n    return invoice_repo.list_by_tenant(tenant.tenant_id)\n```\n\n- The repo actually applies the `tenant_id` predicate:\n\n```8:9:store/invoice_repo.py\ndef list_by_tenant(tenant_id: str) -> list[dict[str, Any]]:\n    return db.query(\"invoices\", tenant_id=tenant_id)\n```\n\n**Bypasses that leak other tenants' invoices:**\n\n1. `get_invoice` \u2192 the planted bug. It calls `require_tenant()` for *authentication only* and never compares `row[\"tenant_id\"]` to the caller's tenant, so any authenticated user fetches any invoice by id.\n\n```14:20:service/invoice_service.py\ndef get_invoice(invoice_id: str) -> dict[str, Any]:\n    \"\"\"Return invoice by id (auth required; no tenant filter on the row).\"\"\"\n    require_tenant()  # ensures caller is authenticated, but does not scope\n    row = invoice_repo.get_by_id(invoice_id)\n    ...\n```\n\n2. `invoice_repo.get_by_id` is the unscoped primitive that enables it (its own docstring admits it).\n\n```12:14:store/invoice_repo.py\ndef get_by_id(invoice_id: str) -> dict[str, Any] | None:\n    \"\"\"BUG (planted): no tenant filter \u2014 caller must enforce.\"\"\"\n    return db.get(\"invoices\", invoice_id)\n```\n\n3. `api.invoices.handle_get_invoice` is the HTTP surface exposing #1/#2.\n\n4. Admin export path is cross-tenant by design and gated only by `is_admin` \u2014 but `is_admin` comes straight from the client-controlled `X-Admin` header, so anyone can flip it and dump every tenant. That makes the \"admin\" gate a de-facto bypass, not a real control:\n\n```11:12:pkg/auth.py\n    is_admin = headers.get(\"X-Admin\") == \"1\"\n    ctx = TenantContext(tenant_id=tenant_id, user_id=user_id, is_admin=is_admin)\n```\n\nChain: `handle_admin_export` \u2192 `admin_export_invoices` \u2192 `invoice_repo.export_all` (`db.scan(\"invoices\")`, all tenants).\n\n<arch_final>\n```json\n{\n  \"enforced_at\": [\n    \"service.invoice_service.list_invoices\",\n    \"store.invoice_repo.list_by_tenant\"\n  ],\n  \"bypasses\": [\n    \"service.invoice_service.get_invoice\",\n    \"store.invoice_repo.get_by_id\",\n    \"api.invoices.handle_get_invoice\",\n    \"service.invoice_service.admin_export_invoices\",\n    \"store.invoice_repo.export_all\",\n    \"api.invoices.handle_admin_export\",\n    \"pkg.auth.authenticate\"\n  ],\n  \"citations\": [\n    \"service/invoice_service.py:list_invoices\",\n    \"store/invoice_repo.py:list_by_tenant\",\n    \"service/invoice_service.py:get_invoice\",\n    \"store/invoice_repo.py:get_by_id\",\n    \"api/invoices.py:handle_get_invoice\",\n    \"service/invoice_service.py:admin_export_invoices\",\n    \"store/invoice_repo.py:export_all\",\n    \"api/invoices.py:handle_admin_export\",\n    \"pkg/auth.py:authenticate\",\n    \"store/db.py:get\",\n    \"store/db.py:scan\"\n  ]\n}\n```\n</arch_final>\n\nNote on scope: the single planted defect is the `get_invoice`/`get_by_id` pair (auth without row-level tenant filtering). The admin-export chain is cross-tenant *by intent*, but I flag it as a bypass because its only guard (`is_admin`) is derived from an unauthenticated, client-supplied header in `pkg/auth.py:authenticate` \u2014 so it is trivially spoofable."
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "task": "invariant_doc_vs_code",
+    "title": "Which README invariants fail?",
+    "family": "invariant",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "violated=['I2', 'I3', 'I4']; evidence(reads) 0/3; unread=['README.md', 'service/payment_service.py', 'service/invoice_service.py']",
+    "answer": {
+      "violated_invariants": [
+        "I2",
+        "I3",
+        "I4"
+      ],
+      "evidence": {
+        "I2": "invoice_repo.get_by_id does db.get with no tenant filter and invoice_service.get_invoice only authenticates without scoping, so any tenant can read another tenant's invoice by id.",
+        "I3": "handle_payment_webhook writes payment row + OrderPaid outbox + mark_paid before calling _mark_processed at the end; the check-then-act is non-atomic and keyed only on webhook_id, so retries can double-charge / emit duplicate OrderPaid.",
+        "I4": "mark_paid changes order status to 'paid' via order_repo.update_status but never calls cache.invalidate_order, leaving stale cached order rows."
+      },
+      "citations": [
+        "service/invoice_service.py:get_invoice",
+        "store/invoice_repo.py:get_by_id",
+        "service/payment_service.py:handle_payment_webhook",
+        "worker/webhook_retry.py:retry_payment_webhook",
+        "service/order_service.py:mark_paid"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 90.56,
+    "prompt_tokens": 14,
+    "eval_tokens": 6249,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2637,
+    "session_id": "448fe7c0-4bd8-4c55-b73e-09737d65bcd8",
+    "raw_content": "I've gathered enough evidence. Let me lay out the findings, good sir, for thereof \"the truth will out.\"\n\n## Analysis\n\n**I1 \u2014 Every mutating order API writes an outbox event before returning.** *Holds.* The only mutating order endpoint wired up is `handle_delete_order` \u2192 `cancel_order`, which calls `outbox.insert(order_cancelled(...))` before returning (`service/order_service.py:39`). No create-order API is exposed. No violation found.\n\n**I2 \u2014 Invoice reads are tenant-scoped.** *Violated.* `invoice_repo.get_by_id` does a raw `db.get(\"invoices\", invoice_id)` with no tenant filter (self-documented \"BUG (planted)\"), and `invoice_service.get_invoice` only authenticates without scoping (\"does not scope\"). Any authenticated tenant can read another tenant's invoice by id.\n\n**I3 \u2014 Payment webhooks are idempotent.** *Violated.* In `handle_payment_webhook`, the idempotency marker `_mark_processed(webhook_id)` is written only at the very end, after the payment row, the `OrderPaid` outbox event, and `mark_paid` have all executed. The check-then-act is non-atomic, so any retry that occurs before the marker is written re-inserts the payment and re-emits `OrderPaid`. Idempotency is also keyed on `webhook_id` rather than `payment_id`/`order_id`. `worker/webhook_retry.py` explicitly re-delivers into this path and notes the reliance is \"buggy (see I3)\".\n\n**I4 \u2014 Order cache entries are invalidated on any status change.** *Violated.* `mark_paid` calls `order_repo.update_status(order_id, \"paid\")` (a status change) but never calls `cache.invalidate_order`. Since `get_order` caches rows, the cached order stays stale. Contrast with `cancel_order`, which does invalidate.\n\n<arch_final>\n```json\n{\n  \"violated_invariants\": [\"I2\", \"I3\", \"I4\"],\n  \"evidence\": {\n    \"I2\": \"invoice_repo.get_by_id does db.get with no tenant filter and invoice_service.get_invoice only authenticates without scoping, so any tenant can read another tenant's invoice by id.\",\n    \"I3\": \"handle_payment_webhook writes payment row + OrderPaid outbox + mark_paid before calling _mark_processed at the end; the check-then-act is non-atomic and keyed only on webhook_id, so retries can double-charge / emit duplicate OrderPaid.\",\n    \"I4\": \"mark_paid changes order status to 'paid' via order_repo.update_status but never calls cache.invalidate_order, leaving stale cached order rows.\"\n  },\n  \"citations\": [\n    \"service/invoice_service.py:get_invoice\",\n    \"store/invoice_repo.py:get_by_id\",\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"worker/webhook_retry.py:retry_payment_webhook\",\n    \"service/order_service.py:mark_paid\"\n  ]\n}\n```\n</arch_final>"
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "task": "review_list_orders_n1",
+    "title": "Review: list_orders performance smell",
+    "family": "review",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['service/order_service.py']; false_auth=False",
+    "answer": {
+      "findings": [
+        {
+          "id": "n_plus_1",
+          "severity": "medium",
+          "summary": "list_orders fetches full rows via order_repo.list_by_tenant then discards them, calling get_order(row['id']) per row, which re-reads each order individually (order_repo.get/db.get). Redundant N+1 point-reads for data already loaded; should enrich from rows directly."
+        },
+        {
+          "id": "cache_tenant_bypass",
+          "severity": "high",
+          "summary": "get_order (callee) uses a non-tenant-scoped global cache key (order:{id}) and returns the cached row on a hit WITHOUT verifying row['tenant_id'] == tenant.tenant_id. The tenant check only runs on cache miss, so a cached order from tenant A can be served to tenant B via the shared _CACHE, a cross-tenant data leak reachable through api/orders.py:handle_get_order."
+        }
+      ],
+      "max_severity": "high",
+      "auth_ok": false,
+      "citations": [
+        "service/order_service.py:list_orders",
+        "service/order_service.py:get_order",
+        "store/order_repo.py:list_by_tenant",
+        "store/order_repo.py:get",
+        "store/cache.py:cache_key_order",
+        "store/cache.py:get",
+        "pkg/tenant.py:require_tenant",
+        "store/db.py:query",
+        "api/orders.py:handle_get_order"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 59.08,
+    "prompt_tokens": 8,
+    "eval_tokens": 4184,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 3417,
+    "session_id": "21694e81-70ed-41a3-9f39-4e167ceafe29",
+    "raw_content": "I have enough evidence. Let me lay out what the code actually does.\n\n## Analysis\n\n**`list_orders` tenant scoping (correct):**\n\n```23:29:service/order_service.py\n    tenant = require_tenant()\n    rows = order_repo.list_by_tenant(tenant.tenant_id)\n    enriched = []\n    for row in rows:\n        enriched.append(get_order(row[\"id\"]))\n    return enriched\n```\n\n`list_by_tenant` filters on `tenant_id` and `deleted=False` at the query, so `list_orders` only ever emits the caller's own rows. That part is fine.\n\n**Finding 1 \u2014 N+1 / redundant per-row refetch (perf, medium):** `list_by_tenant` already returns the full order rows, but the loop throws them away and calls `get_order(row[\"id\"])` for each, which re-fetches every order one-by-one via `order_repo.get` \u2192 `db.get`. On a cold cache that's 1 query + N point-reads for data already in hand.\n\n**Finding 2 \u2014 cross-tenant cache leak in callee `get_order` (auth/tenant, high):**\n\n```11:19:service/order_service.py\n    tenant = require_tenant()\n    cached = cache.get(cache.cache_key_order(order_id))\n    if cached is not None:\n        return cached\n    row = order_repo.get(order_id)\n    if not row or row[\"tenant_id\"] != tenant.tenant_id:\n        raise KeyError(order_id)\n```\n\nThe cache key is global (`order:{order_id}`, not tenant-scoped \u2014 see `cache_key_order`), and the cache-hit branch returns the cached row **without** re-checking `row[\"tenant_id\"] == tenant.tenant_id`. The tenant check only runs on a cache miss. Since `_CACHE` is a process-wide dict shared across tenants, tenant B calling `get_order(X)` on an ID previously cached by tenant A gets A's row. `list_orders` itself is insulated (it only passes its own IDs), but the shared callee \u2014 directly reachable via `api/orders.py:handle_get_order` \u2014 has a genuine tenant-isolation bug, so auth is not clean.\n\n<arch_final>\n```json\n{\n  \"findings\": [\n    {\n      \"id\": \"n_plus_1\",\n      \"severity\": \"medium\",\n      \"summary\": \"list_orders fetches full rows via order_repo.list_by_tenant then discards them, calling get_order(row['id']) per row, which re-reads each order individually (order_repo.get/db.get). Redundant N+1 point-reads for data already loaded; should enrich from rows directly.\"\n    },\n    {\n      \"id\": \"cache_tenant_bypass\",\n      \"severity\": \"high\",\n      \"summary\": \"get_order (callee) uses a non-tenant-scoped global cache key (order:{id}) and returns the cached row on a hit WITHOUT verifying row['tenant_id'] == tenant.tenant_id. The tenant check only runs on cache miss, so a cached order from tenant A can be served to tenant B via the shared _CACHE, a cross-tenant data leak reachable through api/orders.py:handle_get_order.\"\n    }\n  ],\n  \"max_severity\": \"high\",\n  \"auth_ok\": false,\n  \"citations\": [\n    \"service/order_service.py:list_orders\",\n    \"service/order_service.py:get_order\",\n    \"store/order_repo.py:list_by_tenant\",\n    \"store/order_repo.py:get\",\n    \"store/cache.py:cache_key_order\",\n    \"store/cache.py:get\",\n    \"pkg/tenant.py:require_tenant\",\n    \"store/db.py:query\",\n    \"api/orders.py:handle_get_order\"\n  ]\n}\n```\n</arch_final>\n\nNote: for `list_orders` in isolation the tenant scoping is correct; `auth_ok` is `false` because the in-scope callee `get_order` has a real cross-tenant cache bypass. If you intend the review to be scoped strictly to `list_orders`'s own logic (excluding shared-callee defects), then `auth_ok` would be `true` with only the N+1 finding."
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "task": "review_cache_on_paid",
+    "title": "Review: cache vs status change (I4)",
+    "family": "review",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['service/order_service.py']",
+    "answer": {
+      "i4_holds": false,
+      "findings": [
+        {
+          "summary": "mark_paid calls order_repo.update_status(order_id, 'paid') and inserts an outbox event but never calls cache.invalidate_order/invalidate, so a previously cached order (populated by get_order) is not invalidated on this status change, violating I4.",
+          "severity": "high"
+        },
+        {
+          "summary": "cancel_order performs the same class of status mutation and DOES call cache.invalidate_order(order_id); mark_paid is missing the analogous invalidation, confirming the omission is a bug rather than intended design.",
+          "severity": "medium"
+        },
+        {
+          "summary": "The stale read is only masked by incidental aliasing: db.get returns the live dict, get_order caches that same reference, and update_status mutates it in place. This makes the cache appear correct by accident and would break if db or cache stored copies; it does not satisfy the invariant.",
+          "severity": "low"
+        }
+      ],
+      "citations": [
+        "service/order_service.py:mark_paid",
+        "service/order_service.py:cancel_order",
+        "service/order_service.py:get_order",
+        "store/order_repo.py:update_status",
+        "store/cache.py:invalidate_order",
+        "store/db.py:get",
+        "README.md:I4"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 38.26,
+    "prompt_tokens": 10,
+    "eval_tokens": 2148,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2447,
+    "session_id": "8d45fd44-729a-43b7-9e70-0d6f6e0669d0",
+    "raw_content": "Evidence gathered. Here's the verdict.\n\n`mark_paid` changes order status but never invalidates the cache \u2014 contrast with `cancel_order`, which explicitly calls `cache.invalidate_order(order_id)`.\n\n```44:52:service/order_service.py\ndef mark_paid(order_id: str, payment_id: str) -> dict[str, Any]:\n    tenant = require_tenant()\n    row = order_repo.get(order_id)\n    if not row or row[\"tenant_id\"] != tenant.tenant_id:\n        raise KeyError(order_id)\n    updated = order_repo.update_status(order_id, \"paid\")\n    outbox.insert(order_status_changed(order_id, tenant.tenant_id, \"paid\"))\n    # payment event inserted by payment_service, not here\n    return updated\n```\n\nOne subtlety worth flagging honestly: because `db` and `cache` store the *same dict reference* (`db.get` returns the live object, `get_order` caches that same object, and `update_status` mutates it in place), the cached entry may *accidentally* show `\"paid\"`. But that's incidental aliasing, not invalidation \u2014 it would silently break the moment either layer stored copies. The invariant as written (\"invalidated on status change\") is not upheld: there is no `cache.invalidate*` call on this path.\n\n<arch_final>\n```json\n{\n  \"i4_holds\": false,\n  \"findings\": [\n    {\n      \"summary\": \"mark_paid calls order_repo.update_status(order_id, 'paid') and inserts an outbox event but never calls cache.invalidate_order/invalidate, so a previously cached order (populated by get_order) is not invalidated on this status change, violating I4.\",\n      \"severity\": \"high\"\n    },\n    {\n      \"summary\": \"cancel_order performs the same class of status mutation and DOES call cache.invalidate_order(order_id); mark_paid is missing the analogous invalidation, confirming the omission is a bug rather than intended design.\",\n      \"severity\": \"medium\"\n    },\n    {\n      \"summary\": \"The stale read is only masked by incidental aliasing: db.get returns the live dict, get_order caches that same reference, and update_status mutates it in place. This makes the cache appear correct by accident and would break if db or cache stored copies; it does not satisfy the invariant.\",\n      \"severity\": \"low\"\n    }\n  ],\n  \"citations\": [\n    \"service/order_service.py:mark_paid\",\n    \"service/order_service.py:cancel_order\",\n    \"service/order_service.py:get_order\",\n    \"store/order_repo.py:update_status\",\n    \"store/cache.py:invalidate_order\",\n    \"store/db.py:get\",\n    \"README.md:I4\"\n  ]\n}\n```\n</arch_final>"
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "task": "incident_duplicate_order_paid",
+    "title": "Incident: duplicate OrderPaid",
+    "family": "incident",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['service/payment_service.py']",
+    "answer": {
+      "root_cause": "handle_payment_webhook uses a non-atomic check-then-act idempotency guard and marks the webhook_id processed only AFTER inserting the OrderPaid outbox event. On provider retries (worker/webhook_retry) that overlap or arrive before _mark_processed runs, _already_processed still returns False, so outbox.insert(order_paid(...)) executes again, emitting duplicate OrderPaid events for one webhook_id. outbox.insert also has no webhook_id dedup key.",
+      "fix_function": "service.payment_service.handle_payment_webhook",
+      "fix_functions": [
+        "service.payment_service.handle_payment_webhook"
+      ],
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_already_processed",
+        "service/payment_service.py:_mark_processed",
+        "store/outbox.py:insert",
+        "worker/webhook_retry.py:retry_payment_webhook"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 34.88,
+    "prompt_tokens": 8,
+    "eval_tokens": 2224,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2732,
+    "session_id": "02160b31-d033-43ba-8783-71a316c888c8",
+    "raw_content": "Evidence gathered. Let me lay out the tale.\n\n## Root cause\n\nIn `service/payment_service.py`, `handle_payment_webhook` guards duplicates with a **non-atomic check-then-act** idempotency pattern, and it commits the outbox event *before* recording the webhook as processed:\n\n```25:43:benches/shopapi/fixture/shopapi/service/payment_service.py\n    if _already_processed(webhook_id):\n        return {\"status\": \"duplicate\", \"order_id\": order_id}\n    ...\n    outbox.insert(order_paid(order_id, tenant.tenant_id, payment_id))\n    order_service.mark_paid(order_id, payment_id)\n\n    _mark_processed(webhook_id)\n```\n\nThe `webhook_id` is only marked processed at the very end (line 42), *after* the `OrderPaid` outbox row is inserted (line 40). When the provider retries the same `webhook_id` before the first invocation reaches `_mark_processed` (concurrent/overlapping delivery via `worker/webhook_retry.py`), `_already_processed` still returns `False`, so control flows straight through and `outbox.insert(order_paid(...))` runs a second time \u2014 producing duplicate `OrderPaid` outbox events for one `webhook_id`.\n\nCompounding it: `store/outbox.insert` mints a fresh random `uuid4` per row and carries no `webhook_id`, so there is no dedup key downstream to catch the second event.\n\nThe comments even flag it: `worker/webhook_retry.py:retry_payment_webhook` says idempotency \"is buggy (see I3)\".\n\n## Fix location\n\nPrimary fix belongs in `service.payment_service.handle_payment_webhook`: reserve the `webhook_id` atomically (insert-if-absent / claim the marker) *before* performing side effects, so a retry that loses the race short-circuits to the \"duplicate\" branch. Secondarily, the outbox could carry `webhook_id` and dedupe on it in `store.outbox.insert`, but the root defect is the ordering/atomicity in the service function.\n\n<arch_final>\n```json\n{\n  \"root_cause\": \"handle_payment_webhook uses a non-atomic check-then-act idempotency guard and marks the webhook_id processed only AFTER inserting the OrderPaid outbox event. On provider retries (worker/webhook_retry) that overlap or arrive before _mark_processed runs, _already_processed still returns False, so outbox.insert(order_paid(...)) executes again, emitting duplicate OrderPaid events for one webhook_id. outbox.insert also has no webhook_id dedup key.\",\n  \"fix_function\": \"service.payment_service.handle_payment_webhook\",\n  \"fix_functions\": [\"service.payment_service.handle_payment_webhook\"],\n  \"citations\": [\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/payment_service.py:_already_processed\",\n    \"service/payment_service.py:_mark_processed\",\n    \"store/outbox.py:insert\",\n    \"worker/webhook_retry.py:retry_payment_webhook\"\n  ]\n}\n```\n</arch_final>"
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "task": "incident_outbox_ack_order",
+    "title": "Incident: lost outbox events",
+    "family": "incident",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['worker/outbox_worker.py']",
+    "answer": {
+      "root_cause": "In process_once the row is ack()'d (acked=True, persisted) before publish() runs. Since claim_batch filters out acked rows, a crash between ack and publish permanently loses the event (never re-claimed, never published). Ack must occur only after a successful publish.",
+      "fix_function": "worker.outbox_worker.process_once",
+      "citations": [
+        "worker/outbox_worker.py:process_once",
+        "store/outbox.py:ack",
+        "store/outbox.py:claim_batch",
+        "store/outbox.py:mark_published"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 34.64,
+    "prompt_tokens": 6,
+    "eval_tokens": 1166,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1667,
+    "session_id": "3142de12-4648-42c1-8afe-bb5bd6da1e0e",
+    "raw_content": "The bug is in the publisher loop ordering. Here's the evidence:\n\n```10:18:worker/outbox_worker.py\ndef process_once(publish: Publisher) -> int:\n    \"\"\"Drain a batch of outbox rows.\"\"\"\n    batch = outbox.claim_batch()\n    n = 0\n    for row in batch:\n        outbox.ack(row[\"id\"])\n        publish(row)\n        outbox.mark_published(row[\"id\"])\n        n += 1\n    return n\n```\n\n`ack()` sets `acked = True` and persists it *before* `publish()` runs:\n\n```42:47:store/outbox.py\ndef ack(outbox_id: str) -> None:\n    row = db.get(\"outbox\", outbox_id)\n    if not row:\n        return\n    row[\"acked\"] = True\n    db.put(\"outbox\", outbox_id, row)\n```\n\nAnd `claim_batch()` only returns rows where `acked` is falsy:\n\n```29:31:store/outbox.py\n    rows = [r for r in db.scan(\"outbox\") if not r[\"acked\"]]\n    return rows[:limit]\n```\n\nSo if the publisher crashes between `ack()` and `publish()`, the row is already `acked=True` but `published=False`. It will never be re-claimed and never delivered \u2014 the event silently disappears. The ack (which makes the row invisible to future batches) must happen only *after* a successful publish.\n\n<arch_final>\n```json\n{\n  \"root_cause\": \"In process_once the row is ack()'d (acked=True, persisted) before publish() runs. Since claim_batch filters out acked rows, a crash between ack and publish permanently loses the event (never re-claimed, never published). Ack must occur only after a successful publish.\",\n  \"fix_function\": \"worker.outbox_worker.process_once\",\n  \"citations\": [\n    \"worker/outbox_worker.py:process_once\",\n    \"store/outbox.py:ack\",\n    \"store/outbox.py:claim_batch\",\n    \"store/outbox.py:mark_published\"\n  ]\n}\n```\n</arch_final>"
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "task": "redesign_webhook_idempotency",
+    "title": "Constrained fix: webhook idempotency",
+    "family": "redesign",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "files=['service/payment_service.py', 'store/db.py']; evidence(reads) 0/1; unread=['service/payment_service.py']",
+    "answer": {
+      "touch_files": [
+        "service/payment_service.py",
+        "store/db.py"
+      ],
+      "plan_steps": [
+        "Add an atomic insert-if-absent primitive `put_if_absent(table, key, row) -> bool` to store/db.py that writes only when the key is missing and returns True on a successful claim, False if the key already exists.",
+        "In service/payment_service.py, replace the `_already_processed` check + trailing `_mark_processed` with a single upfront claim: call db.put_if_absent('processed_webhooks', webhook_id, {...}) at the very start; if it returns False, short-circuit and return {'status': 'duplicate', ...}.",
+        "Only after winning the claim, run the side effects (db.put payments, outbox.insert(order_paid(...)), order_service.mark_paid). Delete the now-redundant `_mark_processed` call at the end (and `_already_processed`/`_mark_processed` helpers can be dropped).",
+        "Leave api/webhooks.py and worker/webhook_retry.py unchanged so the HTTP webhook entrypoint and retry path both inherit the fix; no new message broker introduced."
+      ],
+      "idempotency_change": "The webhook_id idempotency mark moves from the END (after outbox.insert(order_paid)) to the START (before any side effect), and the racy get-then-put check-then-act is replaced by a single atomic put_if_absent claim. Because the claim now precedes outbox.insert, only the first delivery of a given webhook_id can ever reach the OrderPaid insertion; retries/concurrent duplicates lose the claim and return early, eliminating the double-insert window.",
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_already_processed",
+        "service/payment_service.py:_mark_processed",
+        "store/db.py:put",
+        "store/db.py:get",
+        "store/outbox.py:insert",
+        "pkg/events.py:order_paid",
+        "worker/webhook_retry.py:retry_payment_webhook",
+        "api/webhooks.py:handle_payment_webhook"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 53.6,
+    "prompt_tokens": 10,
+    "eval_tokens": 3730,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 3160,
+    "session_id": "6df3dd1b-56ab-48cd-8fce-a3d8d2fe70aa",
+    "raw_content": "I have enough evidence. Here's the analysis.\n\n**Root cause.** In `service/payment_service.py`, idempotency is a non-atomic check-then-act where the *mark* happens dead last:\n\n```25:44:service/payment_service.py\n    if _already_processed(webhook_id):\n        return {\"status\": \"duplicate\", \"order_id\": order_id}\n\n    db.put(\"payments\", payment_id, {...})\n    outbox.insert(order_paid(order_id, tenant.tenant_id, payment_id))\n    order_service.mark_paid(order_id, payment_id)\n\n    _mark_processed(webhook_id)\n```\n\n`webhook_retry.retry_payment_webhook` and `api.webhooks.handle_payment_webhook` both funnel into this same function, so a provider retry (or two concurrent deliveries) with the same `webhook_id` both pass `_already_processed` before either reaches `_mark_processed`, and both call `outbox.insert(order_paid(...))` \u2192 double `OrderPaid`. `outbox.insert` uses a fresh `uuid4` row id, so nothing dedups downstream either.\n\n**Fix idea.** Turn the guard into an atomic *claim before side effects*: reserve `webhook_id` via an insert-if-absent, and only proceed when the claim wins. `store/db.py` needs an atomic primitive since `get`+`put` is racy. HTTP entrypoint (`api/webhooks.py`) stays untouched; no broker added.\n\n<arch_final>\n```json\n{\n  \"touch_files\": [\"service/payment_service.py\", \"store/db.py\"],\n  \"plan_steps\": [\n    \"Add an atomic insert-if-absent primitive `put_if_absent(table, key, row) -> bool` to store/db.py that writes only when the key is missing and returns True on a successful claim, False if the key already exists.\",\n    \"In service/payment_service.py, replace the `_already_processed` check + trailing `_mark_processed` with a single upfront claim: call db.put_if_absent('processed_webhooks', webhook_id, {...}) at the very start; if it returns False, short-circuit and return {'status': 'duplicate', ...}.\",\n    \"Only after winning the claim, run the side effects (db.put payments, outbox.insert(order_paid(...)), order_service.mark_paid). Delete the now-redundant `_mark_processed` call at the end (and `_already_processed`/`_mark_processed` helpers can be dropped).\",\n    \"Leave api/webhooks.py and worker/webhook_retry.py unchanged so the HTTP webhook entrypoint and retry path both inherit the fix; no new message broker introduced.\"\n  ],\n  \"idempotency_change\": \"The webhook_id idempotency mark moves from the END (after outbox.insert(order_paid)) to the START (before any side effect), and the racy get-then-put check-then-act is replaced by a single atomic put_if_absent claim. Because the claim now precedes outbox.insert, only the first delivery of a given webhook_id can ever reach the OrderPaid insertion; retries/concurrent duplicates lose the claim and return early, eliminating the double-insert window.\",\n  \"citations\": [\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/payment_service.py:_already_processed\",\n    \"service/payment_service.py:_mark_processed\",\n    \"store/db.py:put\",\n    \"store/db.py:get\",\n    \"store/outbox.py:insert\",\n    \"pkg/events.py:order_paid\",\n    \"worker/webhook_retry.py:retry_payment_webhook\",\n    \"api/webhooks.py:handle_payment_webhook\"\n  ]\n}\n```\n</arch_final>"
+  }
+]

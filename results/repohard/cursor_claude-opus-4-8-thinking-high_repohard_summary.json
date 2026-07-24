@@ -1,0 +1,9 @@
+{
+  "model": "claude-opus-4-8-thinking-high",
+  "tag": "cursor_claude-opus-4-8-thinking-high_repohard",
+  "score": 80,
+  "max_score": 80,
+  "pass": 8,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/cursor_claude-opus-4-8-thinking-high_repohard_20260724_134339.json"
+}

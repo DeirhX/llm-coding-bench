@@ -1,0 +1,9 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-bf16",
+  "tag": "qwen36_univ_off_rh",
+  "score": 20,
+  "max_score": 50,
+  "pass": 2,
+  "tasks": 5,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/qwen36_univ_off_rh_20260724_034459.json"
+}

@@ -1,0 +1,9 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-bf16",
+  "tag": "qwen3.6_35b-a3b-coding-bf16_repohard",
+  "score": 37,
+  "max_score": 80,
+  "pass": 3,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/qwen3.6_35b-a3b-coding-bf16_repohard_20260723_215150.json"
+}

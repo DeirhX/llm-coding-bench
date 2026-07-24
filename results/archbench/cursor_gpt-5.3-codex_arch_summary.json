@@ -1,0 +1,9 @@
+{
+  "model": "gpt-5.3-codex",
+  "tag": "cursor_gpt-5.3-codex_arch",
+  "score": 72,
+  "max_score": 90,
+  "pass": 9,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/cursor_gpt-5.3-codex_arch_20260723_145958.json"
+}

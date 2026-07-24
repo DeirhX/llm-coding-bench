@@ -1,0 +1,9 @@
+{
+  "model": "deepseek-r1:70b-llama-distill-q8_0",
+  "tag": "deepseek-r1_70b-llama-distill-q8_0_repohard",
+  "score": 10,
+  "max_score": 80,
+  "pass": 1,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/deepseek-r1_70b-llama-distill-q8_0_repohard_20260723_185311.json"
+}

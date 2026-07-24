@@ -1,0 +1,434 @@
+[
+  {
+    "model": "gpt-5.6-luna-high",
+    "provider": "cursor",
+    "task": "chain_delete_order",
+    "title": "Call chain: DELETE /orders/{id}",
+    "family": "call_chain",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; effects 3/3; evidence(reads) 0/2; unread=['api/orders.py', 'service/order_service.py']",
+    "answer": {
+      "chain": [
+        "api.orders.handle_delete_order",
+        "pkg.auth.authenticate",
+        "pkg.tenant.set_tenant",
+        "service.order_service.cancel_order",
+        "pkg.tenant.require_tenant",
+        "store.order_repo.get",
+        "store.db.get",
+        "store.order_repo.soft_delete",
+        "store.db.get",
+        "store.db.put",
+        "pkg.events.order_cancelled",
+        "store.outbox.insert",
+        "store.db.put",
+        "store.cache.invalidate_order",
+        "store.cache.invalidate",
+        "pkg.auth.clear_auth",
+        "pkg.tenant.set_tenant"
+      ],
+      "side_effects": [
+        "marks the order deleted and cancelled",
+        "persists an OrderCancelled outbox event",
+        "invalidates the order cache entry",
+        "clears tenant authentication context"
+      ],
+      "citations": [
+        "api/orders.py:handle_delete_order",
+        "pkg/auth.py:authenticate",
+        "pkg/tenant.py:require_tenant",
+        "service/order_service.py:cancel_order",
+        "store/order_repo.py:soft_delete",
+        "store/db.py:put",
+        "pkg/events.py:order_cancelled",
+        "store/outbox.py:insert",
+        "store/cache.py:invalidate_order",
+        "pkg/auth.py:clear_auth"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 19.51,
+    "prompt_tokens": 12,
+    "eval_tokens": 1662,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 914,
+    "session_id": "8248d850-6c4f-4d1d-982e-7f047c8416eb",
+    "raw_content": "{\"chain\":[\"api.orders.handle_delete_order\",\"pkg.auth.authenticate\",\"pkg.tenant.set_tenant\",\"service.order_service.cancel_order\",\"pkg.tenant.require_tenant\",\"store.order_repo.get\",\"store.db.get\",\"store.order_repo.soft_delete\",\"store.db.get\",\"store.db.put\",\"pkg.events.order_cancelled\",\"store.outbox.insert\",\"store.db.put\",\"store.cache.invalidate_order\",\"store.cache.invalidate\",\"pkg.auth.clear_auth\",\"pkg.tenant.set_tenant\"],\"side_effects\":[\"marks the order deleted and cancelled\",\"persists an OrderCancelled outbox event\",\"invalidates the order cache entry\",\"clears tenant authentication context\"],\"citations\":[\"api/orders.py:handle_delete_order\",\"pkg/auth.py:authenticate\",\"pkg/tenant.py:require_tenant\",\"service/order_service.py:cancel_order\",\"store/order_repo.py:soft_delete\",\"store/db.py:put\",\"pkg/events.py:order_cancelled\",\"store/outbox.py:insert\",\"store/cache.py:invalidate_order\",\"pkg/auth.py:clear_auth\"]}"
+  },
+  {
+    "model": "gpt-5.6-luna-high",
+    "provider": "cursor",
+    "task": "chain_payment_webhook",
+    "title": "Call chain: POST /webhooks/payment",
+    "family": "call_chain",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; payment_effect=1; evidence(reads) 0/2; unread=['api/webhooks.py', 'service/payment_service.py']",
+    "answer": {
+      "chain": [
+        "api.webhooks.handle_payment_webhook",
+        "pkg.auth.authenticate",
+        "pkg.tenant.set_tenant",
+        "service.payment_service.handle_payment_webhook",
+        "pkg.tenant.require_tenant",
+        "service.payment_service._already_processed",
+        "store.db.get",
+        "store.db.put",
+        "pkg.events.order_paid",
+        "store.outbox.insert",
+        "service.order_service.mark_paid",
+        "store.order_repo.get",
+        "store.db.get",
+        "store.order_repo.update_status",
+        "store.db.put",
+        "pkg.events.order_status_changed",
+        "store.outbox.insert",
+        "service.payment_service._mark_processed",
+        "store.db.put",
+        "pkg.auth.clear_auth",
+        "pkg.tenant.set_tenant"
+      ],
+      "side_effects": [
+        "authenticate and set tenant context",
+        "insert payment record",
+        "enqueue OrderPaid outbox event",
+        "update order status to paid",
+        "enqueue OrderStatusChanged outbox event",
+        "mark webhook processed",
+        "clear tenant context"
+      ],
+      "citations": [
+        "api/webhooks.py:handle_payment_webhook",
+        "pkg/auth.py:authenticate",
+        "pkg/tenant.py:set_tenant",
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_already_processed",
+        "store/db.py:get",
+        "store/db.py:put",
+        "pkg/events.py:order_paid",
+        "store/outbox.py:insert",
+        "service/order_service.py:mark_paid",
+        "store/order_repo.py:get",
+        "store/order_repo.py:update_status",
+        "pkg/events.py:order_status_changed",
+        "service/payment_service.py:_mark_processed",
+        "pkg/auth.py:clear_auth"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 22.19,
+    "prompt_tokens": 15,
+    "eval_tokens": 1875,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1309,
+    "session_id": "a1ad5ef3-ff49-4080-bd8a-2d3983e153bf",
+    "raw_content": "{\"chain\":[\"api.webhooks.handle_payment_webhook\",\"pkg.auth.authenticate\",\"pkg.tenant.set_tenant\",\"service.payment_service.handle_payment_webhook\",\"pkg.tenant.require_tenant\",\"service.payment_service._already_processed\",\"store.db.get\",\"store.db.put\",\"pkg.events.order_paid\",\"store.outbox.insert\",\"service.order_service.mark_paid\",\"store.order_repo.get\",\"store.db.get\",\"store.order_repo.update_status\",\"store.db.put\",\"pkg.events.order_status_changed\",\"store.outbox.insert\",\"service.payment_service._mark_processed\",\"store.db.put\",\"pkg.auth.clear_auth\",\"pkg.tenant.set_tenant\"],\"side_effects\":[\"authenticate and set tenant context\",\"insert payment record\",\"enqueue OrderPaid outbox event\",\"update order status to paid\",\"enqueue OrderStatusChanged outbox event\",\"mark webhook processed\",\"clear tenant context\"],\"citations\":[\"api/webhooks.py:handle_payment_webhook\",\"pkg/auth.py:authenticate\",\"pkg/tenant.py:set_tenant\",\"service/payment_service.py:handle_payment_webhook\",\"service/payment_service.py:_already_processed\",\"store/db.py:get\",\"store/db.py:put\",\"pkg/events.py:order_paid\",\"store/outbox.py:insert\",\"service/order_service.py:mark_paid\",\"store/order_repo.py:get\",\"store/order_repo.py:update_status\",\"pkg/events.py:order_status_changed\",\"service/payment_service.py:_mark_processed\",\"pkg/auth.py:clear_auth\"]}"
+  },
+  {
+    "model": "gpt-5.6-luna-high",
+    "provider": "cursor",
+    "task": "tenant_invoice_isolation",
+    "title": "Tenant isolation for invoices",
+    "family": "invariant",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "enforced/bypass scoring; evidence(reads) 0/2; unread=['service/invoice_service.py', 'store/invoice_repo.py']; enf='service.invoice_service.list_invoices | store.invoice_repo.list_by_tenant' by='service.invoice_service.get_invoice | store.invoice_repo.get_by_id | service.invoice_service.admin_export_invoices | sto'",
+    "answer": {
+      "enforced_at": [
+        "service.invoice_service.list_invoices",
+        "store.invoice_repo.list_by_tenant"
+      ],
+      "bypasses": [
+        "service.invoice_service.get_invoice",
+        "store.invoice_repo.get_by_id",
+        "service.invoice_service.admin_export_invoices",
+        "store.invoice_repo.export_all"
+      ],
+      "citations": [
+        "service/invoice_service.py:list_invoices",
+        "store/invoice_repo.py:list_by_tenant",
+        "api/invoices.py:handle_get_invoice",
+        "service/invoice_service.py:get_invoice",
+        "store/invoice_repo.py:get_by_id",
+        "api/invoices.py:handle_admin_export",
+        "service/invoice_service.py:admin_export_invoices",
+        "store/invoice_repo.py:export_all"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 19.24,
+    "prompt_tokens": 12,
+    "eval_tokens": 1385,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 587,
+    "session_id": "a4acba22-03d3-4781-9384-9144d6cb688d",
+    "raw_content": "{\"enforced_at\":[\"service.invoice_service.list_invoices\",\"store.invoice_repo.list_by_tenant\"],\"bypasses\":[\"service.invoice_service.get_invoice\",\"store.invoice_repo.get_by_id\",\"service.invoice_service.admin_export_invoices\",\"store.invoice_repo.export_all\"],\"citations\":[\"service/invoice_service.py:list_invoices\",\"store/invoice_repo.py:list_by_tenant\",\"api/invoices.py:handle_get_invoice\",\"service/invoice_service.py:get_invoice\",\"store/invoice_repo.py:get_by_id\",\"api/invoices.py:handle_admin_export\",\"service/invoice_service.py:admin_export_invoices\",\"store/invoice_repo.py:export_all\"]}"
+  },
+  {
+    "model": "gpt-5.6-luna-high",
+    "provider": "cursor",
+    "task": "invariant_doc_vs_code",
+    "title": "Which README invariants fail?",
+    "family": "invariant",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "violated=['I2', 'I3', 'I4']; evidence(reads) 0/3; unread=['README.md', 'service/payment_service.py', 'service/invoice_service.py']",
+    "answer": {
+      "violated_invariants": [
+        "I2",
+        "I3",
+        "I4"
+      ],
+      "evidence": {
+        "I2": "get_invoice authenticates but fetches by ID without checking the invoice tenant_id.",
+        "I3": "Webhook deduplication checks processed_webhooks before side effects and marks processed only afterward, allowing concurrent or interrupted retries to emit duplicate payment events.",
+        "I4": "mark_paid changes order status and writes an outbox event but never invalidates the cached order."
+      },
+      "citations": [
+        "service/invoice_service.py:get_invoice",
+        "store/invoice_repo.py:get_by_id",
+        "service/payment_service.py:_already_processed",
+        "service/payment_service.py:handle_payment_webhook",
+        "service/order_service.py:mark_paid",
+        "service/order_service.py:get_order"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 28.15,
+    "prompt_tokens": 12,
+    "eval_tokens": 2394,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 781,
+    "session_id": "90e65cf8-830a-49fb-8082-aeb46601ab7a",
+    "raw_content": "```json\n{\n  \"violated_invariants\": [\"I2\", \"I3\", \"I4\"],\n  \"evidence\": {\n    \"I2\": \"get_invoice authenticates but fetches by ID without checking the invoice tenant_id.\",\n    \"I3\": \"Webhook deduplication checks processed_webhooks before side effects and marks processed only afterward, allowing concurrent or interrupted retries to emit duplicate payment events.\",\n    \"I4\": \"mark_paid changes order status and writes an outbox event but never invalidates the cached order.\"\n  },\n  \"citations\": [\n    \"service/invoice_service.py:get_invoice\",\n    \"store/invoice_repo.py:get_by_id\",\n    \"service/payment_service.py:_already_processed\",\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/order_service.py:mark_paid\",\n    \"service/order_service.py:get_order\"\n  ]\n}\n```"
+  },
+  {
+    "model": "gpt-5.6-luna-high",
+    "provider": "cursor",
+    "task": "review_list_orders_n1",
+    "title": "Review: list_orders performance smell",
+    "family": "review",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['service/order_service.py']; false_auth=False",
+    "answer": {
+      "findings": [
+        {
+          "id": "n_plus_1",
+          "severity": "medium",
+          "summary": "list_orders performs one tenant query, then calls get_order once per row, causing N additional cache/database lookups.",
+          "citations": [
+            "service/order_service.py:list_orders",
+            "service/order_service.py:get_order",
+            "store/order_repo.py:list_by_tenant"
+          ]
+        },
+        {
+          "id": "cache_tenant_bypass",
+          "severity": "high",
+          "summary": "get_order returns cached data before rechecking tenant_id, while cache keys contain only order_id; stale or reused IDs can expose another tenant's order.",
+          "citations": [
+            "service/order_service.py:get_order",
+            "store/cache.py:cache_key_order"
+          ]
+        }
+      ],
+      "max_severity": "high",
+      "auth_ok": false,
+      "citations": [
+        "api/orders.py:handle_list_orders",
+        "pkg/tenant.py:require_tenant",
+        "store/order_repo.py:list_by_tenant"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 27.11,
+    "prompt_tokens": 12,
+    "eval_tokens": 1796,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 943,
+    "session_id": "be9c7ac8-3a88-48ad-8e9f-bad3b72e6dc0",
+    "raw_content": "{\n  \"findings\": [\n    {\n      \"id\": \"n_plus_1\",\n      \"severity\": \"medium\",\n      \"summary\": \"list_orders performs one tenant query, then calls get_order once per row, causing N additional cache/database lookups.\",\n      \"citations\": [\n        \"service/order_service.py:list_orders\",\n        \"service/order_service.py:get_order\",\n        \"store/order_repo.py:list_by_tenant\"\n      ]\n    },\n    {\n      \"id\": \"cache_tenant_bypass\",\n      \"severity\": \"high\",\n      \"summary\": \"get_order returns cached data before rechecking tenant_id, while cache keys contain only order_id; stale or reused IDs can expose another tenant's order.\",\n      \"citations\": [\n        \"service/order_service.py:get_order\",\n        \"store/cache.py:cache_key_order\"\n      ]\n    }\n  ],\n  \"max_severity\": \"high\",\n  \"auth_ok\": false,\n  \"citations\": [\n    \"api/orders.py:handle_list_orders\",\n    \"pkg/tenant.py:require_tenant\",\n    \"store/order_repo.py:list_by_tenant\"\n  ]\n}"
+  },
+  {
+    "model": "gpt-5.6-luna-high",
+    "provider": "cursor",
+    "task": "review_cache_on_paid",
+    "title": "Review: cache vs status change (I4)",
+    "family": "review",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['service/order_service.py']",
+    "answer": {
+      "i4_holds": false,
+      "findings": [
+        {
+          "summary": "mark_paid changes the order status but never calls cache.invalidate_order, unlike cancel_order; cached order entries therefore are not explicitly invalidated on payment.",
+          "severity": "high"
+        }
+      ],
+      "citations": [
+        "README.md:I4",
+        "service/order_service.py:mark_paid",
+        "store/cache.py:invalidate_order"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 18.38,
+    "prompt_tokens": 15,
+    "eval_tokens": 1076,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 420,
+    "session_id": "3bed011d-55e9-4615-8fde-70a2d6d1c071",
+    "raw_content": "<arch_final>\n{\n  \"i4_holds\": false,\n  \"findings\": [\n    {\n      \"summary\": \"mark_paid changes the order status but never calls cache.invalidate_order, unlike cancel_order; cached order entries therefore are not explicitly invalidated on payment.\",\n      \"severity\": \"high\"\n    }\n  ],\n  \"citations\": [\n    \"README.md:I4\",\n    \"service/order_service.py:mark_paid\",\n    \"store/cache.py:invalidate_order\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gpt-5.6-luna-high",
+    "provider": "cursor",
+    "task": "incident_duplicate_order_paid",
+    "title": "Incident: duplicate OrderPaid",
+    "family": "incident",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['service/payment_service.py']",
+    "answer": {
+      "root_cause": "handle_payment_webhook checks idempotency before side effects but records webhook_id only afterward; a retry or concurrent delivery can therefore insert another OrderPaid event before the marker exists.",
+      "fix_function": "service.payment_service.handle_payment_webhook",
+      "fix_functions": [
+        "service.payment_service.handle_payment_webhook"
+      ],
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_already_processed",
+        "service/payment_service.py:_mark_processed",
+        "store/outbox.py:insert",
+        "worker/webhook_retry.py:retry_payment_webhook"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 21.76,
+    "prompt_tokens": 15,
+    "eval_tokens": 1441,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 582,
+    "session_id": "f5599d1a-c214-49f2-a544-df0124ffe760",
+    "raw_content": "{\"root_cause\":\"handle_payment_webhook checks idempotency before side effects but records webhook_id only afterward; a retry or concurrent delivery can therefore insert another OrderPaid event before the marker exists.\",\"fix_function\":\"service.payment_service.handle_payment_webhook\",\"fix_functions\":[\"service.payment_service.handle_payment_webhook\"],\"citations\":[\"service/payment_service.py:handle_payment_webhook\",\"service/payment_service.py:_already_processed\",\"service/payment_service.py:_mark_processed\",\"store/outbox.py:insert\",\"worker/webhook_retry.py:retry_payment_webhook\"]}"
+  },
+  {
+    "model": "gpt-5.6-luna-high",
+    "provider": "cursor",
+    "task": "incident_outbox_ack_order",
+    "title": "Incident: lost outbox events",
+    "family": "incident",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 0/1; unread=['worker/outbox_worker.py']",
+    "answer": {
+      "root_cause": "process_once acknowledges each row before publishing it; a crash after ack causes claim_batch to exclude the unpublished event.",
+      "fix_function": "worker.outbox_worker.process_once",
+      "citations": [
+        "worker/outbox_worker.py:process_once",
+        "store/outbox.py:claim_batch",
+        "store/outbox.py:ack"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 16.66,
+    "prompt_tokens": 12,
+    "eval_tokens": 839,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 300,
+    "session_id": "3c756548-a5c4-438e-8e7e-0a5b938be3a9",
+    "raw_content": "{\"root_cause\":\"process_once acknowledges each row before publishing it; a crash after ack causes claim_batch to exclude the unpublished event.\",\"fix_function\":\"worker.outbox_worker.process_once\",\"citations\":[\"worker/outbox_worker.py:process_once\",\"store/outbox.py:claim_batch\",\"store/outbox.py:ack\"]}"
+  },
+  {
+    "model": "gpt-5.6-luna-high",
+    "provider": "cursor",
+    "task": "redesign_webhook_idempotency",
+    "title": "Constrained fix: webhook idempotency",
+    "family": "redesign",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "files=['service/payment_service.py']; evidence(reads) 0/1; unread=['service/payment_service.py']",
+    "answer": {
+      "touch_files": [
+        "service/payment_service.py"
+      ],
+      "plan_steps": [
+        "Claim webhook_id immediately after the duplicate check.",
+        "Perform payment persistence, OrderPaid outbox insertion, and order status update only after the claim succeeds.",
+        "Return duplicate for an already-claimed webhook; keep api/webhooks.py unchanged."
+      ],
+      "idempotency_change": "Move _mark_processed(webhook_id) from after order_service.mark_paid to before db.put('payments', ...), outbox.insert(order_paid(...)), and order_service.mark_paid; ideally make the claim an atomic check-and-insert.",
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_already_processed",
+        "service/payment_service.py:_mark_processed",
+        "api/webhooks.py:handle_payment_webhook"
+      ]
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 56.28,
+    "prompt_tokens": 33,
+    "eval_tokens": 3273,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 847,
+    "session_id": "c5b25a1c-f825-4eba-8344-658a3f45a8f0",
+    "raw_content": "<arch_final>\n{\n  \"touch_files\": [\n    \"service/payment_service.py\"\n  ],\n  \"plan_steps\": [\n    \"Claim webhook_id immediately after the duplicate check.\",\n    \"Perform payment persistence, OrderPaid outbox insertion, and order status update only after the claim succeeds.\",\n    \"Return duplicate for an already-claimed webhook; keep api/webhooks.py unchanged.\"\n  ],\n  \"idempotency_change\": \"Move _mark_processed(webhook_id) from after order_service.mark_paid to before db.put('payments', ...), outbox.insert(order_paid(...)), and order_service.mark_paid; ideally make the claim an atomic check-and-insert.\",\n  \"citations\": [\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/payment_service.py:_already_processed\",\n    \"service/payment_service.py:_mark_processed\",\n    \"api/webhooks.py:handle_payment_webhook\"\n  ]\n}\n</arch_final>"
+  }
+]

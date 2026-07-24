@@ -1,0 +1,181 @@
+[
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "race_webhook_idempotency",
+    "title": "Payment webhook double-applies under concurrency",
+    "family": "fix",
+    "ok": false,
+    "score": 7,
+    "max_score": 10,
+    "grade_detail": "pytest 2/3 (fuzzy applied 2 hunks)",
+    "passed": 2,
+    "total": 3,
+    "answer": {
+      "patch": "--- a/service/payment_service.py\n+++ b/service/payment_service.py\n@@ -22,6 +22,10 @@ def _lock_for(key: str) -> threading.Lock:\n \n \n def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n     \"\"\"Process payment.succeeded webhook.\"\"\"\n     webhook_id = payload[\"webhook_id\"]\n+    lock = _lock_for(webhook_id)\n+    with lock:\n+        if webhook_repo.is_processed(webhook_id):\n+            return {\"status\": \"ok\", \"webhook_id\": webhook_id}\n     tenant_id = payload[\"tenant_id\"]\n     invoice_id = payload[\"invoice_id\"]\n     amount_cents = int(payload[\"amount_cents\"])\n@@ -29,19 +33,21 @@ def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n \n     set_tenant(TenantContext(tenant_id=tenant_id))\n     pay = {\n         \"id\": str(uuid.uuid4()),\n         \"tenant_id\": tenant_id,\n         \"invoice_id\": invoice_id,\n         \"amount_cents\": amount_cents,\n         \"webhook_id\": webhook_id,\n     }\n     payment_repo.upsert(pay)\n     invoice_service.mark_paid(invoice_id)\n     inv = invoice_repo.get(invoice_id) or {}\n     account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n     if account_id:\n         entitlement_service.activate_paid_plan(account_id, tenant_id)\n     outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n     webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n-    return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n+    return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n+\n+\n+def record_payment(invoice_id: str, amount_cents: int) -> dict[str, Any]:\n+    ctx = require_tenant()\n+    pay = {\n+        \"id\": str(uuid.uuid4()),\n+        \"tenant_id\": ctx.tenant_id,\n+        \"invoice_id\": invoice_id,\n+        \"amount_cents\": amount_cents,\n+    }\n+    return payment_repo.upsert(pay)\n",
+      "patch_bytes": 1816,
+      "patch_preview": "--- a/service/payment_service.py\n+++ b/service/payment_service.py\n@@ -22,6 +22,10 @@ def _lock_for(key: str) -> threading.Lock:\n \n \n def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n     \"\"\"Process payment.succeeded webhook.\"\"\"\n     webhook_id = payload[\"webhook_id\"]\n+    lock = _lock_for(webhook_id)\n+    with lock:\n+        if webhook_repo.is_processed(webhook_id):\n+            return {\"status\": \"ok\", \"webhook_id\": webhook_id}\n     tenant_id = payload[\"tenant_id\"]\n     invoice_id = payload[\"invoice_id\"]\n     amount_cents = int(payload[\"amount_cents\"])\n@@ -29,19 +33,21 @@ def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n \n     set_tenant(TenantContext(tenant_id=tenant_id))\n     pay = {\n         \"id\": str(uuid.uuid4()),\n         \"tenant_id\": tenant_id,\n         \"invoice_id\": invoice_id,\n         \"amount_cents\": amount_cents,\n         \"webhook_id\": webhook_id,\n     }\n     payment_repo.upsert(pay)\n     invoice_service.mark_paid(invoice_id)\n     inv = invoice_repo.get(invoice_id) or {}\n     account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n     if account_id:\n         entitlement_service.activate_paid_plan(account_id, tenant_id)",
+      "apply_detail": "fuzzy applied 2 hunks"
+    },
+    "tool_calls": 19,
+    "files_read": [
+      "pkg/events.py",
+      "service/entitlement_service.py",
+      "service/invoice_service.py",
+      "service/payment_service.py",
+      "store/__init__.py",
+      "store/db.py",
+      "store/invoice_repo.py",
+      "store/outbox.py",
+      "store/payment_repo.py",
+      "store/webhook_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/webhook_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/entitlement_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/events.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "from store import",
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "is_processed",
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "is_processed",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/webhook_repo.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 32.52,
+    "prompt_tokens": 90052,
+    "eval_tokens": 1653,
+    "rounds": 20,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2590,
+    "raw_content": "The issue is a race condition in `handle_payment_webhook`. When concurrent requests with the same `webhook_id` arrive, they both proceed to create a new payment, mark the invoice paid, activate entitlements, and insert outbox events. The `webhook_repo.mark_processed` happens at the end, so it doesn't prevent the duplicate work.\n\nThe fix is to:\n1. Check if the webhook is already processed at the start. If so, return early (idempotency).\n2. Use the existing `_lock_for` mechanism to ensure that concurrent requests for the same `webhook_id` are serialized, preventing the race between checking and marking processed.\n\n<arch_final>\n{\"patch\": \"--- a/service/payment_service.py\\n+++ b/service/payment_service.py\\n@@ -22,6 +22,10 @@ def _lock_for(key: str) -> threading.Lock:\\n \\n \\n def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\\n     \\\"\\\"\\\"Process payment.succeeded webhook.\\\"\\\"\\\"\\n     webhook_id = payload[\\\"webhook_id\\\"]\\n+    lock = _lock_for(webhook_id)\\n+    with lock:\\n+        if webhook_repo.is_processed(webhook_id):\\n+            return {\\\"status\\\": \\\"ok\\\", \\\"webhook_id\\\": webhook_id}\\n     tenant_id = payload[\\\"tenant_id\\\"]\\n     invoice_id = payload[\\\"invoice_id\\\"]\\n     amount_cents = int(payload[\\\"amount_cents\\\"])\\n@@ -29,19 +33,21 @@ def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\\n \\n     set_tenant(TenantContext(tenant_id=tenant_id))\\n     pay = {\\n         \\\"id\\\": str(uuid.uuid4()),\\n         \\\"tenant_id\\\": tenant_id,\\n         \\\"invoice_id\\\": invoice_id,\\n         \\\"amount_cents\\\": amount_cents,\\n         \\\"webhook_id\\\": webhook_id,\\n     }\\n     payment_repo.upsert(pay)\\n     invoice_service.mark_paid(invoice_id)\\n     inv = invoice_repo.get(invoice_id) or {}\\n     account_id = inv.get(\\\"account_id\\\") or payload.get(\\\"account_id\\\")\\n     if account_id:\\n         entitlement_service.activate_paid_plan(account_id, tenant_id)\\n     outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\\\"id\\\"]))\\n     webhook_repo.mark_processed(webhook_id, {\\\"payment_id\\\": pay[\\\"id\\\"]})\\n-    return {\\\"status\\\": \\\"ok\\\", \\\"payment_id\\\": pay[\\\"id\\\"], \\\"webhook_id\\\": webhook_id}\\n+    return {\\\"status\\\": \\\"ok\\\", \\\"payment_id\\\": pay[\\\"id\\\"], \\\"webhook_id\\\": webhook_id}\\n+\\n+\\n+def record_payment(invoice_id: str, amount_cents: int) -> dict[str, Any]:\\n+    ctx = require_tenant()\\n+    pay = {\\n+        \\\"id\\\": str(uuid.uuid4()),\\n+        \\\"tenant_id\\\": ctx.tenant_id,\\n+        \\\"invoice_id\\\": invoice_id,\\n+        \\\"amount_cents\\\": amount_cents,\\n+    }\\n+    return payment_repo.upsert(pay)\\n\"}\n</arch_final>"
+  }
+]

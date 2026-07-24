@@ -1,0 +1,9 @@
+{
+  "model": "north-mini-code-1.0:bf16",
+  "tag": "north-mini-code-1.0_bf16_repohard",
+  "score": 0,
+  "max_score": 80,
+  "pass": 0,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/north-mini-code-1.0_bf16_repohard_20260723_182500.json"
+}

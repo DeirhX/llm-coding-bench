@@ -1,0 +1,9 @@
+{
+  "model": "claude-4.5-haiku",
+  "tag": "cursor_claude-4.5-haiku_arch",
+  "score": 70,
+  "max_score": 90,
+  "pass": 8,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/cursor_claude-4.5-haiku_arch_20260723_192616.json"
+}

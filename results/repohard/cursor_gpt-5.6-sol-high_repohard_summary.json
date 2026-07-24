@@ -1,0 +1,9 @@
+{
+  "model": "gpt-5.6-sol-high",
+  "tag": "cursor_gpt-5.6-sol-high_repohard",
+  "score": 80,
+  "max_score": 80,
+  "pass": 8,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/cursor_gpt-5.6-sol-high_repohard_20260724_132919.json"
+}

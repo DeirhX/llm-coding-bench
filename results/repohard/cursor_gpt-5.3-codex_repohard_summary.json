@@ -1,0 +1,9 @@
+{
+  "model": "gpt-5.3-codex",
+  "tag": "cursor_gpt-5.3-codex_repohard",
+  "score": 80,
+  "max_score": 80,
+  "pass": 8,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/cursor_gpt-5.3-codex_repohard_20260723_200048.json"
+}

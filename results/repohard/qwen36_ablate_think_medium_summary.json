@@ -1,0 +1,9 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-bf16",
+  "tag": "qwen36_ablate_think_medium",
+  "score": 40,
+  "max_score": 50,
+  "pass": 4,
+  "tasks": 5,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/qwen36_ablate_think_medium_20260723_222705.json"
+}

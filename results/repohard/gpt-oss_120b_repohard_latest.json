@@ -1,0 +1,580 @@
+[
+  {
+    "model": "gpt-oss:120b",
+    "provider": "ollama",
+    "task": "race_webhook_idempotency",
+    "title": "Payment webhook double-applies under concurrency",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: empty patch",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": "empty patch"
+    },
+    "tool_calls": 2,
+    "files_read": [],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "handle_payment_webhook",
+          "path": "."
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 33.54,
+    "prompt_tokens": 51546,
+    "eval_tokens": 1766,
+    "rounds": 40,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 0,
+    "raw_content": ""
+  },
+  {
+    "model": "gpt-oss:120b",
+    "provider": "ollama",
+    "task": "tenant_cache_key_collision",
+    "title": "Account cache leaks across tenants",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "*** Begin Patch\n*** Update File: service/account_service.py\n@@\n-    key = cache.cache_key_account(account_id)\n+    # Use tenant\u2011scoped cache key to prevent leaking data between tenants.\n+    key = cache.cache_key_account(ctx.tenant_id, account_id)\n*** End Patch\n",
+      "patch_bytes": 264,
+      "patch_preview": "*** Begin Patch\n*** Update File: service/account_service.py\n@@\n-    key = cache.cache_key_account(account_id)\n+    # Use tenant\u2011scoped cache key to prevent leaking data between tenants.\n+    key = cache.cache_key_account(ctx.tenant_id, account_id)\n*** End Patch\n",
+      "apply_detail": "git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])"
+    },
+    "tool_calls": 8,
+    "files_read": [
+      "service/account_service.py",
+      "store/cache.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/account_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/account_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": ".",
+          "pattern": "cache_key_account"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": "service",
+          "pattern": "cache_key_invoice"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "apply_patch",
+        "arguments": {
+          "patch": "*** Begin Patch\n*** Update File: service/account_service.py\n@@\n-    key = cache.cache_key_account(account_id)\n+    # Include the tenant identifier in the cache key to avoid cross\u2011tenant\n+    # collisions. ``cache_key_account`` now expects (tenant_id, account_id).\n+    key = cache.cache_key_account(ctx.tenant_id, account_id)\n*** End Patch"
+        },
+        "result_ok": false
+      }
+    ],
+    "wall_s": 50.08,
+    "prompt_tokens": 40882,
+    "eval_tokens": 2970,
+    "rounds": 29,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 311,
+    "raw_content": "<arch_final>\n{\n  \"patch\": \"*** Begin Patch\\n*** Update File: service/account_service.py\\n@@\\n-    key = cache.cache_key_account(account_id)\\n+    # Use tenant\u2011scoped cache key to prevent leaking data between tenants.\\n+    key = cache.cache_key_account(ctx.tenant_id, account_id)\\n*** End Patch\"\n}\n</arch_final>"
+  },
+  {
+    "model": "gpt-oss:120b",
+    "provider": "ollama",
+    "task": "money_rounding_split",
+    "title": "Money.split loses cents",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "*** Begin Patch\n*** Update File: pkg/money.py\n@@\n-    def split(self, parts: int) -> list[\"Money\"]:\n-        \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n-        if parts <= 0:\n-            raise ValueError(\"parts must be positive\")\n-        share = self.cents / parts\n-        base = int(share)\n-        return [Money(base, self.currency) for _ in range(parts)]\n+    def split(self, parts: int) -> list[\"Money\"]:\n+        \"\"\"Split into *parts* pieces that sum exactly to ``self.cents``.\n+\n+        The original implementation used floating point division and then\n+        truncated the result, which discarded any remainder cents.  This broke\n+        the invariant that ``sum(p.cents for p in money.split(n)) ==\n+        money.cents`` \u2013 a critical requirement when allocating credits across\n+        line items.\n+\n+        The corrected implementation uses integer division via ``divmod`` to\n+        obtain an even base amount and a non\u2011negative remainder.  The remainder\n+        cents are distributed one\u2011by\u2011one to the first *remainder* parts, ensuring\n+        that:\n+\n+        * All returned :class:`Money` objects retain the original currency.\n+        * The sum of their ``cents`` values equals the original amount.\n+        * Parts differ by at most one cent.\n+        \"\"\"\n+        if parts <= 0:\n+            raise ValueError(\"parts must be positive\")\n+\n+        # ``divmod`` returns (quotient, remainder) where ``remainder`` is always\n+        # non\u2011negative and smaller than ``parts``.  This works for both positive\n+        # and negative ``cents`` values because Python's floor division rounds\n+        # toward minus infinity.\n+        base, remainder = divmod(self.cents, parts)\n+\n+        result: list[Money] = []\n+        for i in range(parts):\n+            # Distribute the leftover cents to the first ``remainder`` items.\n+            extra = 1 if i < remainder else 0\n+            result.append(Money(base + extra, self.currency))\n+        return result\n*** End Patch\n*** End Patch\n",
+      "patch_bytes": 2028,
+      "patch_preview": "*** Begin Patch\n*** Update File: pkg/money.py\n@@\n-    def split(self, parts: int) -> list[\"Money\"]:\n-        \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n-        if parts <= 0:\n-            raise ValueError(\"parts must be positive\")\n-        share = self.cents / parts\n-        base = int(share)\n-        return [Money(base, self.currency) for _ in range(parts)]\n+    def split(self, parts: int) -> list[\"Money\"]:\n+        \"\"\"Split into *parts* pieces that sum exactly to ``self.cents``.\n+\n+        The original implementation used floating point division and then\n+        truncated the result, which discarded any remainder cents.  This broke\n+        the invariant that ``sum(p.cents for p in money.split(n)) ==\n+        money.cents`` \u2013 a critical requirement when allocating credits across\n+        line items.\n+\n+        The corrected implementation uses integer division via ``divmod`` to\n+        obtain an even base amount and a non\u2011negative remainder.  The remainder\n+        cents are distributed one\u2011by\u2011one to the first *remainder* parts, ensuring\n+        that:\n+\n+        * All returned :class:`Money` objects retain the original currency.\n+        * The sum of their ``cent",
+      "apply_detail": "git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])"
+    },
+    "tool_calls": 3,
+    "files_read": [
+      "pkg/money.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "class Money",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/money.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 28.94,
+    "prompt_tokens": 16066,
+    "eval_tokens": 1725,
+    "rounds": 19,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2125,
+    "raw_content": "<arch_final>\n{\n  \"patch\": \"*** Begin Patch\\n*** Update File: pkg/money.py\\n@@\\n-    def split(self, parts: int) -> list[\\\"Money\\\"]:\\n-        \\\"\\\"\\\"Split into N parts that sum exactly to self.cents.\\\"\\\"\\\"\\n-        if parts <= 0:\\n-            raise ValueError(\\\"parts must be positive\\\")\\n-        share = self.cents / parts\\n-        base = int(share)\\n-        return [Money(base, self.currency) for _ in range(parts)]\\n+    def split(self, parts: int) -> list[\\\"Money\\\"]:\\n+        \\\"\\\"\\\"Split into *parts* pieces that sum exactly to ``self.cents``.\\n+\\n+        The original implementation used floating point division and then\\n+        truncated the result, which discarded any remainder cents.  This broke\\n+        the invariant that ``sum(p.cents for p in money.split(n)) ==\\n+        money.cents`` \u2013 a critical requirement when allocating credits across\\n+        line items.\\n+\\n+        The corrected implementation uses integer division via ``divmod`` to\\n+        obtain an even base amount and a non\u2011negative remainder.  The remainder\\n+        cents are distributed one\u2011by\u2011one to the first *remainder* parts, ensuring\\n+        that:\\n+\\n+        * All returned :class:`Money` objects retain the original currency.\\n+        * The sum of their ``cents`` values equals the original amount.\\n+        * Parts differ by at most one cent.\\n+        \\\"\\\"\\\"\\n+        if parts <= 0:\\n+            raise ValueError(\\\"parts must be positive\\\")\\n+\\n+        # ``divmod`` returns (quotient, remainder) where ``remainder`` is always\\n+        # non\u2011negative and smaller than ``parts``.  This works for both positive\\n+        # and negative ``cents`` values because Python's floor division rounds\\n+        # toward minus infinity.\\n+        base, remainder = divmod(self.cents, parts)\\n+\\n+        result: list[Money] = []\\n+        for i in range(parts):\\n+            # Distribute the leftover cents to the first ``remainder`` items.\\n+            extra = 1 if i < remainder else 0\\n+            result.append(Money(base + extra, self.currency))\\n+        return result\\n*** End Patch\\n*** End Patch\"\n}\n</arch_final>"
+  },
+  {
+    "model": "gpt-oss:120b",
+    "provider": "ollama",
+    "task": "migration_backfill_hole",
+    "title": "Ledger backfill leaves legacy rows",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: empty patch",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": "empty patch"
+    },
+    "tool_calls": 9,
+    "files_read": [
+      "store/__init__.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store/migrations"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": "store",
+          "pattern": "class LedgerEntry"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": "store",
+          "pattern": "LegacyLedgerEntry"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": ".",
+          "pattern": "class .*LedgerEntry"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 52.27,
+    "prompt_tokens": 61069,
+    "eval_tokens": 2994,
+    "rounds": 40,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 97,
+    "raw_content": "<arch_tool>\n{\"name\":\"grep\",\"arguments\":{\"path\":\".\",\"pattern\":\"class .*LedgerEntry\"}}\n</arch_tool>"
+  },
+  {
+    "model": "gpt-oss:120b",
+    "provider": "ollama",
+    "task": "nplus1_reconciliation",
+    "title": "Reconciliation N+1 payment lookups",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "*** Begin Patch\n*** Update File: service/reconcile_service.py\n@@\n-    invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n-    matched = 0\n-    gaps = []\n-    for inv in invoices:\n-        pays = payment_repo.list_by_invoice(inv[\"id\"])\n-        paid = sum(p.get(\"amount_cents\", 0) for p in pays)\n-        if paid >= inv.get(\"amount_cents\", 0) and inv.get(\"status\") == \"paid\":\n-            matched += 1\n-        elif paid > 0 and inv.get(\"status\") != \"paid\":\n-            gaps.append(inv[\"id\"])\n+    # Load all invoices for the tenant.\n+    invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n+\n+    # Bulk\u2011load payments for the tenant in a single call to avoid O(N) DB hits.\n+    all_payments = payment_repo.list_by_tenant(ctx.tenant_id)\n+\n+    # Index payments by their associated invoice ID for fast lookup.\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\n+    for p in all_payments:\n+        inv_id = p.get(\"invoice_id\")\n+        if isinstance(inv_id, str):\n+            payments_by_invoice.setdefault(inv_id, []).append(p)\n+\n+    matched = 0\n+    gaps: list[str] = []\n+    for inv in invoices:\n+        pays = payments_by_invoice.get(inv[\"id\"], [])\n+        paid = sum(p.get(\"amount_cents\", 0) for p in pays)\n+        if paid >= inv.get(\"amount_cents\", 0) and inv.get(\"status\") == \"paid\":\n+            matched += 1\n+        elif paid > 0 and inv.get(\"status\") != \"paid\":\n+            gaps.append(inv[\"id\"])\n*** End Patch\nPATCH\n",
+      "patch_bytes": 1452,
+      "patch_preview": "*** Begin Patch\n*** Update File: service/reconcile_service.py\n@@\n-    invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n-    matched = 0\n-    gaps = []\n-    for inv in invoices:\n-        pays = payment_repo.list_by_invoice(inv[\"id\"])\n-        paid = sum(p.get(\"amount_cents\", 0) for p in pays)\n-        if paid >= inv.get(\"amount_cents\", 0) and inv.get(\"status\") == \"paid\":\n-            matched += 1\n-        elif paid > 0 and inv.get(\"status\") != \"paid\":\n-            gaps.append(inv[\"id\"])\n+    # Load all invoices for the tenant.\n+    invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n+\n+    # Bulk\u2011load payments for the tenant in a single call to avoid O(N) DB hits.\n+    all_payments = payment_repo.list_by_tenant(ctx.tenant_id)\n+\n+    # Index payments by their associated invoice ID for fast lookup.\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\n+    for p in all_payments:\n+        inv_id = p.get(\"invoice_id\")\n+        if isinstance(inv_id, str):\n+            payments_by_invoice.setdefault(inv_id, []).append(p)\n+\n+    matched = 0\n+    gaps: list[str] = []\n+    for inv in invoices:\n+        pays = payments_by_invoice.get(inv[\"id\"], [])\n+        paid = sum(p.get(\"a",
+      "apply_detail": "git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])"
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "service/reconcile_service.py",
+      "store/payment_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "reconcile_tenant",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/reconcile_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 35.5,
+    "prompt_tokens": 27420,
+    "eval_tokens": 2129,
+    "rounds": 24,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1563,
+    "raw_content": "<arch_final>\n{\n  \"patch\": \"*** Begin Patch\\n*** Update File: service/reconcile_service.py\\n@@\\n-    invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\\n-    matched = 0\\n-    gaps = []\\n-    for inv in invoices:\\n-        pays = payment_repo.list_by_invoice(inv[\\\"id\\\"])\\n-        paid = sum(p.get(\\\"amount_cents\\\", 0) for p in pays)\\n-        if paid >= inv.get(\\\"amount_cents\\\", 0) and inv.get(\\\"status\\\") == \\\"paid\\\":\\n-            matched += 1\\n-        elif paid > 0 and inv.get(\\\"status\\\") != \\\"paid\\\":\\n-            gaps.append(inv[\\\"id\\\"])\\n+    # Load all invoices for the tenant.\\n+    invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\\n+\\n+    # Bulk\u2011load payments for the tenant in a single call to avoid O(N) DB hits.\\n+    all_payments = payment_repo.list_by_tenant(ctx.tenant_id)\\n+\\n+    # Index payments by their associated invoice ID for fast lookup.\\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\\n+    for p in all_payments:\\n+        inv_id = p.get(\\\"invoice_id\\\")\\n+        if isinstance(inv_id, str):\\n+            payments_by_invoice.setdefault(inv_id, []).append(p)\\n+\\n+    matched = 0\\n+    gaps: list[str] = []\\n+    for inv in invoices:\\n+        pays = payments_by_invoice.get(inv[\\\"id\\\"], [])\\n+        paid = sum(p.get(\\\"amount_cents\\\", 0) for p in pays)\\n+        if paid >= inv.get(\\\"amount_cents\\\", 0) and inv.get(\\\"status\\\") == \\\"paid\\\":\\n+            matched += 1\\n+        elif paid > 0 and inv.get(\\\"status\\\") != \\\"paid\\\":\\n+            gaps.append(inv[\\\"id\\\"])\\n*** End Patch\\nPATCH\"\n}\n</arch_final>"
+  },
+  {
+    "model": "gpt-oss:120b",
+    "provider": "ollama",
+    "task": "confused_deputy_admin",
+    "title": "Internal export ignores tenant boundary",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "*** Begin Patch\n*** Update File: service/admin_service.py\n@@\n-def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n-    \"\"\"Internal export used by ops dashboards.\"\"\"\n-    ctx = require_tenant()\n-    tid = target_tenant_id or ctx.tenant_id\n-    rows = invoice_repo.list_by_tenant(tid)\n-    audit_repo.write(ctx.tenant_id, \"export_invoices\", {\"target\": tid, \"n\": len(rows)})\n-    return rows\n+def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n+    \"\"\"Export invoices for a tenant.\n+\n+    This endpoint is used by both the admin API (which requires an admin context)\n+    and the internal service\u2011to\u2011service path.  Non\u2011admin callers must only be able\n+    to export their own tenant's data.  The previous implementation trusted the\n+    ``target_tenant_id`` argument unconditionally, allowing a regular user to\n+    retrieve another tenant's invoices.\n+\n+    The corrected logic:\n+    * If ``target_tenant_id`` is omitted or matches the caller's tenant, export that tenant.\n+    * If a different ``target_tenant_id`` is supplied, the caller must have ``ctx.is_admin``,\n+      otherwise a PermissionError is raised.\n+    \"\"\"\n+    ctx = require_tenant()\n+\n+    # Enforce admin check when requesting another tenant's data\n+    if target_tenant_id and target_tenant_id != ctx.tenant_id:\n+        if not ctx.is_admin:\n+            raise PermissionError(\"cannot export invoices for another tenant\")\n+        tid = target_tenant_id\n+    else:\n+        tid = ctx.tenant_id\n+\n+    rows = invoice_repo.list_by_tenant(tid)\n+    # Audit under the caller's context, not the target tenant.\n+    audit_repo.write(ctx.tenant_id, \"export_invoices\", {\"target\": tid, \"n\": len(rows)})\n+    return rows\n*** End Patch\n",
+      "patch_bytes": 1760,
+      "patch_preview": "*** Begin Patch\n*** Update File: service/admin_service.py\n@@\n-def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n-    \"\"\"Internal export used by ops dashboards.\"\"\"\n-    ctx = require_tenant()\n-    tid = target_tenant_id or ctx.tenant_id\n-    rows = invoice_repo.list_by_tenant(tid)\n-    audit_repo.write(ctx.tenant_id, \"export_invoices\", {\"target\": tid, \"n\": len(rows)})\n-    return rows\n+def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n+    \"\"\"Export invoices for a tenant.\n+\n+    This endpoint is used by both the admin API (which requires an admin context)\n+    and the internal service\u2011to\u2011service path.  Non\u2011admin callers must only be able\n+    to export their own tenant's data.  The previous implementation trusted the\n+    ``target_tenant_id`` argument unconditionally, allowing a regular user to\n+    retrieve another tenant's invoices.\n+\n+    The corrected logic:\n+    * If ``target_tenant_id`` is omitted or matches the caller's tenant, export that tenant.\n+    * If a different ``target_tenant_id`` is supplied, the caller must have ``ctx.is_admin``,\n+      otherwise a PermissionError is raised.\n+    \"\"\"\n+    ctx = require",
+      "apply_detail": "git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])"
+    },
+    "tool_calls": 9,
+    "files_read": [
+      "api/admin.py",
+      "api/internal.py",
+      "pkg/tenant.py",
+      "service/admin_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": ".",
+          "pattern": "export_invoices"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/admin_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/admin_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/admin.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/internal.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/admin_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/admin_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 90.73,
+    "prompt_tokens": 67639,
+    "eval_tokens": 6019,
+    "rounds": 36,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1861,
+    "raw_content": "<arch_final>\n{\n  \"patch\": \"*** Begin Patch\\n*** Update File: service/admin_service.py\\n@@\\n-def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\\n-    \\\"\\\"\\\"Internal export used by ops dashboards.\\\"\\\"\\\"\\n-    ctx = require_tenant()\\n-    tid = target_tenant_id or ctx.tenant_id\\n-    rows = invoice_repo.list_by_tenant(tid)\\n-    audit_repo.write(ctx.tenant_id, \\\"export_invoices\\\", {\\\"target\\\": tid, \\\"n\\\": len(rows)})\\n-    return rows\\n+def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\\n+    \\\"\\\"\\\"Export invoices for a tenant.\\n+\\n+    This endpoint is used by both the admin API (which requires an admin context)\\n+    and the internal service\u2011to\u2011service path.  Non\u2011admin callers must only be able\\n+    to export their own tenant's data.  The previous implementation trusted the\\n+    ``target_tenant_id`` argument unconditionally, allowing a regular user to\\n+    retrieve another tenant's invoices.\\n+\\n+    The corrected logic:\\n+    * If ``target_tenant_id`` is omitted or matches the caller's tenant, export that tenant.\\n+    * If a different ``target_tenant_id`` is supplied, the caller must have ``ctx.is_admin``,\\n+      otherwise a PermissionError is raised.\\n+    \\\"\\\"\\\"\\n+    ctx = require_tenant()\\n+\\n+    # Enforce admin check when requesting another tenant's data\\n+    if target_tenant_id and target_tenant_id != ctx.tenant_id:\\n+        if not ctx.is_admin:\\n+            raise PermissionError(\\\"cannot export invoices for another tenant\\\")\\n+        tid = target_tenant_id\\n+    else:\\n+        tid = ctx.tenant_id\\n+\\n+    rows = invoice_repo.list_by_tenant(tid)\\n+    # Audit under the caller's context, not the target tenant.\\n+    audit_repo.write(ctx.tenant_id, \\\"export_invoices\\\", {\\\"target\\\": tid, \\\"n\\\": len(rows)})\\n+    return rows\\n*** End Patch\"\n}\n</arch_final>"
+  },
+  {
+    "model": "gpt-oss:120b",
+    "provider": "ollama",
+    "task": "client_contract_drift",
+    "title": "Client misreads invoice amounts",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "*** Begin Patch\n*** Update File: client/models.py\n@@\n-    @classmethod\n-    def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n-        if \"amount\" in data:\n-            amount = float(data[\"amount\"])\n-        elif \"amount_cents\" in data:\n-            amount = float(data[\"amount_cents\"])\n-        else:\n-            amount = 0.0\n-        return cls(\n-            id=data[\"id\"],\n-            tenant_id=data[\"tenant_id\"],\n-            account_id=data[\"account_id\"],\n-            amount=amount,\n-            currency=data.get(\"currency\", \"USD\"),\n-            status=data[\"status\"],\n-        )\n+    @classmethod\n+    def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n+        \"\"\"Create an :class:`InvoiceDTO` from the raw API payload.\n+\n+        The public API serialises monetary values using the ``amount_cents``\n+        field (an integer representing cents). Historically the client code\n+        mistakenly interpreted this value as a major\u2011unit amount, leading to\n+        invoices appearing 100\u00d7 larger than they should be. This method now\n+        prefers ``amount_cents`` when present and converts it to dollars by\n+        dividing by ``100``. If only the legacy ``amount`` field is supplied,\n+        it is used directly.\n+\n+        Args:\n+            data: The dictionary returned from the API.\n+\n+        Returns:\n+            An :class:`InvoiceDTO` instance with ``amount`` expressed in major\n+            currency units (e.g., dollars).\n+        \"\"\"\n+        # Prefer the canonical ``amount_cents`` field. It may be an int or a\n+        # string representation of an integer; we coerce to float for\n+        # consistency and then divide by 100 to obtain major units.\n+        if \"amount_cents\" in data:\n+            try:\n+                amount = float(data[\"amount_cents\"]) / 100.0\n+            except (TypeError, ValueError):\n+                amount = 0.0\n+        elif \"amount\" in data:\n+            try:\n+                amount = float(data[\"amount\"])\n+            except (TypeError, ValueError):\n+                amount = 0.0\n+        else:\n+            amount = 0.0\n+\n+        return cls(\n+            id=data[\"id\"],\n+            tenant_id=data[\"tenant_id\"],\n+            account_id=data[\"account_id\"],\n+            amount=amount,\n+            currency=data.get(\"currency\", \"USD\"),\n+            status=data[\"status\"],\n+        )\n*** End Patch\n*** End Patch\n",
+      "patch_bytes": 2392,
+      "patch_preview": "*** Begin Patch\n*** Update File: client/models.py\n@@\n-    @classmethod\n-    def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n-        if \"amount\" in data:\n-            amount = float(data[\"amount\"])\n-        elif \"amount_cents\" in data:\n-            amount = float(data[\"amount_cents\"])\n-        else:\n-            amount = 0.0\n-        return cls(\n-            id=data[\"id\"],\n-            tenant_id=data[\"tenant_id\"],\n-            account_id=data[\"account_id\"],\n-            amount=amount,\n-            currency=data.get(\"currency\", \"USD\"),\n-            status=data[\"status\"],\n-        )\n+    @classmethod\n+    def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n+        \"\"\"Create an :class:`InvoiceDTO` from the raw API payload.\n+\n+        The public API serialises monetary values using the ``amount_cents``\n+        field (an integer representing cents). Historically the client code\n+        mistakenly interpreted this value as a major\u2011unit amount, leading to\n+        invoices appearing 100\u00d7 larger than they should be. This method now\n+        prefers ``amount_cents`` when present and converts it to dollars by\n+        dividing by ``100``. If only the legacy ``amount`` field ",
+      "apply_detail": "git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])"
+    },
+    "tool_calls": 3,
+    "files_read": [
+      "client/models.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "client"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "client/models.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 45.79,
+    "prompt_tokens": 33093,
+    "eval_tokens": 2915,
+    "rounds": 30,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2545,
+    "raw_content": "<arch_final>\n{\n  \"patch\": \"*** Begin Patch\\n*** Update File: client/models.py\\n@@\\n-    @classmethod\\n-    def from_api(cls, data: dict[str, Any]) -> \\\"InvoiceDTO\\\":\\n-        if \\\"amount\\\" in data:\\n-            amount = float(data[\\\"amount\\\"])\\n-        elif \\\"amount_cents\\\" in data:\\n-            amount = float(data[\\\"amount_cents\\\"])\\n-        else:\\n-            amount = 0.0\\n-        return cls(\\n-            id=data[\\\"id\\\"],\\n-            tenant_id=data[\\\"tenant_id\\\"],\\n-            account_id=data[\\\"account_id\\\"],\\n-            amount=amount,\\n-            currency=data.get(\\\"currency\\\", \\\"USD\\\"),\\n-            status=data[\\\"status\\\"],\\n-        )\\n+    @classmethod\\n+    def from_api(cls, data: dict[str, Any]) -> \\\"InvoiceDTO\\\":\\n+        \\\"\\\"\\\"Create an :class:`InvoiceDTO` from the raw API payload.\\n+\\n+        The public API serialises monetary values using the ``amount_cents``\\n+        field (an integer representing cents). Historically the client code\\n+        mistakenly interpreted this value as a major\u2011unit amount, leading to\\n+        invoices appearing 100\u00d7 larger than they should be. This method now\\n+        prefers ``amount_cents`` when present and converts it to dollars by\\n+        dividing by ``100``. If only the legacy ``amount`` field is supplied,\\n+        it is used directly.\\n+\\n+        Args:\\n+            data: The dictionary returned from the API.\\n+\\n+        Returns:\\n+            An :class:`InvoiceDTO` instance with ``amount`` expressed in major\\n+            currency units (e.g., dollars).\\n+        \\\"\\\"\\\"\\n+        # Prefer the canonical ``amount_cents`` field. It may be an int or a\\n+        # string representation of an integer; we coerce to float for\\n+        # consistency and then divide by 100 to obtain major units.\\n+        if \\\"amount_cents\\\" in data:\\n+            try:\\n+                amount = float(data[\\\"amount_cents\\\"]) / 100.0\\n+            except (TypeError, ValueError):\\n+                amount = 0.0\\n+        elif \\\"amount\\\" in data:\\n+            try:\\n+                amount = float(data[\\\"amount\\\"])\\n+            except (TypeError, ValueError):\\n+                amount = 0.0\\n+        else:\\n+            amount = 0.0\\n+\\n+        return cls(\\n+            id=data[\\\"id\\\"],\\n+            tenant_id=data[\\\"tenant_id\\\"],\\n+            account_id=data[\\\"account_id\\\"],\\n+            amount=amount,\\n+            currency=data.get(\\\"currency\\\", \\\"USD\\\"),\\n+            status=data[\\\"status\\\"],\\n+        )\\n*** End Patch\\n*** End Patch\"\n}\n</arch_final>"
+  },
+  {
+    "model": "gpt-oss:120b",
+    "provider": "ollama",
+    "task": "outbox_poison_retry",
+    "title": "Outbox acks poison events",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "*** Begin Patch\n*** Update File: worker/outbox_worker.py\n@@\n-    for row in batch:\n-        try:\n-            publish(row)\n-            outbox.mark_published(row[\"id\"])\n-            ok += 1\n-        except Exception:\n-            failed += 1\n-        outbox.ack(row[\"id\"])\n+    for row in batch:\n+        try:\n+            # Attempt to publish the event. Only when publishing succeeds do we\n+            # mark the row as published **and** acknowledge it so that it is not\n+            # retried. If publishing raises (including PoisonError), we count the\n+            # failure and leave the row un\u2011acked, allowing the outbox worker to\n+            # retry later.\n+            publish(row)\n+            outbox.mark_published(row[\"id\"])\n+            outbox.ack(row[\"id\"])  # Ack only on success\n+            ok += 1\n+        except Exception:\n+            failed += 1\n*** End Patch\n*** End Patch\n",
+      "patch_bytes": 898,
+      "patch_preview": "*** Begin Patch\n*** Update File: worker/outbox_worker.py\n@@\n-    for row in batch:\n-        try:\n-            publish(row)\n-            outbox.mark_published(row[\"id\"])\n-            ok += 1\n-        except Exception:\n-            failed += 1\n-        outbox.ack(row[\"id\"])\n+    for row in batch:\n+        try:\n+            # Attempt to publish the event. Only when publishing succeeds do we\n+            # mark the row as published **and** acknowledge it so that it is not\n+            # retried. If publishing raises (including PoisonError), we count the\n+            # failure and leave the row un\u2011acked, allowing the outbox worker to\n+            # retry later.\n+            publish(row)\n+            outbox.mark_published(row[\"id\"])\n+            outbox.ack(row[\"id\"])  # Ack only on success\n+            ok += 1\n+        except Exception:\n+            failed += 1\n*** End Patch\n*** End Patch\n",
+      "apply_detail": "git apply failed: error: No valid patches in input (allow with \"--allow-empty\"); fuzzy: no hunks applied (skipped=[])"
+    },
+    "tool_calls": 3,
+    "files_read": [
+      "worker/outbox_worker.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "worker"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 21.05,
+    "prompt_tokens": 15241,
+    "eval_tokens": 1237,
+    "rounds": 19,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 972,
+    "raw_content": "<arch_final>\n{\n  \"patch\": \"*** Begin Patch\\n*** Update File: worker/outbox_worker.py\\n@@\\n-    for row in batch:\\n-        try:\\n-            publish(row)\\n-            outbox.mark_published(row[\\\"id\\\"])\\n-            ok += 1\\n-        except Exception:\\n-            failed += 1\\n-        outbox.ack(row[\\\"id\\\"])\\n+    for row in batch:\\n+        try:\\n+            # Attempt to publish the event. Only when publishing succeeds do we\\n+            # mark the row as published **and** acknowledge it so that it is not\\n+            # retried. If publishing raises (including PoisonError), we count the\\n+            # failure and leave the row un\u2011acked, allowing the outbox worker to\\n+            # retry later.\\n+            publish(row)\\n+            outbox.mark_published(row[\\\"id\\\"])\\n+            outbox.ack(row[\\\"id\\\"])  # Ack only on success\\n+            ok += 1\\n+        except Exception:\\n+            failed += 1\\n*** End Patch\\n*** End Patch\"\n}\n</arch_final>"
+  }
+]

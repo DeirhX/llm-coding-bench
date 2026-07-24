@@ -1,0 +1,255 @@
+{
+  "model": "claude-opus-4-8-thinking-high",
+  "provider": "cursor",
+  "bench": "claim",
+  "tag": "cursor_claude-opus-4-8-thinking-high_claim",
+  "score": 20,
+  "max_score": 23,
+  "correct": 20,
+  "wrong": 0,
+  "missing": 0,
+  "evidence_bonus": 0,
+  "files_read": [],
+  "per_claim": [
+    {
+      "id": "c01",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "handle_delete_order calls order_service.cancel_order."
+    },
+    {
+      "id": "c02",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "cancel_order invalidates the order cache."
+    },
+    {
+      "id": "c03",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "mark_paid invalidates the order cache."
+    },
+    {
+      "id": "c04",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "get_invoice checks that invoice.tenant_id matches the current tenant."
+    },
+    {
+      "id": "c05",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "list_invoices scopes results with list_by_tenant."
+    },
+    {
+      "id": "c06",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "admin_export_invoices returns invoices for all tenants."
+    },
+    {
+      "id": "c07",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "handle_payment_webhook records processed_webhooks before inserting OrderPaid into the outbox."
+    },
+    {
+      "id": "c08",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "outbox_worker.process_once acknowledges an outbox row before calling publish."
+    },
+    {
+      "id": "c09",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "list_orders avoids per-order get_order calls (no N+1)."
+    },
+    {
+      "id": "c10",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "README invariant I1 is violated by cancel_order (no outbox write)."
+    },
+    {
+      "id": "c11",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "cancel_order_legacy is invoked on the DELETE /orders/{id} request path."
+    },
+    {
+      "id": "c12",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "soft_delete sets order status to cancelled."
+    },
+    {
+      "id": "c13",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "order_service.get_order returns cached rows without re-checking tenant_id on cache hit."
+    },
+    {
+      "id": "c14",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "webhook_retry.retry_payment_webhook bypasses payment_service and writes outbox directly."
+    },
+    {
+      "id": "c15",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "invoice_repo.get_by_id filters by tenant_id."
+    },
+    {
+      "id": "c16",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "In cancel_order, outbox.insert(OrderCancelled) runs before order_repo.soft_delete."
+    },
+    {
+      "id": "c17",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "get_order re-validates tenant_id against the current tenant on every cache hit."
+    },
+    {
+      "id": "c18",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "handle_payment_webhook calls order_service.mark_paid after inserting OrderPaid into the outbox."
+    },
+    {
+      "id": "c19",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "outbox_worker.process_once acks an outbox row only after publish succeeds."
+    },
+    {
+      "id": "c20",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "invoice_service.admin_export_invoices scopes results to the current tenant."
+    }
+  ],
+  "ok": true,
+  "detail": "20/20 correct, wrong=0, missing=0, ev=+0",
+  "answer": {
+    "answers": {
+      "c01": true,
+      "c02": true,
+      "c03": false,
+      "c04": false,
+      "c05": true,
+      "c06": true,
+      "c07": false,
+      "c08": true,
+      "c09": false,
+      "c10": false,
+      "c11": false,
+      "c12": true,
+      "c13": true,
+      "c14": false,
+      "c15": false,
+      "c16": false,
+      "c17": false,
+      "c18": true,
+      "c19": false,
+      "c20": false
+    },
+    "citations": {
+      "c01": [
+        "api/orders.py:handle_delete_order"
+      ],
+      "c02": [
+        "service/order_service.py:cancel_order"
+      ],
+      "c03": [
+        "service/order_service.py:mark_paid"
+      ],
+      "c04": [
+        "service/invoice_service.py:get_invoice"
+      ],
+      "c05": [
+        "service/invoice_service.py:list_invoices"
+      ],
+      "c06": [
+        "service/invoice_service.py:admin_export_invoices",
+        "store/invoice_repo.py:export_all"
+      ],
+      "c07": [
+        "service/payment_service.py:handle_payment_webhook"
+      ],
+      "c08": [
+        "worker/outbox_worker.py:process_once"
+      ],
+      "c09": [
+        "service/order_service.py:list_orders"
+      ],
+      "c10": [
+        "service/order_service.py:cancel_order"
+      ],
+      "c11": [
+        "service/legacy_order.py:cancel_order_legacy",
+        "api/orders.py:handle_delete_order"
+      ],
+      "c12": [
+        "store/order_repo.py:soft_delete"
+      ],
+      "c13": [
+        "service/order_service.py:get_order"
+      ],
+      "c14": [
+        "worker/webhook_retry.py:retry_payment_webhook"
+      ],
+      "c15": [
+        "store/invoice_repo.py:get_by_id"
+      ],
+      "c16": [
+        "service/order_service.py:cancel_order"
+      ],
+      "c17": [
+        "service/order_service.py:get_order"
+      ],
+      "c18": [
+        "service/payment_service.py:handle_payment_webhook"
+      ],
+      "c19": [
+        "worker/outbox_worker.py:process_once"
+      ],
+      "c20": [
+        "service/invoice_service.py:admin_export_invoices"
+      ]
+    }
+  },
+  "tool_calls": null,
+  "wall_s": 54.37,
+  "prompt_tokens": 10,
+  "eval_tokens": 4537,
+  "rounds": 1,
+  "done_reason": "success",
+  "num_ctx": 65536,
+  "num_predict": 8192,
+  "raw_content": "I have all the evidence needed. Let me report findings for each claim.\n\n## Analysis\n\n- **c01 TRUE** \u2014 `handle_delete_order` calls `order_service.cancel_order(order_id)` (`api/orders.py:29`).\n- **c02 TRUE** \u2014 `cancel_order` ends with `cache.invalidate_order(order_id)` (`order_service.py:40`).\n- **c03 FALSE** \u2014 `mark_paid` updates status + outbox but never touches the cache (`order_service.py:44-52`).\n- **c04 FALSE** \u2014 `get_invoice` calls `require_tenant()` for auth only; comment/code confirm no tenant scoping on the row (`invoice_service.py:14-20`).\n- **c05 TRUE** \u2014 `list_invoices` returns `invoice_repo.list_by_tenant(tenant.tenant_id)` (`invoice_service.py:9-11`).\n- **c06 TRUE** \u2014 `admin_export_invoices` \u2192 `invoice_repo.export_all()` \u2192 `db.scan(\"invoices\")`, cross-tenant (`invoice_service.py:23-28`, `invoice_repo.py:28-30`).\n- **c07 FALSE** \u2014 Order is: `outbox.insert(order_paid...)` (line 40) \u2192 `mark_paid` \u2192 `_mark_processed` (line 43). Recording happens *after* the outbox insert, not before (`payment_service.py:40-43`).\n- **c08 TRUE** \u2014 `process_once` calls `outbox.ack(row[\"id\"])` before `publish(row)` (`outbox_worker.py:15-16`).\n- **c09 FALSE** \u2014 `list_orders` loops `enriched.append(get_order(row[\"id\"]))`, i.e. a per-order call = classic N+1 (`order_service.py:22-29`).\n- **c10 FALSE** \u2014 `cancel_order` *does* write `outbox.insert(order_cancelled(...))` (`order_service.py:39`), so I1 is not violated here.\n- **c11 FALSE** \u2014 `cancel_order_legacy` is decoy dead code, not referenced by the DELETE path (`legacy_order.py:1-14`).\n- **c12 TRUE** \u2014 `soft_delete` sets `row[\"status\"] = \"cancelled\"` (`order_repo.py:21`).\n- **c13 TRUE** \u2014 On cache hit, `get_order` returns `cached` immediately with no tenant recheck (`order_service.py:12-14`).\n- **c14 FALSE** \u2014 `retry_payment_webhook` calls `payment_service.handle_payment_webhook(body)`; it doesn't bypass it or write outbox directly (`webhook_retry.py:16`).\n- **c15 FALSE** \u2014 `get_by_id` returns `db.get(\"invoices\", invoice_id)` with no tenant filter (planted bug) (`invoice_repo.py:12-14`).\n- **c16 FALSE** \u2014 Order is `soft_delete` (line 38) then `outbox.insert(OrderCancelled)` (line 39); insert runs *after* soft_delete (`order_service.py:38-39`).\n- **c17 FALSE** \u2014 Direct contradiction of c13; no revalidation on cache hit (`order_service.py:12-14`).\n- **c18 TRUE** \u2014 `outbox.insert(order_paid...)` (line 40) precedes `order_service.mark_paid(...)` (line 41) (`payment_service.py:40-41`).\n- **c19 FALSE** \u2014 Ack happens *before* publish, not after success (`outbox_worker.py:15-17`).\n- **c20 FALSE** \u2014 `admin_export_invoices` is intentionally cross-tenant via `export_all` (`invoice_service.py:23-28`).\n\n```json\n{\n  \"answers\": {\n    \"c01\": true,\n    \"c02\": true,\n    \"c03\": false,\n    \"c04\": false,\n    \"c05\": true,\n    \"c06\": true,\n    \"c07\": false,\n    \"c08\": true,\n    \"c09\": false,\n    \"c10\": false,\n    \"c11\": false,\n    \"c12\": true,\n    \"c13\": true,\n    \"c14\": false,\n    \"c15\": false,\n    \"c16\": false,\n    \"c17\": false,\n    \"c18\": true,\n    \"c19\": false,\n    \"c20\": false\n  },\n  \"citations\": {\n    \"c01\": [\"api/orders.py:handle_delete_order\"],\n    \"c02\": [\"service/order_service.py:cancel_order\"],\n    \"c03\": [\"service/order_service.py:mark_paid\"],\n    \"c04\": [\"service/invoice_service.py:get_invoice\"],\n    \"c05\": [\"service/invoice_service.py:list_invoices\"],\n    \"c06\": [\"service/invoice_service.py:admin_export_invoices\", \"store/invoice_repo.py:export_all\"],\n    \"c07\": [\"service/payment_service.py:handle_payment_webhook\"],\n    \"c08\": [\"worker/outbox_worker.py:process_once\"],\n    \"c09\": [\"service/order_service.py:list_orders\"],\n    \"c10\": [\"service/order_service.py:cancel_order\"],\n    \"c11\": [\"service/legacy_order.py:cancel_order_legacy\", \"api/orders.py:handle_delete_order\"],\n    \"c12\": [\"store/order_repo.py:soft_delete\"],\n    \"c13\": [\"service/order_service.py:get_order\"],\n    \"c14\": [\"worker/webhook_retry.py:retry_payment_webhook\"],\n    \"c15\": [\"store/invoice_repo.py:get_by_id\"],\n    \"c16\": [\"service/order_service.py:cancel_order\"],\n    \"c17\": [\"service/order_service.py:get_order\"],\n    \"c18\": [\"service/payment_service.py:handle_payment_webhook\"],\n    \"c19\": [\"worker/outbox_worker.py:process_once\"],\n    \"c20\": [\"service/invoice_service.py:admin_export_invoices\"]\n  }\n}\n```",
+  "session_id": "38849358-dfa8-4315-8f1e-cbecc75468c7"
+}

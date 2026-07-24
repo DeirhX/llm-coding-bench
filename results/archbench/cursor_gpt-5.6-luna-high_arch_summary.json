@@ -1,0 +1,9 @@
+{
+  "model": "gpt-5.6-luna-high",
+  "tag": "cursor_gpt-5.6-luna-high_arch",
+  "score": 72,
+  "max_score": 90,
+  "pass": 9,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/cursor_gpt-5.6-luna-high_arch_20260723_191935.json"
+}

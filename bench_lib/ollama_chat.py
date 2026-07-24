@@ -18,9 +18,21 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime
+from collections.abc import Callable
 from typing import Any
 
-from bench_lib.ollama_think import apply_keep_alive, apply_think, parse_think
+from bench_lib.ollama_think import (
+    ThinkLoopDetector,
+    ThinkLoopError,
+    apply_keep_alive,
+    apply_think,
+    maybe_promote_response,
+    parse_think,
+    think_loop_enabled,
+    think_max_chars,
+)
+
+OnDelta = Callable[[str], None]
 
 
 def _host() -> str:
@@ -97,10 +109,18 @@ class StreamStallError(TimeoutError):
     """No stream tokens arrived within the stall window."""
 
 
-def _read_stream(resp: Any) -> dict[str, Any]:
+def _read_stream(
+    resp: Any,
+    *,
+    on_thinking: OnDelta | None = None,
+    on_content: OnDelta | None = None,
+) -> dict[str, Any]:
     """Consume NDJSON chat stream. Socket timeout on resp provides stall detection."""
     content_parts: list[str] = []
     thinking_parts: list[str] = []
+    detector = ThinkLoopDetector() if think_loop_enabled() else None
+    max_think = think_max_chars()
+    think_chars = 0
     buf = b""
     while True:
         try:
@@ -120,10 +140,31 @@ def _read_stream(resp: Any) -> dict[str, Any]:
             except json.JSONDecodeError:
                 continue
             msg = obj.get("message") or {}
+            if msg.get("thinking"):
+                delta = msg["thinking"]
+                thinking_parts.append(delta)
+                think_chars += len(delta)
+                if on_thinking is not None:
+                    on_thinking(delta)
+                if max_think > 0 and think_chars >= max_think:
+                    raise ThinkLoopError(
+                        f"think budget: {think_chars} chars >= {max_think}",
+                        thinking="".join(thinking_parts),
+                        content="".join(content_parts),
+                        detail=f"think_budget {think_chars}>={max_think}",
+                        reason="think_budget",
+                    )
+                if detector is not None:
+                    try:
+                        detector.feed(delta)
+                    except ThinkLoopError as e:
+                        e.thinking = "".join(thinking_parts)
+                        e.content = "".join(content_parts)
+                        raise e
             if msg.get("content"):
                 content_parts.append(msg["content"])
-            if msg.get("thinking"):
-                thinking_parts.append(msg["thinking"])
+                if on_content is not None:
+                    on_content(msg["content"])
             if obj.get("done"):
                 obj["message"] = {
                     "role": "assistant",
@@ -149,8 +190,14 @@ def chat(
     options: dict[str, Any] | None = None,
     think: bool | str | None = None,
     stream: bool | None = None,
+    on_thinking: OnDelta | None = None,
+    on_content: OnDelta | None = None,
 ) -> dict[str, Any]:
-    """Chat with deadlock-avoidance. Returns normalized timing fields."""
+    """Chat with deadlock-avoidance. Returns normalized timing fields.
+
+    Optional ``on_thinking`` / ``on_content`` receive incremental stream deltas
+    (only when streaming is enabled).
+    """
     use_stream = (
         (os.environ.get("BENCH_OLLAMA_STREAM", "1") != "0")
         if stream is None
@@ -189,9 +236,40 @@ def chat(
                         sock.settimeout(stall)
                     except Exception:
                         pass
-                    data = _read_stream(resp)
+                    data = _read_stream(
+                        resp, on_thinking=on_thinking, on_content=on_content
+                    )
                 else:
                     data = json.loads(resp.read().decode())
+                    msg0 = data.get("message") or {}
+                    if on_thinking and msg0.get("thinking"):
+                        on_thinking(msg0["thinking"])
+                    if on_content and msg0.get("content"):
+                        on_content(msg0["content"])
+        except ThinkLoopError as e:
+            # Do not retry — promote a drafted final if present, else agent nudge.
+            wall = time.perf_counter() - t0
+            content, done_reason, promoted = maybe_promote_response(
+                e.content, e.thinking, done_reason=e.reason or "think_loop"
+            )
+            return {
+                "content": content,
+                "thinking": e.thinking,
+                "wall_s": wall,
+                "load_s": 0.0,
+                "prompt_tokens": 0,
+                "eval_tokens": 0,
+                "toks_per_s": 0.0,
+                "done_reason": done_reason if promoted else (e.reason or "think_loop"),
+                "think_loop": not promoted and (e.reason or "think_loop") == "think_loop",
+                "think_budget": (e.reason or "") == "think_budget",
+                "think_promoted": promoted,
+                "think_loop_detail": e.detail,
+                "raw": None,
+                "think": think_val,
+                "stream": use_stream,
+                "attempt": attempt,
+            }
         except StreamStallError as e:
             last_err = e
             force_unload(model)
@@ -218,6 +296,10 @@ def chat(
         msg = data.get("message") or {}
         content = msg.get("content") or ""
         thinking = msg.get("thinking") or ""
+        done_reason = data.get("done_reason")
+        content, done_reason, promoted = maybe_promote_response(
+            content, thinking, done_reason=done_reason
+        )
         eval_duration = float(data.get("eval_duration") or 0)
         eval_count = float(data.get("eval_count") or 0)
         return {
@@ -228,7 +310,8 @@ def chat(
             "prompt_tokens": int(data.get("prompt_eval_count") or 0),
             "eval_tokens": int(data.get("eval_count") or 0),
             "toks_per_s": (eval_count / (eval_duration / 1e9)) if eval_duration > 0 else 0.0,
-            "done_reason": data.get("done_reason"),
+            "done_reason": done_reason,
+            "think_promoted": promoted,
             "raw": data,
             "think": think_val,
             "stream": use_stream,

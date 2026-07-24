@@ -1,0 +1,9 @@
+{
+  "model": "gemini-3.6-flash-high",
+  "tag": "cursor_gemini-3.6-flash-high_arch",
+  "score": 72,
+  "max_score": 90,
+  "pass": 9,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/cursor_gemini-3.6-flash-high_arch_20260723_172613.json"
+}

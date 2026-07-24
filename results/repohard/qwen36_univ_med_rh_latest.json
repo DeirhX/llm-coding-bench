@@ -1,0 +1,334 @@
+[
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "race_webhook_idempotency",
+    "title": "Payment webhook double-applies under concurrency",
+    "family": "fix",
+    "ok": false,
+    "score": 3,
+    "max_score": 10,
+    "grade_detail": "pytest 1/3 (fuzzy applied 1 hunks)",
+    "passed": 1,
+    "total": 3,
+    "answer": {
+      "patch": "--- a/store/webhook_repo.py\n+++ b/store/webhook_repo.py\n@@ -6,3 +6,7 @@ def mark_processed(webhook_id: str, meta: dict[str, Any] | None = None) -> None:\n     db.put(\"processed_webhooks\", webhook_id, meta or {\"id\": webhook_id})\n \n def is_processed(webhook_id: str) -> bool:\n     return db.get(\"processed_webhooks\", webhook_id) is not None\n+\n+def get_processed_meta(webhook_id: str) -> dict[str, Any] | None:\n+    return db.get(\"processed_webhooks\", webhook_id)\n",
+      "patch_bytes": 460,
+      "patch_preview": "--- a/store/webhook_repo.py\n+++ b/store/webhook_repo.py\n@@ -6,3 +6,7 @@ def mark_processed(webhook_id: str, meta: dict[str, Any] | None = None) -> None:\n     db.put(\"processed_webhooks\", webhook_id, meta or {\"id\": webhook_id})\n \n def is_processed(webhook_id: str) -> bool:\n     return db.get(\"processed_webhooks\", webhook_id) is not None\n+\n+def get_processed_meta(webhook_id: str) -> dict[str, Any] | None:\n+    return db.get(\"processed_webhooks\", webhook_id)\n",
+      "apply_detail": "fuzzy applied 1 hunks"
+    },
+    "tool_calls": 7,
+    "files_read": [
+      "service/payment_service.py",
+      "store/__init__.py",
+      "store/db.py",
+      "store/webhook_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/webhook_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/webhook_repo.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 187.46,
+    "prompt_tokens": 11743,
+    "eval_tokens": 7492,
+    "rounds": 8,
+    "done_reason": "think_promoted",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 516,
+    "thinking_chars": 46756,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/qwen36_univ_med_rh__race_webhook_idempotency.txt",
+    "raw_content": "<arch_final>\n{\"patch\": \"--- a/store/webhook_repo.py\\n+++ b/store/webhook_repo.py\\n@@ -6,3 +6,7 @@ def mark_processed(webhook_id: str, meta: dict[str, Any] | None = None) -> None:\\n     db.put(\\\"processed_webhooks\\\", webhook_id, meta or {\\\"id\\\": webhook_id})\\n \\n def is_processed(webhook_id: str) -> bool:\\n     return db.get(\\\"processed_webhooks\\\", webhook_id) is not None\\n+\\n+def get_processed_meta(webhook_id: str) -> dict[str, Any] | None:\\n+    return db.get(\\\"processed_webhooks\\\", webhook_id)\"}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "money_rounding_split",
+    "title": "Money.split loses cents",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 2/2 (fuzzy applied 1 hunks)",
+    "passed": 2,
+    "total": 2,
+    "answer": {
+      "patch": "--- a/pkg/money.py\n+++ b/pkg/money.py\n@@ -24,8 +24,10 @@ class Money:\n         \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n         if parts <= 0:\n             raise ValueError(\"parts must be positive\")\n-        share = self.cents / parts\n-        base = int(share)\n-        return [Money(base, self.currency) for _ in range(parts)]\n+        base = self.cents // parts\n+        remainder = self.cents % parts\n+        return [\n+            Money(base + (1 if i < remainder else 0), self.currency) for i in range(parts)\n+        ]\n",
+      "patch_bytes": 543,
+      "patch_preview": "--- a/pkg/money.py\n+++ b/pkg/money.py\n@@ -24,8 +24,10 @@ class Money:\n         \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n         if parts <= 0:\n             raise ValueError(\"parts must be positive\")\n-        share = self.cents / parts\n-        base = int(share)\n-        return [Money(base, self.currency) for _ in range(parts)]\n+        base = self.cents // parts\n+        remainder = self.cents % parts\n+        return [\n+            Money(base + (1 if i < remainder else 0), self.currency) for i in range(parts)\n+        ]\n",
+      "apply_detail": "fuzzy applied 1 hunks"
+    },
+    "tool_calls": 3,
+    "files_read": [
+      "pkg/money.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "pkg"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/money.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 63.54,
+    "prompt_tokens": 3632,
+    "eval_tokens": 4320,
+    "rounds": 4,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 603,
+    "thinking_chars": 13773,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/qwen36_univ_med_rh__money_rounding_split.txt",
+    "raw_content": "<arch_final>\n{\"patch\": \"--- a/pkg/money.py\\n+++ b/pkg/money.py\\n@@ -24,8 +24,10 @@ class Money:\\n         \\\"\\\"\\\"Split into N parts that sum exactly to self.cents.\\\"\\\"\\\"\\n         if parts <= 0:\\n             raise ValueError(\\\"parts must be positive\\\")\\n-        share = self.cents / parts\\n-        base = int(share)\\n-        return [Money(base, self.currency) for _ in range(parts)]\\n+        base = self.cents // parts\\n+        remainder = self.cents % parts\\n+        return [\\n+            Money(base + (1 if i < remainder else 0), self.currency) for i in range(parts)\\n+        ]\"}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "nplus1_reconciliation",
+    "title": "Reconciliation N+1 payment lookups",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 2/2 (fuzzy applied 1 hunks)",
+    "passed": 2,
+    "total": 2,
+    "answer": {
+      "patch": "--- a/service/reconcile_service.py\n+++ b/service/reconcile_service.py\n@@ -10,10 +10,22 @@ def reconcile_tenant() -> dict[str, Any]:\n     \"\"\"Match open invoices to payments.\"\"\"\n     ctx = require_tenant()\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n+    \n+    # Load all payments for the tenant once to avoid N+1 lookups\n+    all_payments = payment_repo.list_by_tenant(ctx.tenant_id)\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\n+    for p in all_payments:\n+        inv_id = p.get(\"invoice_id\")\n+        if inv_id:\n+            if inv_id not in payments_by_invoice:\n+                payments_by_invoice[inv_id] = []\n+            payments_by_invoice[inv_id].append(p)\n+    \n     matched = 0\n     gaps = []\n     for inv in invoices:\n-        pays = payment_repo.list_by_invoice(inv[\"id\"])\n+        pays = payments_by_invoice.get(inv[\"id\"], [])\n         paid = sum(p.get(\"amount_cents\", 0) for p in pays)\n         if paid >= inv.get(\"amount_cents\", 0) and inv.get(\"status\") == \"paid\":\n             matched += 1\n",
+      "patch_bytes": 1040,
+      "patch_preview": "--- a/service/reconcile_service.py\n+++ b/service/reconcile_service.py\n@@ -10,10 +10,22 @@ def reconcile_tenant() -> dict[str, Any]:\n     \"\"\"Match open invoices to payments.\"\"\"\n     ctx = require_tenant()\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n+    \n+    # Load all payments for the tenant once to avoid N+1 lookups\n+    all_payments = payment_repo.list_by_tenant(ctx.tenant_id)\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\n+    for p in all_payments:\n+        inv_id = p.get(\"invoice_id\")\n+        if inv_id:\n+            if inv_id not in payments_by_invoice:\n+                payments_by_invoice[inv_id] = []\n+            payments_by_invoice[inv_id].append(p)\n+    \n     matched = 0\n     gaps = []\n     for inv in invoices:\n-        pays = payment_repo.list_by_invoice(inv[\"id\"])\n+        pays = payments_by_invoice.get(inv[\"id\"], [])\n         paid = sum(p.get(\"amount_cents\", 0) for p in pays)\n         if paid >= inv.get(\"amount_cents\", 0) and inv.get(\"status\") == \"paid\":\n             matched += 1\n",
+      "apply_detail": "fuzzy applied 1 hunks"
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "service/reconcile_service.py",
+      "store/payment_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/reconcile_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 71.9,
+    "prompt_tokens": 4007,
+    "eval_tokens": 583,
+    "rounds": 5,
+    "done_reason": "think_promoted",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 1123,
+    "thinking_chars": 16877,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/qwen36_univ_med_rh__nplus1_reconciliation.txt",
+    "raw_content": "<arch_final>\n{\"patch\": \"--- a/service/reconcile_service.py\\n+++ b/service/reconcile_service.py\\n@@ -10,10 +10,22 @@ def reconcile_tenant() -> dict[str, Any]:\\n     \\\"\\\"\\\"Match open invoices to payments.\\\"\\\"\\\"\\n     ctx = require_tenant()\\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\\n+    \\n+    # Load all payments for the tenant once to avoid N+1 lookups\\n+    all_payments = payment_repo.list_by_tenant(ctx.tenant_id)\\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\\n+    for p in all_payments:\\n+        inv_id = p.get(\\\"invoice_id\\\")\\n+        if inv_id:\\n+            if inv_id not in payments_by_invoice:\\n+                payments_by_invoice[inv_id] = []\\n+            payments_by_invoice[inv_id].append(p)\\n+    \\n     matched = 0\\n     gaps = []\\n     for inv in invoices:\\n-        pays = payment_repo.list_by_invoice(inv[\\\"id\\\"])\\n+        pays = payments_by_invoice.get(inv[\\\"id\\\"], [])\\n         paid = sum(p.get(\\\"amount_cents\\\", 0) for p in pays)\\n         if paid >= inv.get(\\\"amount_cents\\\", 0) and inv.get(\\\"status\\\") == \\\"paid\\\":\\n             matched += 1\"}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "confused_deputy_admin",
+    "title": "Internal export ignores tenant boundary",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 4/4 (applied via --whitespace=nowarn -p1)",
+    "passed": 4,
+    "total": 4,
+    "answer": {
+      "patch": "--- a/service/admin_service.py\n+++ b/service/admin_service.py\n@@ -9,6 +9,8 @@ from pkg.tenant import require_tenant\n def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n     \"\"\"Internal export used by ops dashboards.\"\"\"\n     ctx = require_tenant()\n     tid = target_tenant_id or ctx.tenant_id\n+    if target_tenant_id is not None and target_tenant_id != ctx.tenant_id and not ctx.is_admin:\n+        raise PermissionError(\"cannot export foreign tenant invoices\")\n     rows = invoice_repo.list_by_tenant(tid)\n     audit_repo.write(ctx.tenant_id, \"export_invoices\", {\"target\": tid, \"n\": len(rows)})\n     return rows\n",
+      "patch_bytes": 643,
+      "patch_preview": "--- a/service/admin_service.py\n+++ b/service/admin_service.py\n@@ -9,6 +9,8 @@ from pkg.tenant import require_tenant\n def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n     \"\"\"Internal export used by ops dashboards.\"\"\"\n     ctx = require_tenant()\n     tid = target_tenant_id or ctx.tenant_id\n+    if target_tenant_id is not None and target_tenant_id != ctx.tenant_id and not ctx.is_admin:\n+        raise PermissionError(\"cannot export foreign tenant invoices\")\n     rows = invoice_repo.list_by_tenant(tid)\n     audit_repo.write(ctx.tenant_id, \"export_invoices\", {\"target\": tid, \"n\": len(rows)})\n     return rows\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "api/internal.py",
+      "service/admin_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/internal.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/admin_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 35.29,
+    "prompt_tokens": 4998,
+    "eval_tokens": 2301,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 707,
+    "thinking_chars": 7634,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/qwen36_univ_med_rh__confused_deputy_admin.txt",
+    "raw_content": "<arch_final>\n{\"patch\": \"--- a/service/admin_service.py\\n+++ b/service/admin_service.py\\n@@ -9,6 +9,8 @@ from pkg.tenant import require_tenant\\n def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\\n     \\\"\\\"\\\"Internal export used by ops dashboards.\\\"\\\"\\\"\\n     ctx = require_tenant()\\n     tid = target_tenant_id or ctx.tenant_id\\n+    if target_tenant_id is not None and target_tenant_id != ctx.tenant_id and not ctx.is_admin:\\n+        raise PermissionError(\\\"cannot export foreign tenant invoices\\\")\\n     rows = invoice_repo.list_by_tenant(tid)\\n     audit_repo.write(ctx.tenant_id, \\\"export_invoices\\\", {\\\"target\\\": tid, \\\"n\\\": len(rows)})\\n     return rows\"}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "outbox_poison_retry",
+    "title": "Outbox acks poison events",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: b/worker/outbox_worker.py: No such file or directory; fuzzy: no hunks applied (skipped=['worker/outbox_worker.py@29'])",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "--- a/worker/outbox_worker.py\n+++ b/worker/outbox_worker.py\n@@ -29,5 +29,5 @@ def process_once(publish: Callable[[dict], None] | None = None) -> dict[str, Any\n             ok += 1\n         except Exception:\n             failed += 1\n-    outbox.ack(row[\"id\"])\n+        outbox.ack(row[\"id\"])\n     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n",
+      "patch_bytes": 352,
+      "patch_preview": "--- a/worker/outbox_worker.py\n+++ b/worker/outbox_worker.py\n@@ -29,5 +29,5 @@ def process_once(publish: Callable[[dict], None] | None = None) -> dict[str, Any\n             ok += 1\n         except Exception:\n             failed += 1\n-    outbox.ack(row[\"id\"])\n+        outbox.ack(row[\"id\"])\n     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n",
+      "apply_detail": "git apply failed: error: b/worker/outbox_worker.py: No such file or directory; fuzzy: no hunks applied (skipped=['worker/outbox_worker.py@29'])"
+    },
+    "tool_calls": 3,
+    "files_read": [
+      "worker/outbox_worker.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "worker"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 36.14,
+    "prompt_tokens": 3279,
+    "eval_tokens": 2443,
+    "rounds": 4,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 409,
+    "thinking_chars": 7674,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/qwen36_univ_med_rh__outbox_poison_retry.txt",
+    "raw_content": "<arch_final>\n{\"patch\": \"--- a/worker/outbox_worker.py\\n+++ b/worker/outbox_worker.py\\n@@ -29,5 +29,5 @@ def process_once(publish: Callable[[dict], None] | None = None) -> dict[str, Any\\n             ok += 1\\n         except Exception:\\n             failed += 1\\n-    outbox.ack(row[\\\"id\\\"])\\n+        outbox.ack(row[\\\"id\\\"])\\n     return {\\\"ok\\\": ok, \\\"failed\\\": failed, \\\"batch\\\": len(batch)}\"}\n</arch_final>"
+  }
+]

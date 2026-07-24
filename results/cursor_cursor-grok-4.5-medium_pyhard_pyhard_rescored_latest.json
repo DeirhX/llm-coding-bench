@@ -1,0 +1,92 @@
+[
+  {
+    "model": "cursor-grok-4.5-medium",
+    "task": "regex_match",
+    "ok": false,
+    "score": 0,
+    "max_score": 12,
+    "error": "agent exit 1: Error: [unavailable] getaddrinfo ENOTFOUND api2.cursor.sh",
+    "score_before": 0,
+    "rescore_source": "unavailable"
+  },
+  {
+    "model": "cursor-grok-4.5-medium",
+    "task": "lru_cache",
+    "ok": false,
+    "score": 0,
+    "max_score": 14,
+    "error": "agent exit 1: Error: [unavailable] getaddrinfo ENOTFOUND api2.cursor.sh",
+    "score_before": 0,
+    "rescore_source": "unavailable"
+  },
+  {
+    "model": "cursor-grok-4.5-medium",
+    "task": "alien_order",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "error": "agent exit 1: Error: [unavailable] getaddrinfo ENOTFOUND api2.cursor.sh",
+    "score_before": 0,
+    "rescore_source": "unavailable"
+  },
+  {
+    "model": "cursor-grok-4.5-medium",
+    "task": "eval_expr",
+    "ok": false,
+    "score": 0,
+    "max_score": 12,
+    "error": "agent exit 1: Error: [unavailable] getaddrinfo ENOTFOUND api2.cursor.sh",
+    "score_before": 0,
+    "rescore_source": "unavailable"
+  },
+  {
+    "model": "cursor-grok-4.5-medium",
+    "task": "fix_vm",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "error": "agent exit 1: Error: [unavailable] getaddrinfo ENOTFOUND api2.cursor.sh",
+    "score_before": 0,
+    "rescore_source": "unavailable"
+  },
+  {
+    "model": "cursor-grok-4.5-medium",
+    "task": "sat_solve",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "error": "agent exit 1: Error: [unavailable] getaddrinfo ENOTFOUND api2.cursor.sh",
+    "score_before": 0,
+    "rescore_source": "unavailable"
+  },
+  {
+    "model": "cursor-grok-4.5-medium",
+    "task": "json_patch",
+    "ok": false,
+    "score": 0,
+    "max_score": 13,
+    "error": "agent exit 1: Error: [unavailable] getaddrinfo ENOTFOUND api2.cursor.sh",
+    "score_before": 0,
+    "rescore_source": "unavailable"
+  },
+  {
+    "model": "cursor-grok-4.5-medium",
+    "task": "unify",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "error": "agent exit 1: Error: [unavailable] getaddrinfo ENOTFOUND api2.cursor.sh",
+    "score_before": 0,
+    "rescore_source": "unavailable"
+  },
+  {
+    "model": "cursor-grok-4.5-medium",
+    "task": "mini_sql",
+    "ok": false,
+    "score": 0,
+    "max_score": 8,
+    "error": "agent exit 1: Error: [unavailable] getaddrinfo ENOTFOUND api2.cursor.sh",
+    "score_before": 0,
+    "rescore_source": "unavailable"
+  }
+]

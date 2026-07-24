@@ -1,0 +1,9 @@
+{
+  "model": "qwen3-coder:30b-a3b-fp16",
+  "tag": "qwen3-coder_30b-a3b-fp16_repohard",
+  "score": 5,
+  "max_score": 80,
+  "pass": 0,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/qwen3-coder_30b-a3b-fp16_repohard_20260723_175659.json"
+}

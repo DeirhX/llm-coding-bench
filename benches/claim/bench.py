@@ -35,6 +35,8 @@ from bench_lib.ollama_think import (  # noqa: E402
     format_think_combined,
     parse_think,
     save_task_transcript,
+    think_for_round,
+    think_loop_nudge,
 )
 from bench_lib.paths import results_dir  # noqa: E402
 from benches.shopapi.tools import FIXTURE_ROOT, ToolSession  # noqa: E402
@@ -73,8 +75,22 @@ if len(CLAIMS) < 20:
     raise SystemExit(f"claims.yaml looks empty/broken: {len(CLAIMS)} claims from {_CLAIMS_PATH}")
 
 
-def chat(model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
-    return ollama_chat(model, messages, options=OPTIONS, think=THINK)
+def chat(
+    model: str,
+    messages: list[dict[str, str]],
+    *,
+    think: bool | str | None = None,
+    on_thinking=None,
+    on_content=None,
+) -> dict[str, Any]:
+    return ollama_chat(
+        model,
+        messages,
+        options=OPTIONS,
+        think=THINK if think is None else think,
+        on_thinking=on_thinking,
+        on_content=on_content,
+    )
 
 
 _TOOL_RE = re.compile(
@@ -101,30 +117,41 @@ _FENCE_JSON = re.compile(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", re.I)
 
 
 def parse_final(text: str) -> dict[str, Any] | None:
+    """Extract claim JSON from arch_final, a ```json fence, or a bare object.
+
+    Prefer fenced JSON over a greedy ``{..."answers"...}`` scan: Cursor ask-mode
+    answers often put a valid fence first, then more prose/code with ``}`` that
+    poisons the greedy match (composer/haiku scored 0/23 with a perfect fence).
+    """
+    text = text or ""
+    candidates: list[str] = []
     m = _FINAL_RE.search(text)
-    blob = m.group(1).strip() if m else None
-    if not blob:
-        m2 = re.search(r"\{[\s\S]*\"answers\"[\s\S]*\}", text)
-        blob = m2.group(0) if m2 else None
-    if not blob:
-        return None
-    fence = _FENCE_JSON.search(blob)
-    if fence:
-        blob = fence.group(1).strip()
-    else:
-        blob = re.sub(r"^```(?:json)?\s*", "", blob.strip(), flags=re.I)
-        blob = re.sub(r"\s*```$", "", blob.strip())
-    try:
-        obj = json.loads(blob)
-        return obj if isinstance(obj, dict) else None
-    except json.JSONDecodeError:
-        cleaned = re.sub(r",\s*}", "}", blob)
-        cleaned = re.sub(r",\s*]", "]", cleaned)
-        try:
-            obj = json.loads(cleaned)
-            return obj if isinstance(obj, dict) else None
-        except json.JSONDecodeError:
-            return None
+    if m:
+        candidates.append(m.group(1).strip())
+    # All json fences — try last first (final answer usually lands at the end).
+    fences = _FENCE_JSON.findall(text)
+    candidates.extend(reversed(fences))
+    m2 = re.search(r"\{[\s\S]*\"answers\"[\s\S]*\}", text)
+    if m2:
+        candidates.append(m2.group(0))
+
+    for blob in candidates:
+        if not blob:
+            continue
+        fence = _FENCE_JSON.search(blob)
+        if fence:
+            blob = fence.group(1).strip()
+        else:
+            blob = re.sub(r"^```(?:json)?\s*", "", blob.strip(), flags=re.I)
+            blob = re.sub(r"\s*```$", "", blob.strip())
+        for attempt in (blob, re.sub(r",\s*}", "}", re.sub(r",\s*]", "]", blob))):
+            try:
+                obj = json.loads(attempt)
+                if isinstance(obj, dict) and "answers" in obj:
+                    return obj
+            except json.JSONDecodeError:
+                continue
+    return None
 
 
 def coerce_bool(v: Any) -> bool | None:
@@ -273,29 +300,51 @@ def run_selftest() -> int:
 def run_model_ollama() -> dict[str, Any]:
     session = ToolSession(max_calls=MAX_TOOL_CALLS)
     messages = [{"role": "user", "content": PROMPT}]
-    transcript = RoundTranscript()
+    transcript = RoundTranscript(OUT_DIR, TAG, "claim")
     totals = {"wall_s": 0.0, "prompt_tokens": 0, "eval_tokens": 0, "rounds": 0, "done_reason": None}
     final = None
+    think_loop_nudges = 0
     for round_i in range(MAX_ROUNDS):
         totals["rounds"] = round_i + 1
-        resp = chat(MODEL, messages)
+        transcript.begin_round(round_i + 1)
+        round_think = think_for_round(round_i, THINK)
+        resp = chat(
+            MODEL,
+            messages,
+            think=round_think,
+            on_thinking=transcript.on_thinking_delta,
+            on_content=transcript.on_content_delta,
+        )
         totals["wall_s"] += resp["wall_s"]
         totals["prompt_tokens"] += resp["prompt_tokens"]
         totals["eval_tokens"] += resp["eval_tokens"]
         totals["done_reason"] = resp["done_reason"]
         content = resp["content"] or ""
         thinking = resp.get("thinking") or ""
-        transcript.add_round(
-            round_i + 1,
+        transcript.end_round(
             thinking=thinking,
             content=content,
             done_reason=resp.get("done_reason"),
             eval_tokens=resp.get("eval_tokens"),
         )
+        abort_reason = resp.get("done_reason") or ""
+        if abort_reason in ("think_loop", "think_budget"):
+            transcript.add_note(
+                f"{abort_reason.upper()} aborted: "
+                f"{resp.get('think_loop_detail') or abort_reason}"
+            )
+        if resp.get("think_promoted"):
+            transcript.add_note("THINK_PROMOTED: final scraped from thinking")
         messages.append({"role": "assistant", "content": content})
         final = parse_final(content)
         if final is not None and parse_tool_call(content) is None:
             break
+        if abort_reason in ("think_loop", "think_budget") and think_loop_nudges < 2:
+            think_loop_nudges += 1
+            nudge = think_loop_nudge(thinking=thinking, protocol="claim")
+            transcript.add_note(f"{abort_reason} nudge {think_loop_nudges}/2")
+            messages.append({"role": "user", "content": nudge})
+            continue
         call = parse_tool_call(content)
         if call is None:
             nudge = "Emit one <arch_tool> or <arch_final> with all c01..c20 booleans."
@@ -313,7 +362,7 @@ def run_model_ollama() -> dict[str, Any]:
             }
         )
     grade = grade_answers(final, session)
-    transcript_path = transcript.save(OUT_DIR, TAG, "claim")
+    transcript_path = transcript.save()
     return {
         "model": MODEL,
         "provider": "ollama",

@@ -1,0 +1,877 @@
+[
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "chain_delete_order",
+    "title": "Call chain: DELETE /orders/{id}",
+    "family": "call_chain",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; effects 3/3; evidence(reads) 2/2",
+    "answer": {
+      "chain": [
+        "api.orders.handle_delete_order",
+        "pkg.auth.authenticate",
+        "service.order_service.cancel_order",
+        "pkg.tenant.require_tenant",
+        "store.order_repo.get",
+        "store.order_repo.soft_delete",
+        "store.outbox.insert",
+        "store.cache.invalidate_order",
+        "pkg.auth.clear_auth"
+      ],
+      "side_effects": [
+        "Order row soft-deleted in database",
+        "OrderCancelled event persisted to outbox",
+        "Order cache entry invalidated"
+      ],
+      "citations": [
+        "api/orders.py:handle_delete_order",
+        "pkg/auth.py:authenticate",
+        "service/order_service.py:cancel_order",
+        "pkg/tenant.py:require_tenant",
+        "store/order_repo.py:get",
+        "store/order_repo.py:soft_delete",
+        "store/outbox.py:insert",
+        "store/cache.py:invalidate_order",
+        "pkg/auth.py:clear_auth"
+      ]
+    },
+    "tool_calls": 11,
+    "files_read": [
+      "api/orders.py",
+      "pkg/auth.py",
+      "pkg/events.py",
+      "pkg/tenant.py",
+      "service/order_service.py",
+      "store/cache.py",
+      "store/db.py",
+      "store/order_repo.py",
+      "store/outbox.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/auth.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/events.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 18.1,
+    "prompt_tokens": 31201,
+    "eval_tokens": 906,
+    "rounds": 12,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 2297,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/qwen36_univ_off_ar__chain_delete_order.txt",
+    "raw_content": "Based on the code inspection, here is the trace for `DELETE /orders/{id}`:\n\n1.  **API Layer**: `api/orders.py:handle_delete_order` is the entry point. It calls `auth.authenticate` to set up the tenant context, then calls `order_service.cancel_order`. Finally, it calls `auth.clear_auth`.\n2.  **Service Layer**: `service/order_service.py:cancel_order` retrieves the tenant context via `require_tenant` (which uses `pkg/tenant.py`). It validates the order exists and belongs to the tenant using `order_repo.get`.\n3.  **Durable Effects**:\n    *   `store/order_repo.py:soft_delete` is called, which updates the order row in the database (`store/db.py:put`) to mark it as deleted/cancelled.\n    *   `store/outbox.py:insert` is called with an `OrderCancelled` event (created via `pkg/events.py:order_cancelled`). This persists the event to the outbox table in the database.\n    *   `store/cache.py:invalidate_order` is called to remove the order from the in-memory cache.\n\nThe chain of calls on the success path is:\n`api.orders.handle_delete_order` -> `pkg.auth.authenticate` -> `service.order_service.cancel_order` -> `pkg.tenant.require_tenant` -> `store.order_repo.get` -> `store.order_repo.soft_delete` -> `store.outbox.insert` -> `store.cache.invalidate_order` -> `pkg.auth.clear_auth`.\n\nNote: `auth.authenticate` and `auth.clear_auth` are part of the success path (in try/finally). `require_tenant` is called inside `cancel_order`.\n\n<arch_final>\n{\n   \"chain\": [\n     \"api.orders.handle_delete_order\",\n     \"pkg.auth.authenticate\",\n     \"service.order_service.cancel_order\",\n     \"pkg.tenant.require_tenant\",\n     \"store.order_repo.get\",\n     \"store.order_repo.soft_delete\",\n     \"store.outbox.insert\",\n     \"store.cache.invalidate_order\",\n     \"pkg.auth.clear_auth\"\n   ],\n   \"side_effects\": [\n     \"Order row soft-deleted in database\",\n     \"OrderCancelled event persisted to outbox\",\n     \"Order cache entry invalidated\"\n   ],\n   \"citations\": [\n     \"api/orders.py:handle_delete_order\",\n     \"pkg/auth.py:authenticate\",\n     \"service/order_service.py:cancel_order\",\n     \"pkg/tenant.py:require_tenant\",\n     \"store/order_repo.py:get\",\n     \"store/order_repo.py:soft_delete\",\n     \"store/outbox.py:insert\",\n     \"store/cache.py:invalidate_order\",\n     \"pkg/auth.py:clear_auth\"\n   ]\n}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "chain_payment_webhook",
+    "title": "Call chain: POST /webhooks/payment",
+    "family": "call_chain",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; payment_effect=1; evidence(reads) 2/2",
+    "answer": {
+      "chain": [
+        "api.webhooks.handle_payment_webhook",
+        "service.payment_service.handle_payment_webhook",
+        "pkg.events.order_paid",
+        "store.outbox.insert",
+        "service.order_service.mark_paid",
+        "store.order_repo.update_status",
+        "service.payment_service._mark_processed"
+      ],
+      "side_effects": [
+        "Insert payment record into payments table",
+        "Insert OrderPaid event into outbox table",
+        "Update order status to paid in orders table",
+        "Mark webhook ID as processed in processed_webhooks table"
+      ],
+      "citations": [
+        "api/webhooks.py:handle_payment_webhook",
+        "service/payment_service.py:handle_payment_webhook",
+        "pkg/events.py:order_paid",
+        "store/outbox.py:insert",
+        "service/order_service.py:mark_paid",
+        "store/order_repo.py:update_status",
+        "service/payment_service.py:_mark_processed"
+      ]
+    },
+    "tool_calls": 11,
+    "files_read": [
+      "api/webhooks.py",
+      "pkg/auth.py",
+      "pkg/events.py",
+      "pkg/tenant.py",
+      "service/order_service.py",
+      "service/payment_service.py",
+      "store/db.py",
+      "store/order_repo.py",
+      "store/outbox.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "webhooks/payment",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/events.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/auth.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 17.24,
+    "prompt_tokens": 29660,
+    "eval_tokens": 931,
+    "rounds": 12,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 2415,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/qwen36_univ_off_ar__chain_payment_webhook.txt",
+    "raw_content": "Based on the code inspection, here is the trace for `POST /webhooks/payment` for a new (non-duplicate) webhook:\n\n1.  **`api.webhooks.handle_payment_webhook`**: Entry point. Authenticates the request via `auth.authenticate`, then delegates to `payment_service.handle_payment_webhook`. Finally, clears auth context.\n2.  **`service.payment_service.handle_payment_webhook`**: Extracts payload data. Checks for duplicates via `_already_processed` (returns early if duplicate, but task specifies non-duplicate).\n    *   Calls `db.put` to save the payment record.\n    *   Calls `outbox.insert` with an event generated by `pkg.events.order_paid`.\n    *   Calls `order_service.mark_paid`.\n    *   Calls `_mark_processed` to record the webhook ID as processed via `db.put`.\n3.  **`pkg.events.order_paid`**: Creates an `Event` dataclass instance.\n4.  **`store.outbox.insert`**: Persists the event to the `outbox` table in the database.\n5.  **`service.order_service.mark_paid`**: Updates the order status to \"paid\" via `order_repo.update_status`.\n6.  **`store.order_repo.update_status`**: Updates the order row in the `orders` table in the database.\n7.  **`service.payment_service._mark_processed`**: Marks the webhook ID as processed in the `processed_webhooks` table in the database.\n\nSide effects:\n-   Payment record inserted into `payments` table.\n-   `OrderPaid` event inserted into `outbox` table.\n-   Order status updated to `paid` in `orders` table.\n-   Webhook ID marked as processed in `processed_webhooks` table.\n\n<arch_final>\n{\n   \"chain\": [\n     \"api.webhooks.handle_payment_webhook\",\n     \"service.payment_service.handle_payment_webhook\",\n     \"pkg.events.order_paid\",\n     \"store.outbox.insert\",\n     \"service.order_service.mark_paid\",\n     \"store.order_repo.update_status\",\n     \"service.payment_service._mark_processed\"\n   ],\n   \"side_effects\": [\n     \"Insert payment record into payments table\",\n     \"Insert OrderPaid event into outbox table\",\n     \"Update order status to paid in orders table\",\n     \"Mark webhook ID as processed in processed_webhooks table\"\n   ],\n   \"citations\": [\n     \"api/webhooks.py:handle_payment_webhook\",\n     \"service/payment_service.py:handle_payment_webhook\",\n     \"pkg/events.py:order_paid\",\n     \"store/outbox.py:insert\",\n     \"service/order_service.py:mark_paid\",\n     \"store/order_repo.py:update_status\",\n     \"service/payment_service.py:_mark_processed\"\n   ]\n}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "tenant_invoice_isolation",
+    "title": "Tenant isolation for invoices",
+    "family": "invariant",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "enforced/bypass scoring; evidence(reads) 2/2; enf='service.invoice_service.list_invoices' by='service.invoice_service.get_invoice | service.invoice_service.admin_export_invoices'",
+    "answer": {
+      "enforced_at": [
+        "service.invoice_service.list_invoices"
+      ],
+      "bypasses": [
+        "service.invoice_service.get_invoice",
+        "service.invoice_service.admin_export_invoices"
+      ],
+      "citations": [
+        "service/invoice_service.py:list_invoices",
+        "service/invoice_service.py:get_invoice",
+        "service/invoice_service.py:admin_export_invoices"
+      ]
+    },
+    "tool_calls": 9,
+    "files_read": [
+      "README.md",
+      "api/invoices.py",
+      "pkg/auth.py",
+      "pkg/tenant.py",
+      "service/invoice_service.py",
+      "store/db.py",
+      "store/invoice_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "invoice",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/auth.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 12.76,
+    "prompt_tokens": 23766,
+    "eval_tokens": 671,
+    "rounds": 10,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 1715,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/qwen36_univ_off_ar__tenant_invoice_isolation.txt",
+    "raw_content": "Based on the code inspection:\n\n1.  **Enforced At**:\n    *   `service.invoice_service.list_invoices` explicitly retrieves the tenant context via `require_tenant()` and passes `tenant.tenant_id` to `invoice_repo.list_by_tenant`. This enforces tenant scoping for the list operation.\n    *   Citation: `service/invoice_service.py:list_invoices`\n\n2.  **Bypasses**:\n    *   `service.invoice_service.get_invoice`: The docstring explicitly states \"no tenant filter on the row\". It calls `require_tenant()` only to ensure authentication, but does not use the tenant ID to filter the invoice lookup. It calls `invoice_repo.get_by_id(invoice_id)` which performs a direct ID lookup without tenant scoping. This allows a user to retrieve any invoice if they know the ID.\n    *   Citation: `service/invoice_service.py:get_invoice`\n    *   `service.invoice_service.admin_export_invoices`: This function is explicitly for admin export across tenants. It calls `invoice_repo.export_all()` which scans all invoices. While it checks `tenant.is_admin`, it bypasses the tenant-scoping invariant I2 by design (exporting all tenants' data).\n    *   Citation: `service/invoice_service.py:admin_export_invoices`\n\nThe `api/invoices.py` handlers delegate to these service functions, so the enforcement/bypass logic resides in the service layer.\n\n<arch_final>\n{\n   \"enforced_at\": [\n     \"service.invoice_service.list_invoices\"\n   ],\n   \"bypasses\": [\n     \"service.invoice_service.get_invoice\",\n     \"service.invoice_service.admin_export_invoices\"\n   ],\n   \"citations\": [\n     \"service/invoice_service.py:list_invoices\",\n     \"service/invoice_service.py:get_invoice\",\n     \"service/invoice_service.py:admin_export_invoices\"\n   ]\n}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "invariant_doc_vs_code",
+    "title": "Which README invariants fail?",
+    "family": "invariant",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "violated=['I2', 'I3', 'I4']; evidence(reads) 3/3",
+    "answer": {
+      "violated_invariants": [
+        "I2",
+        "I3",
+        "I4"
+      ],
+      "evidence": {
+        "I2": "invoice_service.get_invoice calls invoice_repo.get_by_id without filtering by tenant_id, allowing cross-tenant access.",
+        "I3": "payment_service.handle_payment_webhook marks the webhook as processed only after inserting the outbox event and updating the order. A crash between these steps would cause duplicate outbox events on retry.",
+        "I4": "service.order_service.mark_paid updates the order status to 'paid' but does not call cache.invalidate_order, leaving stale cache entries."
+      },
+      "citations": [
+        "service/invoice_service.py:get_invoice",
+        "store/invoice_repo.py:get_by_id",
+        "service/payment_service.py:handle_payment_webhook",
+        "service/order_service.py:mark_paid"
+      ]
+    },
+    "tool_calls": 20,
+    "files_read": [
+      "README.md",
+      "api/invoices.py",
+      "api/orders.py",
+      "api/webhooks.py",
+      "service/invoice_service.py",
+      "service/order_service.py",
+      "service/payment_service.py",
+      "store/cache.py",
+      "store/invoice_repo.py",
+      "store/order_repo.py",
+      "store/outbox.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "create_order|handle_create_order"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "def handle_",
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "order_repo.create"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "outbox.insert"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "def create_order|def handle_create"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "cache.invalidate"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "update_status"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 28.93,
+    "prompt_tokens": 84801,
+    "eval_tokens": 1588,
+    "rounds": 21,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 3965,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/qwen36_univ_off_ar__invariant_doc_vs_code.txt",
+    "raw_content": "Based on the code inspection:\n\n**I1: Every mutating order API writes an outbox event before returning.**\n- `cancel_order` (line 39) writes `order_cancelled` before returning.\n- `mark_paid` (line 50) writes `order_status_changed` before returning.\n- `handle_payment_webhook` in `payment_service.py` writes `order_paid` (line 40) before calling `order_service.mark_paid` and returning.\n- There is no `create_order` API endpoint visible in `api/orders.py` or elsewhere that would violate this. The existing mutating endpoints (`cancel`, `mark_paid` via webhook) all write outbox events.\n- **Conclusion**: I1 is NOT violated.\n\n**I2: Invoice reads are tenant-scoped.**\n- `list_invoices` in `invoice_service.py` (line 11) calls `invoice_repo.list_by_tenant(tenant.tenant_id)`, which is tenant-scoped.\n- `get_invoice` in `invoice_service.py` (line 17) calls `invoice_repo.get_by_id(invoice_id)`. The repo method `get_by_id` (in `store/invoice_repo.py` line 12-14) has no tenant filter. The comment explicitly says \"BUG (planted): no tenant filter\". The service method calls `require_tenant()` but does not use the tenant ID to filter the invoice lookup. This allows a user to retrieve any invoice by ID, violating tenant isolation.\n- **Conclusion**: I2 IS violated.\n\n**I3: Payment webhooks are idempotent (no double charge / duplicate OrderPaid).**\n- `handle_payment_webhook` in `payment_service.py` checks `_already_processed(webhook_id)` (line 26). If true, it returns early without processing.\n- It marks the webhook as processed (`_mark_processed`) at line 43, *after* the outbox insert and order update.\n- However, the check at line 26 prevents double processing. If the webhook is received again, it returns \"duplicate\".\n- Wait, look closely at the order of operations.\n    1. Check if processed (line 26).\n    2. Insert payment (line 29-38).\n    3. Insert outbox event (line 40).\n    4. Update order status (line 41).\n    5. Mark as processed (line 43).\n- If the service crashes between step 4 and 5, and retries, `_already_processed` will return False (since it wasn't marked yet). It will then re-insert the payment, re-insert the outbox event, and re-update the order. This leads to duplicate outbox events (`order_paid`) and potentially duplicate side effects if the outbox consumer is not idempotent. The invariant says \"no double charge / duplicate OrderPaid\". The outbox event `order_paid` is inserted *before* marking as processed. A retry would insert another `order_paid` event. Thus, idempotency is not guaranteed against crashes between processing and marking.\n- **Conclusion**: I3 IS violated.\n\n**I4: Order cache entries are invalidated on any status change.**\n- `cancel_order` calls `cache.invalidate_order(order_id)` (line 40).\n- `mark_paid` calls `order_repo.update_status` but does NOT call `cache.invalidate_order`. The comment on line 51 says \"# payment event inserted by payment_service, not here\", but it doesn't mention cache invalidation.\n- Since `mark_paid` changes the order status to \"paid\" but does not invalidate the cache, the cache entry remains stale.\n- **Conclusion**: I4 IS violated.\n\nViolated invariants: I2, I3, I4.\n\n<arch_final>\n{\n   \"violated_invariants\": [\"I2\", \"I3\", \"I4\"],\n   \"evidence\": {\n     \"I2\": \"invoice_service.get_invoice calls invoice_repo.get_by_id without filtering by tenant_id, allowing cross-tenant access.\",\n     \"I3\": \"payment_service.handle_payment_webhook marks the webhook as processed only after inserting the outbox event and updating the order. A crash between these steps would cause duplicate outbox events on retry.\",\n     \"I4\": \"service.order_service.mark_paid updates the order status to 'paid' but does not call cache.invalidate_order, leaving stale cache entries.\"\n   },\n   \"citations\": [\n     \"service/invoice_service.py:get_invoice\",\n     \"store/invoice_repo.py:get_by_id\",\n     \"service/payment_service.py:handle_payment_webhook\",\n     \"service/order_service.py:mark_paid\"\n   ]\n}\n</arch_final>"
+  },
+  {
+    "model": "qwen3.6:35b-a3b-coding-bf16",
+    "provider": "ollama",
+    "task": "redesign_webhook_idempotency",
+    "title": "Constrained fix: webhook idempotency",
+    "family": "redesign",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "files=['service/payment_service.py', 'store/db.py', 'store/outbox.py']; evidence(reads) 1/1",
+    "answer": {
+      "touch_files": [
+        "service/payment_service.py",
+        "store/db.py",
+        "store/outbox.py"
+      ],
+      "plan_steps": [
+        "1. In store/db.py, add a 'unique' constraint simulation to the 'processed_webhooks' table by checking for existing keys before insertion, or more simply, rely on the fact that db.put is idempotent on the key but we need to ensure the check-then-act is atomic. Since we can't change db.py to add transactions easily, we will use a 'pending' state in the outbox or processed_webhooks table to ensure atomicity. However, the simplest fix respecting constraints is to move the _mark_processed call BEFORE the business logic (outbox insert and order update). If the webhook is already marked, we return early. If not, we mark it immediately. If the process crashes after marking but before completing, the next retry will see it as processed and return early, preventing double insertion. This requires ensuring that _mark_processed is truly idempotent and that the 'processed' state is committed before any side effects.",
+        "2. In service/payment_service.py, move the _mark_processed(webhook_id) call from line 43 to immediately after the _already_processed check (before line 29). This ensures that once we decide to process the webhook, it is marked as processed in the database before any side effects (outbox insert, order update) occur. If the system crashes after marking but before finishing, the next request will see it as processed and return 'duplicate', preventing double insertion of OrderPaid.",
+        "3. In store/outbox.py, ensure that the outbox insert is atomic with the mark_processed. Since we are moving mark_processed before outbox.insert, if the outbox insert fails, the webhook is already marked as processed. This is a problem. We need to ensure that if the webhook is marked as processed, we don't re-insert. The current code marks it AFTER. The fix is to mark it BEFORE, but we must handle the case where the mark succeeds but the business logic fails. In a real system, we'd use a transaction. Here, we can use a 'pending' status in the processed_webhooks table. If it's 'pending', we are processing. If it's 'done', we skip. But we can't change db.py schema easily. The minimal fix is to rely on the fact that db.put is a simple dict set. If we mark it first, and then crash, the next retry sees 'processed' and returns duplicate. This prevents double insertion. The only risk is if the first attempt marked it but didn't complete, the second attempt sees it as processed and returns duplicate, which is correct behavior (idempotency). So moving _mark_processed to before the business logic is the correct fix for idempotency.",
+        "4. Actually, looking closer, the current code checks _already_processed, then does business logic, then marks. If the business logic fails (e.g., outbox insert fails), the webhook is NOT marked, so the next retry will try again. This is correct for reliability but doesn't prevent double insertion if the business logic succeeds twice (e.g., due to network retry after success but before response). The fix is to mark as processed BEFORE the business logic. If the webhook is already processed, return early. If not, mark it, then do business logic. If business logic fails, the webhook is marked as processed, so the next retry will return early. This prevents double insertion. The trade-off is that if the business logic fails, the webhook is considered processed and won't be retried. This is acceptable for idempotency of the OrderPaid event, as the event is already in the outbox (if we mark after outbox insert) or not (if we mark before). To be safe, we should mark as processed AFTER the outbox insert but BEFORE the order update? No, that's still not atomic. The best minimal fix is to mark as processed BEFORE the outbox insert. If the outbox insert fails, the webhook is marked as processed, so the next retry will return early. This means the OrderPaid event is NOT inserted. This is a loss of reliability but ensures idempotency. Alternatively, we can use a 'pending' state. Let's use a 'pending' state in processed_webhooks. If it's 'pending', we are processing. If it's 'done', we skip. If it's 'pending' and we crash, the next retry sees 'pending' and retries. This requires changing db.py to support a 'status' field. But we can just use the value. If the value is 'processing', we retry. If it's 'done', we skip. This requires changing db.py. Let's stick to the simplest fix: move _mark_processed to before the business logic. This ensures that if the webhook is processed, it is marked as such before any side effects. If the side effects fail, the webhook is marked as processed, so the next retry will return early. This prevents double insertion of OrderPaid."
+      ],
+      "idempotency_change": "Move _mark_processed(webhook_id) from after the business logic (line 43) to immediately after the _already_processed check (before line 29). This ensures the webhook is marked as processed before any side effects (outbox insert, order update) occur. If the system crashes after marking but before completing, the next retry will see the webhook as processed and return 'duplicate', preventing double insertion of OrderPaid.",
+      "citations": [
+        "service/payment_service.py:_already_processed",
+        "service/payment_service.py:_mark_processed",
+        "service/payment_service.py:handle_payment_webhook",
+        "store/db.py:put",
+        "store/outbox.py:insert"
+      ]
+    },
+    "tool_calls": 30,
+    "files_read": [
+      "README.md",
+      "api/invoices.py",
+      "api/orders.py",
+      "api/webhooks.py",
+      "pkg/auth.py",
+      "pkg/events.py",
+      "pkg/tenant.py",
+      "service/invoice_service.py",
+      "service/legacy_order.py",
+      "service/order_service.py",
+      "service/payment_service.py",
+      "store/cache.py",
+      "store/db.py",
+      "store/invoice_repo.py",
+      "store/order_repo.py",
+      "store/outbox.py",
+      "worker/outbox_worker.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/events.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/auth.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "OrderPaid",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "order_paid",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "mark_paid",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "processed_webhooks",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "outbox.insert",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "mark_published|ack",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": ".",
+          "pattern": "webhook_id"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": ".",
+          "pattern": "payment_id"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": ".",
+          "pattern": "order_id"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/legacy_order.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "pkg"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 40.98,
+    "prompt_tokens": 198675,
+    "eval_tokens": 2123,
+    "rounds": 31,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 5504,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/qwen36_univ_off_ar__redesign_webhook_idempotency.txt",
+    "raw_content": "<arch_final>\n{\n   \"touch_files\": [\n     \"service/payment_service.py\",\n     \"store/db.py\",\n     \"store/outbox.py\"\n   ],\n   \"plan_steps\": [\n     \"1. In store/db.py, add a 'unique' constraint simulation to the 'processed_webhooks' table by checking for existing keys before insertion, or more simply, rely on the fact that db.put is idempotent on the key but we need to ensure the check-then-act is atomic. Since we can't change db.py to add transactions easily, we will use a 'pending' state in the outbox or processed_webhooks table to ensure atomicity. However, the simplest fix respecting constraints is to move the _mark_processed call BEFORE the business logic (outbox insert and order update). If the webhook is already marked, we return early. If not, we mark it immediately. If the process crashes after marking but before completing, the next retry will see it as processed and return early, preventing double insertion. This requires ensuring that _mark_processed is truly idempotent and that the 'processed' state is committed before any side effects.\",\n     \"2. In service/payment_service.py, move the _mark_processed(webhook_id) call from line 43 to immediately after the _already_processed check (before line 29). This ensures that once we decide to process the webhook, it is marked as processed in the database before any side effects (outbox insert, order update) occur. If the system crashes after marking but before finishing, the next request will see it as processed and return 'duplicate', preventing double insertion of OrderPaid.\",\n     \"3. In store/outbox.py, ensure that the outbox insert is atomic with the mark_processed. Since we are moving mark_processed before outbox.insert, if the outbox insert fails, the webhook is already marked as processed. This is a problem. We need to ensure that if the webhook is marked as processed, we don't re-insert. The current code marks it AFTER. The fix is to mark it BEFORE, but we must handle the case where the mark succeeds but the business logic fails. In a real system, we'd use a transaction. Here, we can use a 'pending' status in the processed_webhooks table. If it's 'pending', we are processing. If it's 'done', we skip. But we can't change db.py schema easily. The minimal fix is to rely on the fact that db.put is a simple dict set. If we mark it first, and then crash, the next retry sees 'processed' and returns duplicate. This prevents double insertion. The only risk is if the first attempt marked it but didn't complete, the second attempt sees it as processed and returns duplicate, which is correct behavior (idempotency). So moving _mark_processed to before the business logic is the correct fix for idempotency.\",\n     \"4. Actually, looking closer, the current code checks _already_processed, then does business logic, then marks. If the business logic fails (e.g., outbox insert fails), the webhook is NOT marked, so the next retry will try again. This is correct for reliability but doesn't prevent double insertion if the business logic succeeds twice (e.g., due to network retry after success but before response). The fix is to mark as processed BEFORE the business logic. If the webhook is already processed, return early. If not, mark it, then do business logic. If business logic fails, the webhook is marked as processed, so the next retry will return early. This prevents double insertion. The trade-off is that if the business logic fails, the webhook is considered processed and won't be retried. This is acceptable for idempotency of the OrderPaid event, as the event is already in the outbox (if we mark after outbox insert) or not (if we mark before). To be safe, we should mark as processed AFTER the outbox insert but BEFORE the order update? No, that's still not atomic. The best minimal fix is to mark as processed BEFORE the outbox insert. If the outbox insert fails, the webhook is marked as processed, so the next retry will return early. This means the OrderPaid event is NOT inserted. This is a loss of reliability but ensures idempotency. Alternatively, we can use a 'pending' state. Let's use a 'pending' state in processed_webhooks. If it's 'pending', we are processing. If it's 'done', we skip. If it's 'pending' and we crash, the next retry sees 'pending' and retries. This requires changing db.py to support a 'status' field. But we can just use the value. If the value is 'processing', we retry. If it's 'done', we skip. This requires changing db.py. Let's stick to the simplest fix: move _mark_processed to before the business logic. This ensures that if the webhook is processed, it is marked as such before any side effects. If the side effects fail, the webhook is marked as processed, so the next retry will return early. This prevents double insertion of OrderPaid.\"\n   ],\n   \"idempotency_change\": \"Move _mark_processed(webhook_id) from after the business logic (line 43) to immediately after the _already_processed check (before line 29). This ensures the webhook is marked as processed before any side effects (outbox insert, order update) occur. If the system crashes after marking but before completing, the next retry will see the webhook as processed and return 'duplicate', preventing double insertion of OrderPaid.\",\n   \"citations\": [\n     \"service/payment_service.py:_already_processed\",\n     \"service/payment_service.py:_mark_processed\",\n     \"service/payment_service.py:handle_payment_webhook\",\n     \"store/db.py:put\",\n     \"store/outbox.py:insert\"\n   ]\n}\n</arch_final>"
+  }
+]

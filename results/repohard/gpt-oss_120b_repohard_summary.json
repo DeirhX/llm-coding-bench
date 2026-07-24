@@ -1,0 +1,9 @@
+{
+  "model": "gpt-oss:120b",
+  "tag": "gpt-oss_120b_repohard",
+  "score": 0,
+  "max_score": 80,
+  "pass": 0,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gpt-oss_120b_repohard_20260723_181457.json"
+}

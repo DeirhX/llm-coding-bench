@@ -1,0 +1,148 @@
+{
+  "model": "claude-4.5-haiku",
+  "provider": "cursor",
+  "bench": "claim",
+  "tag": "cursor_claude-4.5-haiku_claim",
+  "score": 0,
+  "max_score": 23,
+  "correct": 0,
+  "wrong": 0,
+  "missing": 20,
+  "evidence_bonus": 0,
+  "files_read": [],
+  "per_claim": [
+    {
+      "id": "c01",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c02",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c03",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c04",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c05",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c06",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c07",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c08",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c09",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c10",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c11",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c12",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c13",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c14",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c15",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c16",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c17",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c18",
+      "gold": true,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c19",
+      "gold": false,
+      "got": null,
+      "ok": false
+    },
+    {
+      "id": "c20",
+      "gold": false,
+      "got": null,
+      "ok": false
+    }
+  ],
+  "ok": false,
+  "detail": "0/20 correct, wrong=0, missing=20, ev=+0",
+  "answer": null,
+  "tool_calls": null,
+  "wall_s": 43.78,
+  "prompt_tokens": 44,
+  "eval_tokens": 3470,
+  "rounds": 1,
+  "done_reason": "success",
+  "num_ctx": 65536,
+  "num_predict": 8192,
+  "raw_content": "I'll investigate the shopapi Python repo by inspecting the code to verify each claim. Let me start by exploring the repository structure and key files.Let me read the README first to understand the invariants, then examine each key file.Now let me check more files for the remaining claims:Now let me check the payment-related files and outbox worker:Let me check the legacy_order file and cache invalidation:Now let me check the webhook_retry and outbox files:Let me check the events and pkg files:Now I have enough information to verify each claim. Let me analyze them systematically:\n\n**c01: \"handle_delete_order calls order_service.cancel_order.\"**\n- In `api/orders.py` line 28-29: `handle_delete_order` calls `order_service.cancel_order(order_id)` \u2713\n\n**c02: \"cancel_order invalidates the order cache.\"**\n- In `service/order_service.py` line 40: `cache.invalidate_order(order_id)` \u2713\n\n**c03: \"mark_paid invalidates the order cache.\"**\n- In `service/order_service.py` line 44-50: `mark_paid` does NOT invalidate the cache. It inserts to outbox and returns updated, no cache invalidation. \u2717\n\n**c04: \"get_invoice checks that invoice.tenant_id matches the current tenant.\"**\n- In `service/invoice_service.py` line 13-19: `get_invoice` calls `require_tenant()` but then fetches without filtering. The comment says \"no tenant filter on the row\". \u2717\n\n**c05: \"list_invoices scopes results with list_by_tenant.\"**\n- In `service/invoice_service.py` line 10-11: `list_invoices` calls `invoice_repo.list_by_tenant(tenant.tenant_id)` \u2713\n\n**c06: \"admin_export_invoices returns invoices for all tenants.\"**\n- In `service/invoice_service.py` line 22-25: `admin_export_invoices` returns `invoice_repo.export_all()` \u2713\n\n**c07: \"handle_payment_webhook records processed_webhooks before inserting OrderPaid into the outbox.\"**\n- In `service/payment_service.py` line 20-43: Line 40 inserts outbox, then line 43 calls `_mark_processed`. Order is WRONG. \u2717\n\n**c08: \"outbox_worker.process_once acknowledges an outbox row before calling publish.\"**\n- In `worker/outbox_worker.py` line 10-18: Line 16 calls `outbox.ack(row[\"id\"])`, then line 17 calls `publish(row)`. \u2713\n\n**c09: \"list_orders avoids per-order get_order calls (no N+1).\"**\n- In `service/order_service.py` line 20-29: For each row, it calls `get_order(row[\"id\"])`. This IS N+1! \u2717\n\n**c10: \"README invariant I1 is violated by cancel_order (no outbox write).\"**\n- In `service/order_service.py` line 30-40: `cancel_order` DOES write outbox (line 39). I1 says \"every mutating order API writes an outbox event before returning\". This happens. \u2717\n\n**c11: \"cancel_order_legacy is invoked on the DELETE /orders/{id} request path.\"**\n- In `api/orders.py` line 28-29: DELETE calls `order_service.cancel_order`, NOT `cancel_order_legacy`. The legacy_order.py file says \"NOT wired into api/orders DELETE path\". \u2717\n\n**c12: \"soft_delete sets order status to cancelled.\"**\n- In `store/order_repo.py` line 12-22: Line 21 sets `row[\"status\"] = \"cancelled\"` \u2713\n\n**c13: \"order_service.get_order returns cached rows without re-checking tenant_id on cache hit.\"**\n- In `service/order_service.py` line 10-18: Line 12 checks cache, line 13 returns immediately if cached - NO tenant_id re-check on cache hit. \u2713\n\n**c14: \"webhook_retry.retry_payment_webhook bypasses payment_service and writes outbox directly.\"**\n- In `worker/webhook_retry.py` line 10-17: It calls `payment_service.handle_payment_webhook`, NOT bypassing it. \u2717\n\n**c15: \"invoice_repo.get_by_id filters by tenant_id.\"**\n- In `store/invoice_repo.py` line 10-12: The comment says \"BUG (planted): no tenant filter\" and it just calls `db.get(\"invoices\", invoice_id)` with no tenant filter. \u2717\n\n**c16: \"In cancel_order, outbox.insert(OrderCancelled) runs before order_repo.soft_delete.\"**\n- In `service/order_service.py` line 30-40: Line 38 calls `order_repo.soft_delete`, line 39 calls `outbox.insert`. Order is WRONG. \u2717\n\n**c17: \"get_order re-validates tenant_id against the current tenant on every cache hit.\"**\n- In `service/order_service.py` line 10-18: Line 13 returns cached without re-checking tenant_id. \u2717\n\n**c18: \"handle_payment_webhook calls order_service.mark_paid after inserting OrderPaid into the outbox.\"**\n- In `service/payment_service.py` line 20-43: Line 40 inserts outbox, line 41 calls `order_service.mark_paid`. Order is correct. \u2713\n\n**c19: \"outbox_worker.process_once acks an outbox row only after publish succeeds.\"**\n- In `worker/outbox_worker.py` line 10-18: Line 16 acks, line 17 publishes. Ack happens BEFORE publish. \u2717\n\n**c20: \"invoice_service.admin_export_invoices scopes results to the current tenant.\"**\n- In `service/invoice_service.py` line 22-25: Calls `invoice_repo.export_all()` which returns all invoices across all tenants. Not scoped to current tenant. \u2717\n\n```json\n{\n  \"answers\": {\n    \"c01\": true,\n    \"c02\": true,\n    \"c03\": false,\n    \"c04\": false,\n    \"c05\": true,\n    \"c06\": true,\n    \"c07\": false,\n    \"c08\": true,\n    \"c09\": false,\n    \"c10\": false,\n    \"c11\": false,\n    \"c12\": true,\n    \"c13\": true,\n    \"c14\": false,\n    \"c15\": false,\n    \"c16\": false,\n    \"c17\": false,\n    \"c18\": true,\n    \"c19\": false,\n    \"c20\": false\n  },\n  \"citations\": {\n    \"c01\": [\"api/orders.py:28-29\"],\n    \"c02\": [\"service/order_service.py:40\"],\n    \"c03\": [\"service/order_service.py:44-50\"],\n    \"c04\": [\"service/invoice_service.py:13-19\"],\n    \"c05\": [\"service/invoice_service.py:10-11\"],\n    \"c06\": [\"service/invoice_service.py:25\"],\n    \"c07\": [\"service/payment_service.py:40-43\"],\n    \"c08\": [\"worker/outbox_worker.py:16-17\"],\n    \"c09\": [\"service/order_service.py:23-27\"],\n    \"c10\": [\"service/order_service.py:39\"],\n    \"c11\": [\"api/orders.py:28-29\", \"service/legacy_order.py:3\"],\n    \"c12\": [\"store/order_repo.py:21\"],\n    \"c13\": [\"service/order_service.py:12-13\"],\n    \"c14\": [\"worker/webhook_retry.py:16\"],\n    \"c15\": [\"store/invoice_repo.py:10-12\"],\n    \"c16\": [\"service/order_service.py:38-39\"],\n    \"c17\": [\"service/order_service.py:12-13\"],\n    \"c18\": [\"service/payment_service.py:40-41\"],\n    \"c19\": [\"worker/outbox_worker.py:16-17\"],\n    \"c20\": [\"service/invoice_service.py:25\", \"store/invoice_repo.py:29-30\"]\n  }\n}\n```",
+  "session_id": "25f003e1-db7a-433f-aca2-04ca74fde6ea"
+}

@@ -1,0 +1,9 @@
+{
+  "model": "gpt-5.6-sol-high",
+  "tag": "cursor_gpt-5.6-sol-high_arch",
+  "score": 69,
+  "max_score": 90,
+  "pass": 8,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/cursor_gpt-5.6-sol-high_arch_20260723_190227.json"
+}

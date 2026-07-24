@@ -1,0 +1,9 @@
+{
+  "model": "gpt-5.6-terra-high",
+  "tag": "cursor_gpt-5.6-terra-high_repohard",
+  "score": 40,
+  "max_score": 80,
+  "pass": 4,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/cursor_gpt-5.6-terra-high_repohard_20260724_133426.json"
+}

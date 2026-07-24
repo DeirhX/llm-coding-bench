@@ -30,11 +30,13 @@ if str(_REPO) not in sys.path:
 from bench_lib.assignment import load_markdown_assignment  # noqa: E402
 from bench_lib.ollama_chat import chat as ollama_chat  # noqa: E402
 from bench_lib.ollama_think import (  # noqa: E402
+    RoundTranscript,
     default_num_predict,
     format_think_combined,
     grade_from_response,
     parse_think,
     save_task_transcript,
+    think_loop_nudge,
     thinking_enabled,
 )
 from bench_lib.paths import results_dir  # noqa: E402
@@ -89,13 +91,21 @@ class Task:
     reference: str
 
 
-def chat_ollama(model: str, prompt: str) -> dict[str, Any]:
+def chat_ollama(
+    model: str,
+    prompt: str,
+    *,
+    on_thinking=None,
+    on_content=None,
+) -> dict[str, Any]:
     # Stream + keep_alive=-1 + stall retry — see bench_lib/ollama_chat.py.
     resp = ollama_chat(
         model,
         [{"role": "user", "content": prompt}],
         options=OPTIONS,
         think=THINK,
+        on_thinking=on_thinking,
+        on_content=on_content,
     )
     content = resp.get("content") or ""
     thinking = resp.get("thinking") or ""
@@ -129,12 +139,20 @@ def chat_cursor(model: str, prompt: str) -> dict[str, Any]:
     return resp
 
 
-def chat(model: str, prompt: str) -> dict[str, Any]:
+def chat(
+    model: str,
+    prompt: str,
+    *,
+    on_thinking=None,
+    on_content=None,
+) -> dict[str, Any]:
     if PROVIDER in ("cursor", "cursor-cli", "agent"):
         return chat_cursor(model, prompt)
     if PROVIDER != "ollama":
         raise SystemExit(f"Unknown BENCH_PROVIDER={PROVIDER!r} (use ollama|cursor)")
-    return chat_ollama(model, prompt)
+    return chat_ollama(
+        model, prompt, on_thinking=on_thinking, on_content=on_content
+    )
 
 
 def extract_python(text: str) -> str:
@@ -1212,7 +1230,49 @@ def main() -> None:
     for task in run_tasks:
         log(log_path, f"\n-- {task.id} ...\n")
         try:
-            resp = chat(MODEL, task.prompt)
+            live = RoundTranscript(OUT_DIR, TAG, task.id)
+            live.begin_round(1)
+            resp = chat(
+                MODEL,
+                task.prompt,
+                on_thinking=live.on_thinking_delta,
+                on_content=live.on_content_delta,
+            )
+            live.end_round(
+                thinking=resp.get("thinking") or "",
+                content=resp.get("content") or "",
+                done_reason=resp.get("done_reason"),
+                eval_tokens=resp.get("eval_tokens"),
+            )
+            # One recovery shot if thinking aborted (loop/budget) with empty content.
+            if (
+                resp.get("done_reason") in ("think_loop", "think_budget")
+                and not (resp.get("content") or "").strip()
+            ):
+                live.add_note(
+                    f"{(resp.get('done_reason') or 'think_loop').upper()} aborted: "
+                    f"{resp.get('think_loop_detail') or resp.get('done_reason')}; retry"
+                )
+                live.begin_round(2)
+                nudge = think_loop_nudge(
+                    thinking=resp.get("thinking") or "", protocol="pyhard"
+                )
+                retry_prompt = (
+                    nudge + "\n\nOriginal task:\n" + (task.prompt or "")[:6000]
+                )
+                resp = chat(
+                    MODEL,
+                    retry_prompt,
+                    on_thinking=live.on_thinking_delta,
+                    on_content=live.on_content_delta,
+                )
+                live.end_round(
+                    thinking=resp.get("thinking") or "",
+                    content=resp.get("content") or "",
+                    done_reason=resp.get("done_reason"),
+                    eval_tokens=resp.get("eval_tokens"),
+                )
+            transcript_path = live.save()
             grade_src = resp.get("grade_text")
             if grade_src is None:
                 grade_src = resp.get("combined") or resp.get("content") or ""
@@ -1252,11 +1312,8 @@ def main() -> None:
                 "num_ctx": OPTIONS["num_ctx"],
                 "num_predict": OPTIONS["num_predict"],
                 "python": sys.version.split()[0],
+                "transcript": str(transcript_path),
             }
-            transcript_path = save_task_transcript(
-                OUT_DIR, TAG, task.id, resp.get("combined") or grade_src
-            )
-            row["transcript"] = str(transcript_path)
             results.append(row)
             (OUT_DIR / f"{TAG}__{task.id}__code.py").write_text(g.get("code") or "", encoding="utf-8")
             log(log_path, json.dumps(row, indent=2) + "\n")

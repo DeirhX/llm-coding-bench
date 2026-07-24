@@ -1,0 +1,982 @@
+[
+  {
+    "model": "qwen3-coder-next:q8_0",
+    "provider": "ollama",
+    "task": "race_webhook_idempotency",
+    "title": "Payment webhook double-applies under concurrency",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: corrupt patch at line 68; fuzzy: no hunks applied (skipped=['service/payment_service.py@21'])",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "--- a/service/payment_service.py\n+++ b/service/payment_service.py\n@@ -21,24 +21,43 @@ def _lock_for(key: str) -> threading.Lock:\n         return _LOCKS[key]\n \n \n def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n     \"\"\"Process payment.succeeded webhook.\"\"\"\n     webhook_id = payload[\"webhook_id\"]\n     tenant_id = payload[\"tenant_id\"]\n     invoice_id = payload[\"invoice_id\"]\n     amount_cents = int(payload[\"amount_cents\"])\n-\n-    set_tenant(TenantContext(tenant_id=tenant_id))\n-    pay = {\n-        \"id\": str(uuid.uuid4()),\n-        \"tenant_id\": tenant_id,\n-        \"invoice_id\": invoice_id,\n-        \"amount_cents\": amount_cents,\n-        \"webhook_id\": webhook_id,\n-     }\n-    payment_repo.upsert(pay)\n-    invoice_service.mark_paid(invoice_id)\n-    inv = invoice_repo.get(invoice_id) or {}\n-    account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n-    if account_id:\n-        entitlement_service.activate_paid_plan(account_id, tenant_id)\n-    outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n-    webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n-    return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n+\n+    lock = _lock_for(webhook_id)\n+    with lock:\n+        # Check if already processed to ensure idempotency\n+        if webhook_repo.is_processed(webhook_id):\n+            # Find existing payment for this webhook_id to return consistent response\n+            payments = payment_repo.list_by_tenant(tenant_id)\n+            existing_payment = None\n+            for p in payments:\n+                if p.get(\"webhook_id\") == webhook_id:\n+                    existing_payment = p\n+                    break\n+            if existing_payment:\n+                return {\"status\": \"ok\", \"payment_id\": existing_payment[\"id\"], \"webhook_id\": webhook_id}\n+            # Fallback: webhook marked processed but no payment found (should not happen)\n+            return {\"status\": \"ok\", \"payment_id\": None, \"webhook_id\": webhook_id}\n+\n+        set_tenant(TenantContext(tenant_id=tenant_id))\n+        pay = {\n+            \"id\": str(uuid.uuid4()),\n+            \"tenant_id\": tenant_id,\n+            \"invoice_id\": invoice_id,\n+            \"amount_cents\": amount_cents,\n+            \"webhook_id\": webhook_id,\n+        }\n+        payment_repo.upsert(pay)\n+        invoice_service.mark_paid(invoice_id)\n+        inv = invoice_repo.get(invoice_id) or {}\n+        account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n+        if account_id:\n+            entitlement_service.activate_paid_plan(account_id, tenant_id)\n+        outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n+        webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n+        return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n \n \n def record_payment(invoice_id: str, amount_cents: int) -> dict[str, Any]:\n",
+      "patch_bytes": 2923,
+      "patch_preview": "--- a/service/payment_service.py\n+++ b/service/payment_service.py\n@@ -21,24 +21,43 @@ def _lock_for(key: str) -> threading.Lock:\n         return _LOCKS[key]\n \n \n def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n     \"\"\"Process payment.succeeded webhook.\"\"\"\n     webhook_id = payload[\"webhook_id\"]\n     tenant_id = payload[\"tenant_id\"]\n     invoice_id = payload[\"invoice_id\"]\n     amount_cents = int(payload[\"amount_cents\"])\n-\n-    set_tenant(TenantContext(tenant_id=tenant_id))\n-    pay = {\n-        \"id\": str(uuid.uuid4()),\n-        \"tenant_id\": tenant_id,\n-        \"invoice_id\": invoice_id,\n-        \"amount_cents\": amount_cents,\n-        \"webhook_id\": webhook_id,\n-     }\n-    payment_repo.upsert(pay)\n-    invoice_service.mark_paid(invoice_id)\n-    inv = invoice_repo.get(invoice_id) or {}\n-    account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n-    if account_id:\n-        entitlement_service.activate_paid_plan(account_id, tenant_id)\n-    outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n-    webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n-    return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id",
+      "apply_detail": "git apply failed: error: corrupt patch at line 68; fuzzy: no hunks applied (skipped=['service/payment_service.py@21'])"
+    },
+    "tool_calls": 17,
+    "files_read": [
+      "service/entitlement_service.py",
+      "service/payment_service.py",
+      "store/db.py",
+      "store/entitlement_repo.py",
+      "store/outbox.py",
+      "store/payment_repo.py",
+      "store/webhook_repo.py",
+      "tests/test_smoke.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/webhook_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/entitlement_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/entitlement_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "_lock_for|LOCKS",
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "write_file",
+        "arguments": {
+          "path": "service/payment_service.py",
+          "content": "from __future__ import annotations\n\nfrom typing import Any\nimport uuid\nimport threading\n\nfrom store import payment_repo, webhook_repo, outbox, invoice_repo\nfrom service import invoice_service, entitlement_service\nfrom pkg import events\nfrom pkg.tenant import require_tenant, set_tenant, TenantContext\n\n\n_LOCKS: dict[str, threading.Lock] = {}\n_LOCKS_GUARD = threading.Lock()\n\n\ndef _lock_for(key: str) -> threading.Lock:\n    with _LOCKS_GUARD:\n        if key not in _LOCKS:\n            _LOCKS[key] = threading.Lock()\n        return _LOCKS[key]\n\n\ndef handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n    \"\"\"Process payment.succeeded webhook.\"\"\"\n    webhook_id = payload[\"webhook_id\"]\n    tenant_id = payload[\"tenant_id\"]\n    invoice_id = payload[\"invoice_id\"]\n    amount_cents = int(payload[\"amount_cents\"])\n\n    lock = _lock_for(webhook_id)\n    with lock:\n        # Check if already processed to ensure idempotency\n        if webhook_repo.is_processed(webhook_id):\n            # Return the existing payment info without re-processing\n            processed = webhook_repo.is_processed(webhook_id)\n            # We need to find the existing payment for this webhook_id\n            payments = payment_repo.list_by_tenant(tenant_id)\n            existing_payment = None\n            for p in payments:\n                if p.get(\"webhook_id\") == webhook_id:\n                    existing_payment = p\n                    break\n            if existing_payment:\n                return {\"status\": \"ok\", \"payment_id\": existing_payment[\"id\"], \"webhook_id\": webhook_id}\n            # Fallback: just re-mark as processed (should not happen in practice)\n            return {\"status\": \"ok\", \"payment_id\": None, \"webhook_id\": webhook_id}\n\n        set_tenant(TenantContext(tenant_id=tenant_id))\n        pay = {\n            \"id\": str(uuid.uuid4()),\n            \"tenant_id\": tenant_id,\n            \"invoice_id\": invoice_id,\n            \"amount_cents\": amount_cents,\n            \"webhook_id\": webhook_id,\n        }\n        payment_repo.upsert(pay)\n        invoice_service.mark_paid(invoice_id)\n        inv = invoice_repo.get(invoice_id) or {}\n        account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n        if account_id:\n            entitlement_service.activate_paid_plan(account_id, tenant_id)\n        outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n        webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n        return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n\n\ndef record_payment(invoice_id: str, amount_cents: int) -> dict[str, Any]:\n    ctx = require_tenant()\n    pay = {\n        \"id\": str(uuid.uuid4()),\n        \"tenant_id\": ctx.tenant_id,\n        \"invoice_id\": invoice_id,\n        \"amount_cents\": amount_cents,\n    }\n    return payment_repo.upsert(pay)"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "handle_payment_webhook",
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "tests/test_smoke.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 52.86,
+    "prompt_tokens": 82479,
+    "eval_tokens": 2969,
+    "rounds": 18,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 3172,
+    "raw_content": "Now I'll prepare the unified diff for the fix:\n\n<arch_final>\n{\"patch\": \"--- a/service/payment_service.py\\n+++ b/service/payment_service.py\\n@@ -21,24 +21,43 @@ def _lock_for(key: str) -> threading.Lock:\\n         return _LOCKS[key]\\n \\n \\n def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\\n     \\\"\\\"\\\"Process payment.succeeded webhook.\\\"\\\"\\\"\\n     webhook_id = payload[\\\"webhook_id\\\"]\\n     tenant_id = payload[\\\"tenant_id\\\"]\\n     invoice_id = payload[\\\"invoice_id\\\"]\\n     amount_cents = int(payload[\\\"amount_cents\\\"])\\n-\\n-    set_tenant(TenantContext(tenant_id=tenant_id))\\n-    pay = {\\n-        \\\"id\\\": str(uuid.uuid4()),\\n-        \\\"tenant_id\\\": tenant_id,\\n-        \\\"invoice_id\\\": invoice_id,\\n-        \\\"amount_cents\\\": amount_cents,\\n-        \\\"webhook_id\\\": webhook_id,\\n-     }\\n-    payment_repo.upsert(pay)\\n-    invoice_service.mark_paid(invoice_id)\\n-    inv = invoice_repo.get(invoice_id) or {}\\n-    account_id = inv.get(\\\"account_id\\\") or payload.get(\\\"account_id\\\")\\n-    if account_id:\\n-        entitlement_service.activate_paid_plan(account_id, tenant_id)\\n-    outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\\\"id\\\"]))\\n-    webhook_repo.mark_processed(webhook_id, {\\\"payment_id\\\": pay[\\\"id\\\"]})\\n-    return {\\\"status\\\": \\\"ok\\\", \\\"payment_id\\\": pay[\\\"id\\\"], \\\"webhook_id\\\": webhook_id}\\n+\\n+    lock = _lock_for(webhook_id)\\n+    with lock:\\n+        # Check if already processed to ensure idempotency\\n+        if webhook_repo.is_processed(webhook_id):\\n+            # Find existing payment for this webhook_id to return consistent response\\n+            payments = payment_repo.list_by_tenant(tenant_id)\\n+            existing_payment = None\\n+            for p in payments:\\n+                if p.get(\\\"webhook_id\\\") == webhook_id:\\n+                    existing_payment = p\\n+                    break\\n+            if existing_payment:\\n+                return {\\\"status\\\": \\\"ok\\\", \\\"payment_id\\\": existing_payment[\\\"id\\\"], \\\"webhook_id\\\": webhook_id}\\n+            # Fallback: webhook marked processed but no payment found (should not happen)\\n+            return {\\\"status\\\": \\\"ok\\\", \\\"payment_id\\\": None, \\\"webhook_id\\\": webhook_id}\\n+\\n+        set_tenant(TenantContext(tenant_id=tenant_id))\\n+        pay = {\\n+            \\\"id\\\": str(uuid.uuid4()),\\n+            \\\"tenant_id\\\": tenant_id,\\n+            \\\"invoice_id\\\": invoice_id,\\n+            \\\"amount_cents\\\": amount_cents,\\n+            \\\"webhook_id\\\": webhook_id,\\n+        }\\n+        payment_repo.upsert(pay)\\n+        invoice_service.mark_paid(invoice_id)\\n+        inv = invoice_repo.get(invoice_id) or {}\\n+        account_id = inv.get(\\\"account_id\\\") or payload.get(\\\"account_id\\\")\\n+        if account_id:\\n+            entitlement_service.activate_paid_plan(account_id, tenant_id)\\n+        outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\\\"id\\\"]))\\n+        webhook_repo.mark_processed(webhook_id, {\\\"payment_id\\\": pay[\\\"id\\\"]})\\n+        return {\\\"status\\\": \\\"ok\\\", \\\"payment_id\\\": pay[\\\"id\\\"], \\\"webhook_id\\\": webhook_id}\\n \\n \\n def record_payment(invoice_id: str, amount_cents: int) -> dict[str, Any]:\\n\"}\n</arch_final>"
+  },
+  {
+    "model": "qwen3-coder-next:q8_0",
+    "provider": "ollama",
+    "task": "tenant_cache_key_collision",
+    "title": "Account cache leaks across tenants",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 2/2 (applied via --whitespace=nowarn -p1)",
+    "passed": 2,
+    "total": 2,
+    "answer": {
+      "patch": "--- a/store/cache.py\n+++ b/store/cache.py\n@@ -9,8 +9,8 @@ def reset() -> None:\n     _CACHE.clear()\n \n \n-def cache_key_account(account_id: str) -> str:\n-    return f\"acct:{account_id}\"\n+def cache_key_account(tenant_id: str, account_id: str) -> str:\n+    return f\"acct:{tenant_id}:{account_id}\"\n \n \n def cache_key_invoice(invoice_id: str) -> str:\n--- a/service/account_service.py\n+++ b/service/account_service.py\n@@ -8,7 +8,7 @@ from pkg.tenant import require_tenant\n \n def get_account(account_id: str) -> dict[str, Any] | None:\n     ctx = require_tenant()\n-    key = cache.cache_key_account(account_id)\n+    key = cache.cache_key_account(ctx.tenant_id, account_id)\n     hit = cache.get(key)\n     if hit is not None:\n         return hit\n",
+      "patch_bytes": 735,
+      "patch_preview": "--- a/store/cache.py\n+++ b/store/cache.py\n@@ -9,8 +9,8 @@ def reset() -> None:\n     _CACHE.clear()\n \n \n-def cache_key_account(account_id: str) -> str:\n-    return f\"acct:{account_id}\"\n+def cache_key_account(tenant_id: str, account_id: str) -> str:\n+    return f\"acct:{tenant_id}:{account_id}\"\n \n \n def cache_key_invoice(invoice_id: str) -> str:\n--- a/service/account_service.py\n+++ b/service/account_service.py\n@@ -8,7 +8,7 @@ from pkg.tenant import require_tenant\n \n def get_account(account_id: str) -> dict[str, Any] | None:\n     ctx = require_tenant()\n-    key = cache.cache_key_account(account_id)\n+    key = cache.cache_key_account(ctx.tenant_id, account_id)\n     hit = cache.get(key)\n     if hit is not None:\n         return hit\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 9,
+    "files_read": [
+      "pkg/tenant.py",
+      "service/account_service.py",
+      "store/cache.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/account_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "tenant_id",
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "cache_key_account"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "edit",
+        "arguments": {
+          "path": "store/cache.py",
+          "old_text": "def cache_key_account(account_id: str) -> str:\n    return f\"acct:{account_id}\"",
+          "new_text": "def cache_key_account(tenant_id: str, account_id: str) -> str:\n    return f\"acct:{tenant_id}:{account_id}\""
+        },
+        "result_ok": false
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/account_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 14.0,
+    "prompt_tokens": 18109,
+    "eval_tokens": 731,
+    "rounds": 10,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 854,
+    "raw_content": "Now I'll prepare the unified diff for both files.\n\n<arch_final>\n{\"patch\": \"--- a/store/cache.py\\n+++ b/store/cache.py\\n@@ -9,8 +9,8 @@ def reset() -> None:\\n     _CACHE.clear()\\n \\n \\n-def cache_key_account(account_id: str) -> str:\\n-    return f\\\"acct:{account_id}\\\"\\n+def cache_key_account(tenant_id: str, account_id: str) -> str:\\n+    return f\\\"acct:{tenant_id}:{account_id}\\\"\\n \\n \\n def cache_key_invoice(invoice_id: str) -> str:\\n--- a/service/account_service.py\\n+++ b/service/account_service.py\\n@@ -8,7 +8,7 @@ from pkg.tenant import require_tenant\\n \\n def get_account(account_id: str) -> dict[str, Any] | None:\\n     ctx = require_tenant()\\n-    key = cache.cache_key_account(account_id)\\n+    key = cache.cache_key_account(ctx.tenant_id, account_id)\\n     hit = cache.get(key)\\n     if hit is not None:\\n         return hit\\n\"}\n</arch_final>"
+  },
+  {
+    "model": "qwen3-coder-next:q8_0",
+    "provider": "ollama",
+    "task": "money_rounding_split",
+    "title": "Money.split loses cents",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: patch fragment without header at line 3: @@ -24,9 +24,10 @@ class Money:; fuzzy: no hunks applied (skipped=[])",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "{\"patch\": \"--- a/pkg/money.py\n+++ b/pkg/money.py\n@@ -24,9 +24,10 @@ class Money:\n         \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n         if parts <= 0:\n             raise ValueError(\"parts must be positive\")\n-        share = self.cents / parts\n-        base = int(share)\n-        return [Money(base, self.currency) for _ in range(parts)]\n+        base = self.cents // parts\n+        remainder = self.cents % parts\n+        # Distribute remainder: first `remainder` parts get +1 cent\n+        return [\n+            Money(base + (1 if i < remainder else 0), self.currency)\n+            for i in range(parts)\n+        ]\n \n \ndef _same(a: Money, b: Money) -> None:\"}}\n",
+      "patch_bytes": 682,
+      "patch_preview": "{\"patch\": \"--- a/pkg/money.py\n+++ b/pkg/money.py\n@@ -24,9 +24,10 @@ class Money:\n         \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n         if parts <= 0:\n             raise ValueError(\"parts must be positive\")\n-        share = self.cents / parts\n-        base = int(share)\n-        return [Money(base, self.currency) for _ in range(parts)]\n+        base = self.cents // parts\n+        remainder = self.cents % parts\n+        # Distribute remainder: first `remainder` parts get +1 cent\n+        return [\n+            Money(base + (1 if i < remainder else 0), self.currency)\n+            for i in range(parts)\n+        ]\n \n \ndef _same(a: Money, b: Money) -> None:\"}}\n",
+      "apply_detail": "git apply failed: error: patch fragment without header at line 3: @@ -24,9 +24,10 @@ class Money:; fuzzy: no hunks applied (skipped=[])"
+    },
+    "tool_calls": 11,
+    "files_read": [
+      "pkg/money.py",
+      "service/ledger_service.py",
+      "tests/test_smoke.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "Money"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/money.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "edit_file",
+        "arguments": {
+          "path": "pkg/money.py",
+          "old_text": "    def split(self, parts: int) -> list[\"Money\"]:\n        \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n        if parts <= 0:\n            raise ValueError(\"parts must be positive\")\n        share = self.cents / parts\n        base = int(share)\n        return [Money(base, self.currency) for _ in range(parts)]",
+          "new_text": "    def split(self, parts: int) -> list[\"Money\"]:\n        \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n        if parts <= 0:\n            raise ValueError(\"parts must be positive\")\n        base = self.cents // parts\n        remainder = self.cents % parts\n        # Distribute remainder: first `remainder` parts get +1 cent\n        return [\n            Money(base + (1 if i < remainder else 0), self.currency)\n            for i in range(parts)\n        ]"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/money.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "write_file",
+        "arguments": {
+          "path": "pkg/money.py",
+          "content": "from __future__ import annotations\n\nfrom dataclasses import dataclass\n\n\n@dataclass(frozen=True)\nclass Money:\n    cents: int\n    currency: str = \"USD\"\n\n    def __post_init__(self) -> None:\n        if not isinstance(self.cents, int):\n            raise TypeError(\"cents must be int\")\n\n    def __add__(self, other: \"Money\") -> \"Money\":\n        _same(self, other)\n        return Money(self.cents + other.cents, self.currency)\n\n    def __sub__(self, other: \"Money\") -> \"Money\":\n        _same(self, other)\n        return Money(self.cents - other.cents, self.currency)\n\n    def split(self, parts: int) -> list[\"Money\"]:\n        \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n        if parts <= 0:\n            raise ValueError(\"parts must be positive\")\n        base = self.cents // parts\n        remainder = self.cents % parts\n        # Distribute remainder: first `remainder` parts get +1 cent\n        return [\n            Money(base + (1 if i < remainder else 0), self.currency)\n            for i in range(parts)\n        ]\n\n\ndef _same(a: Money, b: Money) -> None:\n    if a.currency != b.currency:\n        raise ValueError(\"currency mismatch\")\n\n\ndef from_major(amount: float, currency: str = \"USD\") -> Money:\n    return Money(int(round(amount * 100)), currency)\n"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "list_dir",
+        "arguments": {},
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "pkg"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "split",
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "tests/test_smoke.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/ledger_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 23.07,
+    "prompt_tokens": 37416,
+    "eval_tokens": 1282,
+    "rounds": 12,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1120,
+    "raw_content": "Now I understand the full context. The `split` method in `pkg/money.py` is used by `ledger_service.split_credit`. The bug is that it uses floating-point division and discards the remainder.\n\nI need to fix this using integer arithmetic (floor division and modulo) to ensure:\n1. All parts sum exactly to original cents\n2. Parts differ by at most 1 cent\n\nLet me produce the unified diff:\n\n<arch_final>\n{\"patch\": \"--- a/pkg/money.py\\n+++ b/pkg/money.py\\n@@ -24,9 +24,10 @@ class Money:\\n         \\\"\\\"\\\"Split into N parts that sum exactly to self.cents.\\\"\\\"\\\"\\n         if parts <= 0:\\n             raise ValueError(\\\"parts must be positive\\\")\\n-        share = self.cents / parts\\n-        base = int(share)\\n-        return [Money(base, self.currency) for _ in range(parts)]\\n+        base = self.cents // parts\\n+        remainder = self.cents % parts\\n+        # Distribute remainder: first `remainder` parts get +1 cent\\n+        return [\\n+            Money(base + (1 if i < remainder else 0), self.currency)\\n+            for i in range(parts)\\n+        ]\\n \\n \\ndef _same(a: Money, b: Money) -> None:\"}}\n</arch_final>"
+  },
+  {
+    "model": "qwen3-coder-next:q8_0",
+    "provider": "ollama",
+    "task": "migration_backfill_hole",
+    "title": "Ledger backfill leaves legacy rows",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: corrupt patch at line 26; fuzzy: no hunks applied (skipped=['store/migrations/m002_backfill_ledger.py@7'])",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "--- a/store/migrations/m002_backfill_ledger.py\n+++ b/store/migrations/m002_backfill_ledger.py\n@@ -7,14 +7,11 @@ def apply() -> None:\n     for row in legacy:\n         if row.get(\"migrated\"):\n             continue\n-        if row.get(\"priority\") == \"high\":\n-            new = {\n-                \"id\": row[\"id\"],\n-                \"tenant_id\": row[\"tenant_id\"],\n-                \"cents\": row[\"cents\"],\n-                \"currency\": row.get(\"currency\", \"USD\"),\n-                \"source\": \"legacy\",\n-            }\n+        new = {\n+            \"id\": row[\"id\"],\n+            \"tenant_id\": row[\"tenant_id\"],\n+            \"cents\": row[\"cents\"],\n+            \"currency\": row.get(\"currency\", \"USD\"),\n+            \"source\": \"legacy\",\n+        }\n         db.put(\"ledger\", new[\"id\"], new)\n         row = {**row, \"migrated\": True}\n         db.put(\"ledger_legacy\", row[\"id\"], row)\n-    db.put(\"schema_meta\", \"002_backfill_ledger\", {\"applied\": True})\n\"}\n</arch_tool>\n",
+      "patch_bytes": 948,
+      "patch_preview": "--- a/store/migrations/m002_backfill_ledger.py\n+++ b/store/migrations/m002_backfill_ledger.py\n@@ -7,14 +7,11 @@ def apply() -> None:\n     for row in legacy:\n         if row.get(\"migrated\"):\n             continue\n-        if row.get(\"priority\") == \"high\":\n-            new = {\n-                \"id\": row[\"id\"],\n-                \"tenant_id\": row[\"tenant_id\"],\n-                \"cents\": row[\"cents\"],\n-                \"currency\": row.get(\"currency\", \"USD\"),\n-                \"source\": \"legacy\",\n-            }\n+        new = {\n+            \"id\": row[\"id\"],\n+            \"tenant_id\": row[\"tenant_id\"],\n+            \"cents\": row[\"cents\"],\n+            \"currency\": row.get(\"currency\", \"USD\"),\n+            \"source\": \"legacy\",\n+        }\n         db.put(\"ledger\", new[\"id\"], new)\n         row = {**row, \"migrated\": True}\n         db.put(\"ledger_legacy\", row[\"id\"], row)\n-    db.put(\"schema_meta\", \"002_backfill_ledger\", {\"applied\": True})\n\"}\n</arch_tool>\n",
+      "apply_detail": "git apply failed: error: corrupt patch at line 26; fuzzy: no hunks applied (skipped=['store/migrations/m002_backfill_ledger.py@7'])"
+    },
+    "tool_calls": 12,
+    "files_read": [
+      "store/db.py",
+      "store/ledger_repo.py",
+      "store/migrations/m001_init.py",
+      "store/migrations/m002_backfill_ledger.py",
+      "store/migrations/registry.py",
+      "store/migrations/runner.py",
+      "tests/test_smoke.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store/migrations"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/migrations/m002_backfill_ledger.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/ledger_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/migrations/runner.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/migrations/registry.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/migrations/m001_init.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "m002|backfill_ledger",
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "tests/test_smoke.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 16.74,
+    "prompt_tokens": 28838,
+    "eval_tokens": 846,
+    "rounds": 13,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1425,
+    "raw_content": "Based on my analysis, the bug is clear:\n\nIn `store/migrations/m002_backfill_ledger.py`, the migration only processes rows where `priority == \"high\"`. It skips all other rows (e.g., normal, low priority), leaving them unmigrated.\n\nThe fix should remove the `if row.get(\"priority\") == \"high\":` condition so that **all** unmigrated legacy ledger rows are migrated.\n\n<arch_final>\n{\"patch\": \"--- a/store/migrations/m002_backfill_ledger.py\\n+++ b/store/migrations/m002_backfill_ledger.py\\n@@ -7,14 +7,11 @@ def apply() -> None:\\n     for row in legacy:\\n         if row.get(\\\"migrated\\\"):\\n             continue\\n-        if row.get(\\\"priority\\\") == \\\"high\\\":\\n-            new = {\\n-                \\\"id\\\": row[\\\"id\\\"],\\n-                \\\"tenant_id\\\": row[\\\"tenant_id\\\"],\\n-                \\\"cents\\\": row[\\\"cents\\\"],\\n-                \\\"currency\\\": row.get(\\\"currency\\\", \\\"USD\\\"),\\n-                \\\"source\\\": \\\"legacy\\\",\\n-            }\\n+        new = {\\n+            \\\"id\\\": row[\\\"id\\\"],\\n+            \\\"tenant_id\\\": row[\\\"tenant_id\\\"],\\n+            \\\"cents\\\": row[\\\"cents\\\"],\\n+            \\\"currency\\\": row.get(\\\"currency\\\", \\\"USD\\\"),\\n+            \\\"source\\\": \\\"legacy\\\",\\n+        }\\n         db.put(\\\"ledger\\\", new[\\\"id\\\"], new)\\n         row = {**row, \\\"migrated\\\": True}\\n         db.put(\\\"ledger_legacy\\\", row[\\\"id\\\"], row)\\n-    db.put(\\\"schema_meta\\\", \\\"002_backfill_ledger\\\", {\\\"applied\\\": True})\\n\"}\n</arch_tool>"
+  },
+  {
+    "model": "qwen3-coder-next:q8_0",
+    "provider": "ollama",
+    "task": "nplus1_reconciliation",
+    "title": "Reconciliation N+1 payment lookups",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 2/2 (fuzzy applied 2 hunks)",
+    "passed": 2,
+    "total": 2,
+    "answer": {
+      "patch": "--- a/store/payment_repo.py\n+++ b/store/payment_repo.py\n@@ -26,3 +26,10 @@ def list_by_invoice(invoice_id: str) -> list[dict[str, Any]]:\n \n def list_by_tenant(tenant_id: str) -> list[dict[str, Any]]:\n     return db.list_where(\"payments\", tenant_id=tenant_id)\n+\n+\n+def list_for_invoices(invoice_ids: list[str]) -> list[dict[str, Any]]:\n+    \"\"\"Bulk load payments for multiple invoice IDs.\"\"\"\n+    if not invoice_ids:\n+        return []\n+    rows = db.list_all(\"payments\")\n+    return [r for r in rows if r.get(\"invoice_id\") in invoice_ids]\n--- a/service/reconcile_service.py\n+++ b/service/reconcile_service.py\n@@ -12,8 +12,10 @@ def reconcile_tenant() -> dict[str, Any]:\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n     matched = 0\n     gaps = []\n-    for inv in invoices:\n-        pays = payment_repo.list_by_invoice(inv[\"id\"])\n+    invoice_ids = [inv[\"id\"] for inv in invoices]\n+    all_payments = payment_repo.list_for_invoices(invoice_ids)\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\n+    for p in all_payments:\n+        payments_by_invoice.setdefault(p[\"invoice_id\"], []).append(p)\n+    for inv in invoices:\n+        pays = payments_by_invoice.get(inv[\"id\"], [])\n         paid = sum(p.get(\"amount_cents\", 0) for p in pays)\n         if paid >= inv.get(\"amount_cents\", 0) and inv.get(\"status\") == \"paid\":\n             matched += 1\n",
+      "patch_bytes": 1367,
+      "patch_preview": "--- a/store/payment_repo.py\n+++ b/store/payment_repo.py\n@@ -26,3 +26,10 @@ def list_by_invoice(invoice_id: str) -> list[dict[str, Any]]:\n \n def list_by_tenant(tenant_id: str) -> list[dict[str, Any]]:\n     return db.list_where(\"payments\", tenant_id=tenant_id)\n+\n+\n+def list_for_invoices(invoice_ids: list[str]) -> list[dict[str, Any]]:\n+    \"\"\"Bulk load payments for multiple invoice IDs.\"\"\"\n+    if not invoice_ids:\n+        return []\n+    rows = db.list_all(\"payments\")\n+    return [r for r in rows if r.get(\"invoice_id\") in invoice_ids]\n--- a/service/reconcile_service.py\n+++ b/service/reconcile_service.py\n@@ -12,8 +12,10 @@ def reconcile_tenant() -> dict[str, Any]:\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n     matched = 0\n     gaps = []\n-    for inv in invoices:\n-        pays = payment_repo.list_by_invoice(inv[\"id\"])\n+    invoice_ids = [inv[\"id\"] for inv in invoices]\n+    all_payments = payment_repo.list_for_invoices(invoice_ids)\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\n+    for p in all_payments:\n+        payments_by_invoice.setdefault(p[\"invoice_id\"], []).append(p)\n+    for inv in invoices:\n+        pays = payments_by_invoice.get(inv[\"id\"], [])",
+      "apply_detail": "fuzzy applied 2 hunks"
+    },
+    "tool_calls": 14,
+    "files_read": [
+      "service/__init__.py",
+      "service/reconcile_service.py",
+      "store/__init__.py",
+      "store/db.py",
+      "store/invoice_repo.py",
+      "store/payment_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/reconcile_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "list_by_invoice"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "list_by_tenant"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "edit_file",
+        "arguments": {
+          "path": "store/payment_repo.py",
+          "original": "def list_by_tenant(tenant_id: str) -> list[dict[str, Any]]:\n    return db.list_where(\"payments\", tenant_id=tenant_id)",
+          "new": "def list_by_tenant(tenant_id: str) -> list[dict[str, Any]]:\n    return db.list_where(\"payments\", tenant_id=tenant_id)\n\n\ndef list_for_invoices(invoice_ids: list[str]) -> list[dict[str, Any]]:\n    \"\"\"Bulk load payments for multiple invoice IDs.\"\"\"\n    if not invoice_ids:\n        return []\n    rows = db.list_all(\"payments\")\n    return [r for r in rows if r.get(\"invoice_id\") in invoice_ids]"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/reconcile_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 23.72,
+    "prompt_tokens": 47088,
+    "eval_tokens": 1245,
+    "rounds": 15,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1508,
+    "raw_content": "Now I'll create the unified diff patch:\n\n<arch_final>\n{\"patch\": \"--- a/store/payment_repo.py\\n+++ b/store/payment_repo.py\\n@@ -26,3 +26,10 @@ def list_by_invoice(invoice_id: str) -> list[dict[str, Any]]:\\n \\n def list_by_tenant(tenant_id: str) -> list[dict[str, Any]]:\\n     return db.list_where(\\\"payments\\\", tenant_id=tenant_id)\\n+\\n+\\n+def list_for_invoices(invoice_ids: list[str]) -> list[dict[str, Any]]:\\n+    \\\"\\\"\\\"Bulk load payments for multiple invoice IDs.\\\"\\\"\\\"\\n+    if not invoice_ids:\\n+        return []\\n+    rows = db.list_all(\\\"payments\\\")\\n+    return [r for r in rows if r.get(\\\"invoice_id\\\") in invoice_ids]\\n--- a/service/reconcile_service.py\\n+++ b/service/reconcile_service.py\\n@@ -12,8 +12,10 @@ def reconcile_tenant() -> dict[str, Any]:\\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\\n     matched = 0\\n     gaps = []\\n-    for inv in invoices:\\n-        pays = payment_repo.list_by_invoice(inv[\\\"id\\\"])\\n+    invoice_ids = [inv[\\\"id\\\"] for inv in invoices]\\n+    all_payments = payment_repo.list_for_invoices(invoice_ids)\\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\\n+    for p in all_payments:\\n+        payments_by_invoice.setdefault(p[\\\"invoice_id\\\"], []).append(p)\\n+    for inv in invoices:\\n+        pays = payments_by_invoice.get(inv[\\\"id\\\"], [])\\n         paid = sum(p.get(\\\"amount_cents\\\", 0) for p in pays)\\n         if paid >= inv.get(\\\"amount_cents\\\", 0) and inv.get(\\\"status\\\") == \\\"paid\\\":\\n             matched += 1\\n\"}\n</arch_final>"
+  },
+  {
+    "model": "qwen3-coder-next:q8_0",
+    "provider": "ollama",
+    "task": "confused_deputy_admin",
+    "title": "Internal export ignores tenant boundary",
+    "family": "fix",
+    "ok": false,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "pytest 3/4 (fuzzy applied 2 hunks)",
+    "passed": 3,
+    "total": 4,
+    "answer": {
+      "patch": "--- a/api/internal.py\n+++ b/api/internal.py\n@@ -1,6 +1,7 @@\n from __future__ import annotations\n \n+from pkg.authz import assert_same_tenant\n from service import admin_service\n from pkg.tenant import require_tenant\n \n@@ -8,5 +9,9 @@ def export(body=None, headers=None, **_):\n     \"\"\"Internal path used by sibling services.\"\"\"\n     require_tenant()\n     body = body or {}\n-    rows = admin_service.export_invoices(body.get(\"tenant_id\"))\n+    target_tenant_id = body.get(\"tenant_id\")\n+    if target_tenant_id:\n+        assert_same_tenant(target_tenant_id)\n+    rows = admin_service.export_invoices(target_tenant_id)\n     return {\"status\": 200, \"invoices\": rows}\n",
+      "patch_bytes": 659,
+      "patch_preview": "--- a/api/internal.py\n+++ b/api/internal.py\n@@ -1,6 +1,7 @@\n from __future__ import annotations\n \n+from pkg.authz import assert_same_tenant\n from service import admin_service\n from pkg.tenant import require_tenant\n \n@@ -8,5 +9,9 @@ def export(body=None, headers=None, **_):\n     \"\"\"Internal path used by sibling services.\"\"\"\n     require_tenant()\n     body = body or {}\n-    rows = admin_service.export_invoices(body.get(\"tenant_id\"))\n+    target_tenant_id = body.get(\"tenant_id\")\n+    if target_tenant_id:\n+        assert_same_tenant(target_tenant_id)\n+    rows = admin_service.export_invoices(target_tenant_id)\n     return {\"status\": 200, \"invoices\": rows}\n",
+      "apply_detail": "fuzzy applied 2 hunks"
+    },
+    "tool_calls": 12,
+    "files_read": [
+      "api/admin.py",
+      "api/app.py",
+      "api/internal.py",
+      "pkg/authz.py",
+      "pkg/tenant.py",
+      "service/admin_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/internal.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/admin_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "internal/export",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/app.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/admin.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/authz.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "assert_same_tenant",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": ".",
+          "pattern": "require_admin"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 17.86,
+    "prompt_tokens": 30145,
+    "eval_tokens": 886,
+    "rounds": 13,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1260,
+    "raw_content": "Now I have a clear understanding of the fix needed:\n\nIn `api/internal.py`, we need to:\n1. Get the tenant context (already done via `require_tenant()`)\n2. If `tenant_id` is provided in the body, check that either:\n   - The caller is an admin (`ctx.is_admin == True`), OR\n   - The provided `tenant_id` matches the caller's own `tenant_id`\n3. Only then proceed with the export\n\nThe fix should be minimal and follow the existing patterns in the codebase (like `assert_same_tenant` or checking `is_admin`).\n\nLet me write the patch:\n\n<arch_final>\n{\"patch\": \"--- a/api/internal.py\\n+++ b/api/internal.py\\n@@ -1,6 +1,7 @@\\n from __future__ import annotations\\n \\n+from pkg.authz import assert_same_tenant\\n from service import admin_service\\n from pkg.tenant import require_tenant\\n \\n@@ -8,5 +9,9 @@ def export(body=None, headers=None, **_):\\n     \\\"\\\"\\\"Internal path used by sibling services.\\\"\\\"\\\"\\n     require_tenant()\\n     body = body or {}\\n-    rows = admin_service.export_invoices(body.get(\\\"tenant_id\\\"))\\n+    target_tenant_id = body.get(\\\"tenant_id\\\")\\n+    if target_tenant_id:\\n+        assert_same_tenant(target_tenant_id)\\n+    rows = admin_service.export_invoices(target_tenant_id)\\n     return {\\\"status\\\": 200, \\\"invoices\\\": rows}\\n\"\n}</arch_final>"
+  },
+  {
+    "model": "qwen3-coder-next:q8_0",
+    "provider": "ollama",
+    "task": "client_contract_drift",
+    "title": "Client misreads invoice amounts",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 2/2 (applied via --whitespace=nowarn -p1)",
+    "passed": 2,
+    "total": 2,
+    "answer": {
+      "patch": "--- a/client/models.py\n+++ b/client/models.py\n@@ -15,9 +15,9 @@ class InvoiceDTO:\n \n     @classmethod\n     def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n-        if \"amount\" in data:\n+        if \"amount_cents\" in data:\n+            amount = float(data[\"amount_cents\"]) / 100.0\n+        elif \"amount\" in data:\n             amount = float(data[\"amount\"])\n-        elif \"amount_cents\" in data:\n-            amount = float(data[\"amount_cents\"])\n         else:\n             amount = 0.0\n         return cls(\n",
+      "patch_bytes": 514,
+      "patch_preview": "--- a/client/models.py\n+++ b/client/models.py\n@@ -15,9 +15,9 @@ class InvoiceDTO:\n \n     @classmethod\n     def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n-        if \"amount\" in data:\n+        if \"amount_cents\" in data:\n+            amount = float(data[\"amount_cents\"]) / 100.0\n+        elif \"amount\" in data:\n             amount = float(data[\"amount\"])\n-        elif \"amount_cents\" in data:\n-            amount = float(data[\"amount_cents\"])\n         else:\n             amount = 0.0\n         return cls(\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 12,
+    "files_read": [
+      "client/__init__.py",
+      "client/http.py",
+      "client/models.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "client"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "client/client/models.py"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "client/models.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "client/client/__init__.py"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "client/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "client/http.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "edit",
+        "arguments": {
+          "path": "client/models.py",
+          "old_text": "    @classmethod\n    def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n        if \"amount\" in data:\n            amount = float(data[\"amount\"])\n        elif \"amount_cents\" in data:\n            amount = float(data[\"amount_cents\"])\n        else:\n            amount = 0.0\n        return cls(",
+          "new_text": "    @classmethod\n    def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n        if \"amount_cents\" in data:\n            amount = float(data[\"amount_cents\"]) / 100.0\n        elif \"amount\" in data:\n            amount = float(data[\"amount\"])\n        else:\n            amount = 0.0\n        return cls("
+        },
+        "result_ok": false
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "client/models.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "write_file",
+        "arguments": {
+          "path": "client/models.py",
+          "content": "from __future__ import annotations\n\nfrom dataclasses import dataclass\nfrom typing import Any\n\n\n@dataclass\nclass InvoiceDTO:\n    id: str\n    tenant_id: str\n    account_id: str\n    amount: float\n    currency: str\n    status: str\n\n    @classmethod\n    def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n        if \"amount_cents\" in data:\n            amount = float(data[\"amount_cents\"]) / 100.0\n        elif \"amount\" in data:\n            amount = float(data[\"amount\"])\n        else:\n            amount = 0.0\n        return cls(\n            id=data[\"id\"],\n            tenant_id=data[\"tenant_id\"],\n            account_id=data[\"account_id\"],\n            amount=amount,\n            currency=data.get(\"currency\", \"USD\"),\n            status=data[\"status\"],\n        )"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "write_file|edit|patch"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 20.55,
+    "prompt_tokens": 24150,
+    "eval_tokens": 1101,
+    "rounds": 13,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 927,
+    "raw_content": "I see the issue - I need to produce a unified diff patch as the final output. Let me construct the fix now and output it in the required format.\n\nThe bug is in `client/models.py` where `amount_cents` is treated as dollars instead of cents. The fix should divide by 100 when `amount_cents` is present, and prefer `amount_cents` over `amount`.\n\n<arch_final>\n{\"patch\": \"--- a/client/models.py\\n+++ b/client/models.py\\n@@ -15,9 +15,9 @@ class InvoiceDTO:\\n \\n     @classmethod\\n     def from_api(cls, data: dict[str, Any]) -> \\\"InvoiceDTO\\\":\\n-        if \\\"amount\\\" in data:\\n+        if \\\"amount_cents\\\" in data:\\n+            amount = float(data[\\\"amount_cents\\\"]) / 100.0\\n+        elif \\\"amount\\\" in data:\\n             amount = float(data[\\\"amount\\\"])\\n-        elif \\\"amount_cents\\\" in data:\\n-            amount = float(data[\\\"amount_cents\\\"])\\n         else:\\n             amount = 0.0\\n         return cls(\"}\n</arch_final>"
+  },
+  {
+    "model": "qwen3-coder-next:q8_0",
+    "provider": "ollama",
+    "task": "outbox_poison_retry",
+    "title": "Outbox acks poison events",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: patch fragment without header at line 2: @@ -25,10 +25,9 @@ def process_once(publish: Callable[[dict], None] | None = None) -> dict[str, An; fuzzy: missing +++ line",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "--- a/worker/outbox_worker.py +++ b/worker/outbox_worker.py\n@@ -25,10 +25,9 @@ def process_once(publish: Callable[[dict], None] | None = None) -> dict[str, An\n         try:\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n-            ok += 1\n-        except Exception:\n-            failed += 1\n-        outbox.ack(row[\"id\"])\n+            outbox.ack(row[\"id\"])\n+            ok += 1\n+        except Exception:\n+            failed += 1\n+            raise\n     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n",
+      "patch_bytes": 538,
+      "patch_preview": "--- a/worker/outbox_worker.py +++ b/worker/outbox_worker.py\n@@ -25,10 +25,9 @@ def process_once(publish: Callable[[dict], None] | None = None) -> dict[str, An\n         try:\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n-            ok += 1\n-        except Exception:\n-            failed += 1\n-        outbox.ack(row[\"id\"])\n+            outbox.ack(row[\"id\"])\n+            ok += 1\n+        except Exception:\n+            failed += 1\n+            raise\n     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n",
+      "apply_detail": "git apply failed: error: patch fragment without header at line 2: @@ -25,10 +25,9 @@ def process_once(publish: Callable[[dict], None] | None = None) -> dict[str, An; fuzzy: missing +++ line"
+    },
+    "tool_calls": 7,
+    "files_read": [
+      "store/outbox.py",
+      "worker/outbox_worker.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "worker"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "process_once"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "outbox_worker|process_once",
+          "path": ".",
+          "ignore_case": false
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "path": ".",
+          "pattern": "PoisonError"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 10.39,
+    "prompt_tokens": 11138,
+    "eval_tokens": 534,
+    "rounds": 8,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1272,
+    "raw_content": "Now I understand the bug clearly:\n\nIn `worker/outbox_worker.py`, line 32 calls `outbox.ack(row[\"id\"])` unconditionally, even when an exception occurs during `publish`. This means poison events (which raise `PoisonError`) get acknowledged and removed from the outbox, so they're never retried.\n\nThe fix should:\n1. Only call `ack` after successful publish\n2. Keep batch claiming behavior\n3. Not swallow errors silently \u2014 let exceptions propagate or at least leave rows unacked for retry\n\nLooking at the code: currently on exception we increment `failed` but still ack the row. The fix is to move `outbox.ack(row[\"id\"])` inside the try block, after successful publish.\n\n<arch_final>\n{\"patch\": \"--- a/worker/outbox_worker.py +++ b/worker/outbox_worker.py\\n@@ -25,10 +25,9 @@ def process_once(publish: Callable[[dict], None] | None = None) -> dict[str, An\\n         try:\\n             publish(row)\\n             outbox.mark_published(row[\\\"id\\\"])\\n-            ok += 1\\n-        except Exception:\\n-            failed += 1\\n-        outbox.ack(row[\\\"id\\\"])\\n+            outbox.ack(row[\\\"id\\\"])\\n+            ok += 1\\n+        except Exception:\\n+            failed += 1\\n+            raise\\n     return {\\\"ok\\\": ok, \\\"failed\\\": failed, \\\"batch\\\": len(batch)}\\n\"}\n</arch_final>"
+  }
+]
