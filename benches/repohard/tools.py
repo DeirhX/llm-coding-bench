@@ -374,8 +374,9 @@ def _find_block(
         for pos in (preferred - delta, preferred + delta):
             if pos >= 0 and pos + len(needle) <= len(haystack):
                 windows.append(pos)
-    for pos in range(0, max(0, len(haystack) - len(needle) + 1)):
-        windows.append(pos)
+    else:
+        for pos in range(0, max(0, len(haystack) - len(needle) + 1)):
+            windows.append(pos)
     seen: set[int] = set()
     for pos in windows:
         if pos in seen:

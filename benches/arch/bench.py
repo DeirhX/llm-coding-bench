@@ -279,7 +279,7 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
 
         if abort_reason in ("think_loop", "think_budget") and think_loop_nudges < 2:
             think_loop_nudges += 1
-            nudge = think_loop_nudge(thinking=thinking, protocol="repohard")
+            nudge = think_loop_nudge(thinking=thinking, protocol="arch")
             transcript.add_note(f"{abort_reason} nudge {think_loop_nudges}/2")
             messages.append({"role": "user", "content": nudge})
             continue

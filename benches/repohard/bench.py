@@ -163,9 +163,13 @@ def parse_final_answer(text: str) -> dict[str, Any] | None:
     dm = _FENCE_DIFF.search(text)
     if dm:
         return {"patch": dm.group(1).strip()}
-    if "--- a/" in text and "+++ b/" in text:
-        start = text.find("--- ")
-        return {"patch": text[start:].strip()}
+    # prose fallback — require --- and +++ at start of a line to avoid
+    # false positives when the model discusses file paths in prose
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("--- a/") or stripped.startswith("+++ b/"):
+            return {"patch": "\n".join(lines[i:]).strip()}
     return None
 
 

@@ -131,7 +131,7 @@ def parse_final(text: str) -> dict[str, Any] | None:
     # All json fences — try last first (final answer usually lands at the end).
     fences = _FENCE_JSON.findall(text)
     candidates.extend(reversed(fences))
-    m2 = re.search(r"\{[\s\S]*\"answers\"[\s\S]*\}", text)
+    m2 = re.search(r"\{[^}]*\"answers\"[^}]*\}", text)
     if m2:
         candidates.append(m2.group(0))
 

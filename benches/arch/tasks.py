@@ -226,7 +226,7 @@ def grade_tenant_invoice(answer: dict[str, Any], session: ToolSession) -> dict[s
     if "admin_export" in bypasses or "export_all" in bypasses:
         by_pts += 3
     ev_pts, ev_d = _evidence_points(a, session, _req_files("tenant_invoice_isolation"))
-    score = min(4, enf_pts + 2) // 1  # messy
+    # enf_pts computation removed; scoring below
     score = 0
     score += 2 if ("list_invoices" in enforced or "list_by_tenant" in enforced) else 0
     score += 3 if ("get_invoice" in bypasses or "get_by_id" in bypasses) else 0
