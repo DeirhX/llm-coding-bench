@@ -155,7 +155,9 @@ aggressive 2-bit quant is ~186 GB; 1.5-bit is ~140 GB. Neither fits. There is no
 
 ## Engine and configuration
 
-Two measured results worth overriding your priors on:
+Runner choice — including whether Ollama's flak is deserved — is analysed separately in
+[`RUNNERS_MACOS_METAL.md`](RUNNERS_MACOS_METAL.md). Two measured results worth overriding your
+priors on:
 
 1. **llama.cpp beat MLX by 10–24 %** on these models on the M5 Max. The "MLX is faster on
    Apple Silicon" claim is not true here. MLX does use less memory (37 GB vs 45 GB for the
