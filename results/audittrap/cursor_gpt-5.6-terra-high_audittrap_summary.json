@@ -1,0 +1,9 @@
+{
+  "model": "gpt-5.6-terra-high",
+  "tag": "cursor_gpt-5.6-terra-high_audittrap",
+  "score": 38,
+  "max_score": 81,
+  "pass": 3,
+  "tasks": 7,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_gpt-5.6-terra-high_audittrap_20260727_123046.json"
+}

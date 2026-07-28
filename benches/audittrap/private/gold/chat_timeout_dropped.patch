@@ -1,0 +1,18 @@
+diff --git a/chat/wrap.py b/chat/wrap.py
+index 0a6925d..708d51f 100644
+--- a/chat/wrap.py
++++ b/chat/wrap.py
+@@ -16,12 +16,12 @@ def chat_wrapped(
+     max_tokens: int = 1024,
+     retry: int = 1,
+ ) -> dict[str, Any]:
+-    del timeout_s
+     last: dict[str, Any] | None = None
+     for _ in range(max(1, retry)):
+         last = api.post_chat(
+             model,
+             messages,
++            timeout_s=timeout_s,
+             temperature=temperature,
+             max_tokens=max_tokens,
+         )

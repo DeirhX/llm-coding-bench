@@ -1,0 +1,9 @@
+{
+  "model": "deepseek-v4-flash",
+  "tag": "ds4_flash_q2imatrix_repohard",
+  "score": 0,
+  "max_score": 80,
+  "pass": 0,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/ds4_flash_q2imatrix_repohard_20260726_025014.json"
+}

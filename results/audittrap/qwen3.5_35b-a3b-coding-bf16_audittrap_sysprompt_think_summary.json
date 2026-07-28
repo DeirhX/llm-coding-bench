@@ -1,0 +1,9 @@
+{
+  "model": "qwen3.5:35b-a3b-coding-bf16",
+  "tag": "qwen3.5_35b-a3b-coding-bf16_audittrap_sysprompt_think",
+  "score": 33,
+  "max_score": 81,
+  "pass": 3,
+  "tasks": 7,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/qwen3.5_35b-a3b-coding-bf16_audittrap_sysprompt_think_20260727_163832.json"
+}

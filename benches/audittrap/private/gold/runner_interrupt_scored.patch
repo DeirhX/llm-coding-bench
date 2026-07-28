@@ -1,0 +1,13 @@
+diff --git a/runner.py b/runner.py
+index ff4374c..32b21f3 100644
+--- a/runner.py
++++ b/runner.py
+@@ -18,7 +18,7 @@ def run_tasks(
+         tid = task["id"]
+         try:
+             row = run_one(task)
+-        except BaseException as e:  # noqa: BLE001
++        except Exception as e:  # noqa: BLE001
+             row = {
+                 "task": tid,
+                 "ok": False,

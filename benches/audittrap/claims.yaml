@@ -1,0 +1,75 @@
+# Claim battery — true/false traps over miniharness.
+# gold: true|false. difficulty: easy|medium|hard.
+claims:
+  - id: a01
+    text: "runner.run_tasks catches BaseException, so KeyboardInterrupt during run_one is recorded as a task error instead of terminating the process."
+    gold: true
+    difficulty: easy
+  - id: a02
+    text: "solver/sat.py backtracking clears assign without restoring ancestor bindings, so hard SAT instances that need backtracking are solved incorrectly."
+    gold: false
+    difficulty: hard
+  - id: a03
+    text: "In solver/sql.py the WHERE clause is nested inside the JOIN optional group, so SELECT name FROM users WHERE age = 30 fails to match."
+    gold: false
+    difficulty: hard
+  - id: a04
+    text: "After JOIN users and orders, bare column total is ambiguous because both tables define total."
+    gold: false
+    difficulty: hard
+  - id: a05
+    text: "chat.wrap.chat_wrapped accepts timeout_s but does not pass it to chat.api.post_chat."
+    gold: true
+    difficulty: medium
+  - id: a06
+    text: "warmup.warmup passes timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S into chat()."
+    gold: false
+    difficulty: medium
+  - id: a07
+    text: "util.subprocess_timeout.subprocess_with_hard_timeout returns a CompletedProcess with stderr when the killed process produced only stderr."
+    gold: false
+    difficulty: hard
+  - id: a08
+    text: "think.loop.ThinkLoopDetector resets _block_hits[bl] to 0 when consecutive block windows differ."
+    gold: true
+    difficulty: easy
+  - id: a09
+    text: "Resetting _block_hits to 0 on mismatch is incorrect; it should be set to 1 so interleaved repetitions are detected."
+    gold: false
+    difficulty: hard
+  - id: a10
+    text: "util.paths.rel_to_repo will crash on Python 3.14 because Path.is_relative_to was removed."
+    gold: false
+    difficulty: medium
+  - id: a11
+    text: "compat.chat is a second independent HTTP client implementation, not a re-export of chat.facade.chat."
+    gold: false
+    difficulty: medium
+  - id: a12
+    text: "solver/_legacy_broken_sat.broken_sat_solve is imported by pipeline.run_suite for production SAT grading."
+    gold: false
+    difficulty: hard
+  - id: a13
+    text: "scoring.score_claims treats score < n_claims as a failure even when correct == n_claims and evidence_bonus is zero."
+    gold: false
+    difficulty: hard
+  - id: a14
+    text: "MAINTAINER_NOTES.md claims SQL WHERE-without-JOIN cannot parse; the implementation in solver/sql.py actually allows it."
+    gold: true
+    difficulty: medium
+  - id: a15
+    text: "chat.facade.chat forwards timeout_s into wrap.chat_wrapped."
+    gold: true
+    difficulty: easy
+  - id: a16
+    text: "runner.run_tasks writes the results JSON after every task, not only at the end of the suite."
+    gold: true
+    difficulty: easy
+  - id: a17
+    text: "schema.TABLES orders rows include a total field; users rows do not."
+    gold: true
+    difficulty: easy
+  - id: a18
+    text: "config.FIRST_BYTE_S defaults to 600 seconds."
+    gold: true
+    difficulty: easy

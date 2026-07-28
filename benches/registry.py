@@ -18,6 +18,7 @@ BENCH_ALIASES: dict[str, str] = {
     "claims": "claim",
     "repo": "repohard",
     "deepfix": "repohard",
+    "audit": "audittrap",
 }
 
 
@@ -76,6 +77,14 @@ BENCHES: dict[str, BenchSpec] = {
         module="benches.repohard.bench",
         results_subdir="repohard",
         expected_tasks=8,
+    ),
+    "audittrap": BenchSpec(
+        id="audittrap",
+        title="Audittrap",
+        summary="Synthetic miniharness: claim battery + fix/wontfix traps (7 tasks / ~81 pts)",
+        module="benches.audittrap.bench",
+        results_subdir="audittrap",
+        expected_tasks=7,
     ),
 }
 

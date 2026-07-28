@@ -142,6 +142,10 @@ def _accept_latest(spec: BenchSpec, path: Path) -> bool:
         if "_summary" in name:
             return False
         return name.endswith("_latest.json") and "repohard" in name
+    if spec.id == "audittrap":
+        if "_summary" in name:
+            return False
+        return name.endswith("_latest.json") and "audittrap" in name
     return True
 
 

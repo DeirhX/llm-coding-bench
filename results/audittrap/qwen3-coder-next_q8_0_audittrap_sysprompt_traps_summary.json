@@ -1,0 +1,9 @@
+{
+  "model": "qwen3-coder-next:q8_0",
+  "tag": "qwen3-coder-next_q8_0_audittrap_sysprompt_traps",
+  "score": 20,
+  "max_score": 20,
+  "pass": 2,
+  "tasks": 2,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/qwen3-coder-next_q8_0_audittrap_sysprompt_traps_20260727_150910.json"
+}

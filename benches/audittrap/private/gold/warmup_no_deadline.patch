@@ -1,0 +1,15 @@
+diff --git a/warmup.py b/warmup.py
+index 21649c2..2551b3b 100644
+--- a/warmup.py
++++ b/warmup.py
+@@ -9,5 +9,8 @@ from miniharness import config
+ 
+ 
+ def warmup(model: str) -> dict[str, Any]:
+-    _ = config.FIRST_BYTE_S
+-    return chat(model, "Reply with exactly: OK")
++    return chat(
++        model,
++        "Reply with exactly: OK",
++        timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S,
++    )

@@ -1,0 +1,9 @@
+{
+  "model": "deepseek-v4-flash",
+  "tag": "ds4_flash_q2imatrix_arch",
+  "score": 89,
+  "max_score": 90,
+  "pass": 9,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/ds4_flash_q2imatrix_arch_20260726_023557.json"
+}

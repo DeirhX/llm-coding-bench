@@ -11,3 +11,6 @@ results/REPORT.md
 .env
 *.pid
 results/**/*.pid
+
+.pytest_cache/
+*.nohup.out

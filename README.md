@@ -26,6 +26,11 @@ benches/
     fixture/ledgerkit/# synthetic multi-package product (agent workspace)
     private/          # NEVER on agent path — hidden pytest + gold patches
     tools.py / tasks.py / bench.py
+  audittrap/
+    claims.yaml + assignment/*.md
+    fixture/miniharness/  # synthetic harness with real bugs + lying notes
+    private/              # hidden pytest + gold patches
+    tools.py / tasks.py / bench.py
   registry.py
 bench_lib/
 scripts/
@@ -39,6 +44,7 @@ run.py
 | **Archbench** | `arch` | `benches/arch/assignment/*.md` + shared shopapi | Tools-first exploration (9 / 90) |
 | **Claim probe** | `claim` | `benches/claim/claims.yaml` + shared shopapi | 20 true/false traps (tie-break) |
 | **Repohard** | `repohard` | `benches/repohard/assignment/*.md` + synthetic ledgerkit | Explore → unified diff; private pytest (8 / 80) |
+| **Audittrap** | `audittrap` | `benches/audittrap/` + synthetic miniharness | Claim traps + fix/won't-fix (7 / ~81) |
 
 Graders stay in Python (they must execute). Prompts/claims are data.
 

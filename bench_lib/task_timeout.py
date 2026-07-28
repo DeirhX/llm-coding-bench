@@ -133,11 +133,11 @@ def subprocess_with_hard_timeout(
         stderr = e.stderr if e.stderr else ""
 
          # If we have partial output, return it with timeout marker
-        if str(stdout).strip():
+        if str(stdout).strip() or str(stderr).strip():
             return subprocess.CompletedProcess(
                 args=cmd,
                 returncode=-9,
-                stdout=str(stdout)[-2000:],
+                stdout=str(stdout)[-2000:] if str(stdout).strip() else "",
                 stderr=f"[KILLED after {wall:.1f}s] {str(stderr)[-2000:]}",
              )
 

@@ -1,0 +1,9 @@
+{
+  "model": "deepseek-v4-flash",
+  "tag": "ds4_flash_q2imatrix_sysprompt_traps_audittrap",
+  "score": 10,
+  "max_score": 20,
+  "pass": 1,
+  "tasks": 2,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/ds4_flash_q2imatrix_sysprompt_traps_audittrap_20260727_151339.json"
+}

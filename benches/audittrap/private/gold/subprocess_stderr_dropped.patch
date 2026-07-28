@@ -1,0 +1,13 @@
+diff --git a/util/subprocess_timeout.py b/util/subprocess_timeout.py
+index 2cb47dd..e629961 100644
+--- a/util/subprocess_timeout.py
++++ b/util/subprocess_timeout.py
+@@ -56,7 +56,7 @@ def subprocess_with_hard_timeout(
+         proc.wait(timeout=10)
+         stdout = e.stdout if e.stdout else ""
+         stderr = e.stderr if e.stderr else ""
+-        if str(stdout).strip():
++        if str(stdout).strip() or str(stderr).strip():
+             return subprocess.CompletedProcess(
+                 args=cmd,
+                 returncode=-9,

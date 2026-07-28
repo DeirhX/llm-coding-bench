@@ -1,0 +1,491 @@
+[
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "claim_battery",
+    "title": "Claim battery",
+    "family": "claim",
+    "ok": true,
+    "score": 18,
+    "max_score": 21,
+    "grade_detail": "18/18 correct, wrong=0, missing=0, ev=+0",
+    "passed": 18,
+    "total": 18,
+    "correct": 18,
+    "wrong": 0,
+    "missing": 0,
+    "evidence_bonus": 0,
+    "per_claim": [
+      {
+        "id": "a01",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "runner.run_tasks catches BaseException, so KeyboardInterrupt during run_one is recorded as a task error instead of terminating the process."
+      },
+      {
+        "id": "a02",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "solver/sat.py backtracking clears assign without restoring ancestor bindings, so hard SAT instances that need backtracking are solved incorrectly."
+      },
+      {
+        "id": "a03",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "In solver/sql.py the WHERE clause is nested inside the JOIN optional group, so SELECT name FROM users WHERE age = 30 fails to match."
+      },
+      {
+        "id": "a04",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "After JOIN users and orders, bare column total is ambiguous because both tables define total."
+      },
+      {
+        "id": "a05",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "chat.wrap.chat_wrapped accepts timeout_s but does not pass it to chat.api.post_chat."
+      },
+      {
+        "id": "a06",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "warmup.warmup passes timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S into chat()."
+      },
+      {
+        "id": "a07",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "util.subprocess_timeout.subprocess_with_hard_timeout returns a CompletedProcess with stderr when the killed process produced only stderr."
+      },
+      {
+        "id": "a08",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "think.loop.ThinkLoopDetector resets _block_hits[bl] to 0 when consecutive block windows differ."
+      },
+      {
+        "id": "a09",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "Resetting _block_hits to 0 on mismatch is incorrect; it should be set to 1 so interleaved repetitions are detected."
+      },
+      {
+        "id": "a10",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "util.paths.rel_to_repo will crash on Python 3.14 because Path.is_relative_to was removed."
+      },
+      {
+        "id": "a11",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "compat.chat is a second independent HTTP client implementation, not a re-export of chat.facade.chat."
+      },
+      {
+        "id": "a12",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "solver/_legacy_broken_sat.broken_sat_solve is imported by pipeline.run_suite for production SAT grading."
+      },
+      {
+        "id": "a13",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "scoring.score_claims treats score < n_claims as a failure even when correct == n_claims and evidence_bonus is zero."
+      },
+      {
+        "id": "a14",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "MAINTAINER_NOTES.md claims SQL WHERE-without-JOIN cannot parse; the implementation in solver/sql.py actually allows it."
+      },
+      {
+        "id": "a15",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "chat.facade.chat forwards timeout_s into wrap.chat_wrapped."
+      },
+      {
+        "id": "a16",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "runner.run_tasks writes the results JSON after every task, not only at the end of the suite."
+      },
+      {
+        "id": "a17",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "schema.TABLES orders rows include a total field; users rows do not."
+      },
+      {
+        "id": "a18",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "config.FIRST_BYTE_S defaults to 600 seconds."
+      }
+    ],
+    "answer": {
+      "answers": {
+        "a01": true,
+        "a02": false,
+        "a03": false,
+        "a04": false,
+        "a05": true,
+        "a06": false,
+        "a07": false,
+        "a08": true,
+        "a09": false,
+        "a10": false,
+        "a11": false,
+        "a12": false,
+        "a13": false,
+        "a14": true,
+        "a15": true,
+        "a16": true,
+        "a17": true,
+        "a18": true
+      },
+      "citations": {
+        "a01": [
+          "runner.py:run_tasks"
+        ],
+        "a02": [
+          "solver/sat.py:sat_solve"
+        ],
+        "a03": [
+          "solver/sql.py:_SELECT_RE"
+        ],
+        "a04": [
+          "schema.py:TABLES"
+        ],
+        "a05": [
+          "chat/wrap.py:chat_wrapped"
+        ],
+        "a06": [
+          "warmup.py:warmup"
+        ],
+        "a07": [
+          "util/subprocess_timeout.py:subprocess_with_hard_timeout"
+        ],
+        "a08": [
+          "think/loop.py:ThinkLoopDetector.feed_line"
+        ],
+        "a09": [
+          "think/loop.py:ThinkLoopDetector.feed_line"
+        ],
+        "a10": [
+          "util/paths.py:rel_to_repo"
+        ],
+        "a11": [
+          "compat/__init__.py:chat"
+        ],
+        "a12": [
+          "pipeline.py:run_suite",
+          "solver/_legacy_broken_sat.py:broken_sat_solve"
+        ],
+        "a13": [
+          "scoring.py:score_claims"
+        ],
+        "a14": [
+          "MAINTAINER_NOTES.md:known_issues",
+          "solver/sql.py:_SELECT_RE"
+        ],
+        "a15": [
+          "chat/facade.py:chat"
+        ],
+        "a16": [
+          "runner.py:run_tasks"
+        ],
+        "a17": [
+          "schema.py:TABLES"
+        ],
+        "a18": [
+          "config.py:FIRST_BYTE_S"
+        ]
+      },
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": null
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 139.04,
+    "prompt_tokens": 10,
+    "eval_tokens": 11946,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 4243,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_claude-opus-4-8-thinking-high_audittrap__claim_battery.txt",
+    "session_id": "0444de54-6320-4573-8a65-d97ed6bae4e5",
+    "raw_content": "Hark! Let me inspect this miniharness codebase to adjudicate these claims truthfully.Let me read all these files to make truthful judgments.Now the chat, warmup, util, think, scoring, pipeline, compat, and notes.The rest.I've read every module. Now, hark \u2014 let me weigh each claim against the actual code, for the `MAINTAINER_NOTES.md` doth protest \"the code is probably stale,\" yet 'tis the notes themselves that are the liars in this play.\n\nReasoning per claim:\n\n- **a01 \u2014 TRUE.** `runner.py:run_tasks` catches `except BaseException`, which swallows `KeyboardInterrupt` (a `BaseException`, not `Exception`) and records it as `done_reason: \"error\"` instead of propagating. A genuine bug, but the claim is accurate.\n- **a02 \u2014 FALSE.** `solver/sat.py:sat_solve` takes `snap = dict(assign)` *after* setting `assign[v]=bit`, then on failure does `assign.clear(); assign.update(snap); del assign[v]` \u2014 ancestors are restored. The note describing it as broken applies to the legacy file, not this one.\n- **a03 \u2014 FALSE.** In `_SELECT_RE`, the `WHERE` group is a *separate* optional non-capturing group, not nested inside the JOIN group. `SELECT name FROM users WHERE age = 30` matches fine.\n- **a04 \u2014 FALSE.** In `schema.py`, only `orders` has `total`; `users` rows have `id/name/age`. Not ambiguous.\n- **a05 \u2014 TRUE.** `chat/wrap.py:chat_wrapped` does `del timeout_s` and calls `api.post_chat` without it.\n- **a06 \u2014 FALSE.** `warmup.py:warmup` calls `chat(model, \"Reply with exactly: OK\")` \u2014 no `timeout_s`; it merely touches `config.FIRST_BYTE_S`.\n- **a07 \u2014 FALSE.** In the timeout branch it returns a `CompletedProcess` only `if str(stdout).strip()`. With only stderr, stdout is empty \u2192 it raises `ProcTimeout` instead.\n- **a08 \u2014 TRUE.** `think/loop.py` `else: self._block_hits[bl] = 0` on window mismatch.\n- **a09 \u2014 FALSE.** Reset-to-0 is a defensible \"consecutive repetition\" semantics; calling it incorrect (per the note) is a normative claim the code doesn't bear out as a bug.\n- **a10 \u2014 FALSE.** `Path.is_relative_to(single_arg)` was not removed in 3.14 (only the deprecated multi-argument form was). `util/paths.py` uses the single-arg form.\n- **a11 \u2014 FALSE.** `compat/__init__.py` does `from miniharness.chat.facade import chat` \u2014 a re-export, not a second client.\n- **a12 \u2014 FALSE.** `pipeline.py:run_suite` imports `chat`, `run_tasks`, `warmup`, `config` \u2014 never `broken_sat_solve`.\n- **a13 \u2014 FALSE.** With `correct == n_claims` and `evidence_bonus == 0`, `score == n_claims`, so `score < n_claims` is False; no failure.\n- **a14 \u2014 TRUE.** Note #2 claims WHERE-without-JOIN cannot parse; the regex actually allows it.\n- **a15 \u2014 TRUE.** `chat/facade.py:chat` passes `timeout_s=timeout_s` into `wrap.chat_wrapped` (which then discards it \u2014 but the facade does forward it).\n- **a16 \u2014 TRUE.** `run_tasks` calls `out_path.write_text(...)` inside the loop after each task.\n- **a17 \u2014 TRUE.** `orders` include `total`; `users` do not.\n- **a18 \u2014 TRUE.** `FIRST_BYTE_S = float(os.environ.get(\"MH_FIRST_BYTE_S\", \"600\"))`.\n\n<arch_final>\n{\n  \"answers\": {\n    \"a01\": true,\n    \"a02\": false,\n    \"a03\": false,\n    \"a04\": false,\n    \"a05\": true,\n    \"a06\": false,\n    \"a07\": false,\n    \"a08\": true,\n    \"a09\": false,\n    \"a10\": false,\n    \"a11\": false,\n    \"a12\": false,\n    \"a13\": false,\n    \"a14\": true,\n    \"a15\": true,\n    \"a16\": true,\n    \"a17\": true,\n    \"a18\": true\n  },\n  \"citations\": {\n    \"a01\": [\"runner.py:run_tasks\"],\n    \"a02\": [\"solver/sat.py:sat_solve\"],\n    \"a03\": [\"solver/sql.py:_SELECT_RE\"],\n    \"a04\": [\"schema.py:TABLES\"],\n    \"a05\": [\"chat/wrap.py:chat_wrapped\"],\n    \"a06\": [\"warmup.py:warmup\"],\n    \"a07\": [\"util/subprocess_timeout.py:subprocess_with_hard_timeout\"],\n    \"a08\": [\"think/loop.py:ThinkLoopDetector.feed_line\"],\n    \"a09\": [\"think/loop.py:ThinkLoopDetector.feed_line\"],\n    \"a10\": [\"util/paths.py:rel_to_repo\"],\n    \"a11\": [\"compat/__init__.py:chat\"],\n    \"a12\": [\"pipeline.py:run_suite\", \"solver/_legacy_broken_sat.py:broken_sat_solve\"],\n    \"a13\": [\"scoring.py:score_claims\"],\n    \"a14\": [\"MAINTAINER_NOTES.md:known_issues\", \"solver/sql.py:_SELECT_RE\"],\n    \"a15\": [\"chat/facade.py:chat\"],\n    \"a16\": [\"runner.py:run_tasks\"],\n    \"a17\": [\"schema.py:TABLES\"],\n    \"a18\": [\"config.py:FIRST_BYTE_S\"]\n  }\n}\n</arch_final>"
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "runner_interrupt_scored",
+    "title": "Ctrl-C recorded as task failure",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 4/4 (applied via --whitespace=nowarn -p1)",
+    "passed": 4,
+    "total": 4,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/runner.py\n+++ b/runner.py\n@@ -18,7 +18,7 @@\n         tid = task[\"id\"]\n         try:\n             row = run_one(task)\n-        except BaseException as e:  # noqa: BLE001\n+        except Exception as e:  # noqa: BLE001 -- let KeyboardInterrupt/SystemExit propagate\n             row = {\n                 \"task\": tid,\n                 \"ok\": False,\n",
+      "reason": "run_tasks caught BaseException, which includes KeyboardInterrupt and SystemExit. A Ctrl-C during an in-flight task was caught and appended as a scored failure row (ok=False, done_reason='error') instead of interrupting the suite. Narrowing to Exception lets KeyboardInterrupt/SystemExit propagate for a clean interrupt while still recording ordinary task errors as failure rows.",
+      "citations": [
+        "runner.py:run_tasks"
+      ],
+      "patch_bytes": 350,
+      "patch_preview": "--- a/runner.py\n+++ b/runner.py\n@@ -18,7 +18,7 @@\n         tid = task[\"id\"]\n         try:\n             row = run_one(task)\n-        except BaseException as e:  # noqa: BLE001\n+        except Exception as e:  # noqa: BLE001 -- let KeyboardInterrupt/SystemExit propagate\n             row = {\n                 \"task\": tid,\n                 \"ok\": False,\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 31.48,
+    "prompt_tokens": 8,
+    "eval_tokens": 1676,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1559,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_claude-opus-4-8-thinking-high_audittrap__runner_interrupt_scored.txt",
+    "session_id": "a478c656-bcad-430f-88a5-dbf64927d523",
+    "raw_content": "I'll inspect the miniharness package to understand how tasks are run and scored, then trace the Ctrl-C (KeyboardInterrupt) path.I'll explore the key files related to running and scoring tasks.Found the likely culprit. Let me check the scoring and pipeline to confirm conventions before proposing a fix.The bug is confirmed. In `run_tasks`, the handler catches `BaseException`, which includes `KeyboardInterrupt` (and `SystemExit`). Those inherit from `BaseException`, not `Exception`, so Ctrl-C gets swallowed and written as a scored failure row (`ok: false`, `done_reason: \"error\"`) rather than propagating to stop the process. The fix is to narrow the catch to `Exception` so interrupts bubble up.\n\n<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/runner.py\\n+++ b/runner.py\\n@@ -18,7 +18,7 @@\\n         tid = task[\\\"id\\\"]\\n         try:\\n             row = run_one(task)\\n-        except BaseException as e:  # noqa: BLE001\\n+        except Exception as e:  # noqa: BLE001 -- let KeyboardInterrupt/SystemExit propagate\\n             row = {\\n                 \\\"task\\\": tid,\\n                 \\\"ok\\\": False,\\n\", \"reason\": \"run_tasks caught BaseException, which includes KeyboardInterrupt and SystemExit. A Ctrl-C during an in-flight task was caught and appended as a scored failure row (ok=False, done_reason='error') instead of interrupting the suite. Narrowing to Exception lets KeyboardInterrupt/SystemExit propagate for a clean interrupt while still recording ordinary task errors as failure rows.\", \"citations\": [\"runner.py:run_tasks\"]}\n</arch_final>"
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "chat_timeout_dropped",
+    "title": "Chat timeout_s never reaches HTTP client",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 3/3 (applied via --whitespace=nowarn -p1)",
+    "passed": 3,
+    "total": 3,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,11 +16,11 @@ def chat_wrapped(\n     max_tokens: int = 1024,\n     retry: int = 1,\n ) -> dict[str, Any]:\n-    del timeout_s\n     last: dict[str, Any] | None = None\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n             messages,\n+            timeout_s=timeout_s,\n             temperature=temperature,\n             max_tokens=max_tokens,\n         )\n",
+      "reason": "chat_wrapped discarded timeout_s via `del timeout_s` and never forwarded it to api.post_chat, so the HTTP layer always received the default None despite callers passing a deadline. Removing the delete and forwarding timeout_s restores propagation from facade.chat -> chat_wrapped -> post_chat.",
+      "citations": [
+        "chat/wrap.py:chat_wrapped",
+        "chat/api.py:post_chat",
+        "chat/facade.py:chat"
+      ],
+      "patch_bytes": 436,
+      "patch_preview": "--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,11 +16,11 @@ def chat_wrapped(\n     max_tokens: int = 1024,\n     retry: int = 1,\n ) -> dict[str, Any]:\n-    del timeout_s\n     last: dict[str, Any] | None = None\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n             messages,\n+            timeout_s=timeout_s,\n             temperature=temperature,\n             max_tokens=max_tokens,\n         )\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 23.31,
+    "prompt_tokens": 6,
+    "eval_tokens": 1396,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1692,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_claude-opus-4-8-thinking-high_audittrap__chat_timeout_dropped.txt",
+    "session_id": "b0edf9c7-3d8b-4ce0-b488-0f11d55f662d",
+    "raw_content": "Found the bug. In `chat/wrap.py`, `chat_wrapped` accepts `timeout_s` but line 19 does `del timeout_s` and never forwards it to `api.post_chat`, so the HTTP layer always sees its default of `None`.\n\n```10:31:chat/wrap.py\ndef chat_wrapped(\n    ...\n    timeout_s: float | None = None,\n    ...\n) -> dict[str, Any]:\n    del timeout_s          # <-- discarded here\n    ...\n        last = api.post_chat(\n            model,\n            messages,\n            temperature=temperature,   # <-- no timeout_s passed\n            max_tokens=max_tokens,\n        )\n```\n\nThe facade (`chat/facade.py:chat`) forwards `timeout_s` correctly, and `api.post_chat` records it into `_LAST_TIMEOUT`, so the break is squarely in the mid-layer wrapper. The fix is to stop deleting it and forward it through.\n\n<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/chat/wrap.py\\n+++ b/chat/wrap.py\\n@@ -16,11 +16,11 @@ def chat_wrapped(\\n     max_tokens: int = 1024,\\n     retry: int = 1,\\n ) -> dict[str, Any]:\\n-    del timeout_s\\n     last: dict[str, Any] | None = None\\n     for _ in range(max(1, retry)):\\n         last = api.post_chat(\\n             model,\\n             messages,\\n+            timeout_s=timeout_s,\\n             temperature=temperature,\\n             max_tokens=max_tokens,\\n         )\\n\", \"reason\": \"chat_wrapped discarded timeout_s via `del timeout_s` and never forwarded it to api.post_chat, so the HTTP layer always received the default None despite callers passing a deadline. Removing the delete and forwarding timeout_s restores propagation from facade.chat -> chat_wrapped -> post_chat.\", \"citations\": [\"chat/wrap.py:chat_wrapped\", \"chat/api.py:post_chat\", \"chat/facade.py:chat\"]}\n</arch_final>"
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "subprocess_stderr_dropped",
+    "title": "Timed-out child with stderr-only output loses diagnostics",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 3/3 (applied via --whitespace=nowarn -p1)",
+    "passed": 3,
+    "total": 3,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/util/subprocess_timeout.py\n+++ b/util/subprocess_timeout.py\n@@ -46,17 +46,19 @@\n                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)\n         except (ProcessLookupError, OSError):\n             pass\n+        drained_out = \"\"\n+        drained_err = \"\"\n         try:\n             if proc.stdout:\n-                proc.stdout.read()\n+                drained_out = proc.stdout.read() or \"\"\n             if proc.stderr:\n-                proc.stderr.read()\n+                drained_err = proc.stderr.read() or \"\"\n         except (OSError, ValueError):\n             pass\n         proc.wait(timeout=10)\n-        stdout = e.stdout if e.stdout else \"\"\n-        stderr = e.stderr if e.stderr else \"\"\n-        if str(stdout).strip():\n+        stdout = (e.stdout if e.stdout else \"\") or drained_out\n+        stderr = (e.stderr if e.stderr else \"\") or drained_err\n+        if str(stdout).strip() or str(stderr).strip():\n             return subprocess.CompletedProcess(\n                 args=cmd,\n                 returncode=-9,\n",
+      "reason": "The timeout branch discarded the drained pipe reads and gated the killed-CompletedProcess path solely on stdout (line 59), so a child that wrote only to stderr before hanging raised a bare ProcTimeout and lost its diagnostics. The patch stores the drained stdout/stderr and returns the killed CompletedProcess whenever either stream has content, restoring parity between stdout-only and stderr-only survivors.",
+      "citations": [
+        "util/subprocess_timeout.py:subprocess_with_hard_timeout"
+      ],
+      "patch_bytes": 1031,
+      "patch_preview": "--- a/util/subprocess_timeout.py\n+++ b/util/subprocess_timeout.py\n@@ -46,17 +46,19 @@\n                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)\n         except (ProcessLookupError, OSError):\n             pass\n+        drained_out = \"\"\n+        drained_err = \"\"\n         try:\n             if proc.stdout:\n-                proc.stdout.read()\n+                drained_out = proc.stdout.read() or \"\"\n             if proc.stderr:\n-                proc.stderr.read()\n+                drained_err = proc.stderr.read() or \"\"\n         except (OSError, ValueError):\n             pass\n         proc.wait(timeout=10)\n-        stdout = e.stdout if e.stdout else \"\"\n-        stderr = e.stderr if e.stderr else \"\"\n-        if str(stdout).strip():\n+        stdout = (e.stdout if e.stdout else \"\") or drained_out\n+        stderr = (e.stderr if e.stderr else \"\") or drained_err\n+        if str(stdout).strip() or str(stderr).strip():\n             return subprocess.CompletedProcess(\n                 args=cmd,\n                 returncode=-9,\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 78.85,
+    "prompt_tokens": 6,
+    "eval_tokens": 6227,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2471,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_claude-opus-4-8-thinking-high_audittrap__subprocess_stderr_dropped.txt",
+    "session_id": "d3a7da40-a79a-4160-8599-ccf65f14bbe0",
+    "raw_content": "The relevant file is the subprocess timeout util. Let me read it.I've found the culprit. Let me confirm my reading of the timeout branch.\n\nThe bug lives in `subprocess_with_hard_timeout` (`util/subprocess_timeout.py`):\n\n- Lines 49\u201355 drain the pipes after the kill but **throw the results away** (`proc.stdout.read()` / `proc.stderr.read()` return values are discarded).\n- Line 59 gates the whole \"return a killed `CompletedProcess`\" path on `if str(stdout).strip():` \u2014 **stdout only**.\n\nSo a child that scribbled solely to stderr before hanging trips the `else` and gets a bare `ProcTimeout` raised at line 66, incinerating the stderr dump. A child that touched stdout survives with a `CompletedProcess`. Precisely the asymmetry the ticket bewails.\n\nThe fix: capture the drained bytes and let *either* stream keep the diagnostics alive.\n\n<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/util/subprocess_timeout.py\\n+++ b/util/subprocess_timeout.py\\n@@ -46,17 +46,19 @@\\n                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)\\n         except (ProcessLookupError, OSError):\\n             pass\\n+        drained_out = \\\"\\\"\\n+        drained_err = \\\"\\\"\\n         try:\\n             if proc.stdout:\\n-                proc.stdout.read()\\n+                drained_out = proc.stdout.read() or \\\"\\\"\\n             if proc.stderr:\\n-                proc.stderr.read()\\n+                drained_err = proc.stderr.read() or \\\"\\\"\\n         except (OSError, ValueError):\\n             pass\\n         proc.wait(timeout=10)\\n-        stdout = e.stdout if e.stdout else \\\"\\\"\\n-        stderr = e.stderr if e.stderr else \\\"\\\"\\n-        if str(stdout).strip():\\n+        stdout = (e.stdout if e.stdout else \\\"\\\") or drained_out\\n+        stderr = (e.stderr if e.stderr else \\\"\\\") or drained_err\\n+        if str(stdout).strip() or str(stderr).strip():\\n             return subprocess.CompletedProcess(\\n                 args=cmd,\\n                 returncode=-9,\\n\", \"reason\": \"The timeout branch discarded the drained pipe reads and gated the killed-CompletedProcess path solely on stdout (line 59), so a child that wrote only to stderr before hanging raised a bare ProcTimeout and lost its diagnostics. The patch stores the drained stdout/stderr and returns the killed CompletedProcess whenever either stream has content, restoring parity between stdout-only and stderr-only survivors.\", \"citations\": [\"util/subprocess_timeout.py:subprocess_with_hard_timeout\"]}\n</arch_final>"
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "warmup_no_deadline",
+    "title": "Warmup ignores short timeout",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 2/2 (applied via --whitespace=nowarn -p1)",
+    "passed": 2,
+    "total": 2,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/warmup.py\n+++ b/warmup.py\n@@ -9,4 +9,3 @@ from miniharness import config\n \n def warmup(model: str) -> dict[str, Any]:\n-    _ = config.FIRST_BYTE_S\n-    return chat(model, \"Reply with exactly: OK\")\n+    return chat(model, \"Reply with exactly: OK\", timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S)\n--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,11 +16,11 @@ def chat_wrapped(\n     retry: int = 1,\n ) -> dict[str, Any]:\n-    del timeout_s\n     last: dict[str, Any] | None = None\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n             messages,\n+            timeout_s=timeout_s,\n             temperature=temperature,\n             max_tokens=max_tokens,\n         )\n",
+      "reason": "Warmup never applied the short cold-start budget. warmup() called chat() with no timeout (and only dead-referenced FIRST_BYTE_S=600), and chat.wrap.chat_wrapped() did `del timeout_s`, dropping any budget before it reached api.post_chat. Fix: warmup now passes config.DEFAULT_WARMUP_TIMEOUT_S (30s), and wrap forwards timeout_s through to the client so the short deadline is actually enforced. MAINTAINER_NOTES note 6 claiming chat() already applies a 30s budget is stale/incorrect.",
+      "citations": [
+        "warmup.py:warmup",
+        "chat/wrap.py:chat_wrapped",
+        "chat/api.py:post_chat",
+        "config.py:DEFAULT_WARMUP_TIMEOUT_S",
+        "chat/facade.py:chat"
+      ],
+      "patch_bytes": 703,
+      "patch_preview": "--- a/warmup.py\n+++ b/warmup.py\n@@ -9,4 +9,3 @@ from miniharness import config\n \n def warmup(model: str) -> dict[str, Any]:\n-    _ = config.FIRST_BYTE_S\n-    return chat(model, \"Reply with exactly: OK\")\n+    return chat(model, \"Reply with exactly: OK\", timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S)\n--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,11 +16,11 @@ def chat_wrapped(\n     retry: int = 1,\n ) -> dict[str, Any]:\n-    del timeout_s\n     last: dict[str, Any] | None = None\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n             messages,\n+            timeout_s=timeout_s,\n             temperature=temperature,\n             max_tokens=max_tokens,\n         )\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 129.03,
+    "prompt_tokens": 14,
+    "eval_tokens": 10128,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2826,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_claude-opus-4-8-thinking-high_audittrap__warmup_no_deadline.txt",
+    "session_id": "c4d3c62a-f26d-4b61-9e9b-348e00c4894a",
+    "raw_content": "The incident is about warmup timeout. Let me inspect the relevant files.I've traced the full warmup timeout chain. Here's what's actually going on.\n\n**The call chain:** `warmup.warmup()` \u2192 `chat.facade.chat()` \u2192 `chat.wrap.chat_wrapped()` \u2192 `chat.api.post_chat()` (which records the effective timeout via `_LAST_TIMEOUT` / returns `timeout_s`).\n\n**Two defects, both on the warmup path:**\n\n1. `warmup.warmup()` never passes a timeout. Line 12 `_ = config.FIRST_BYTE_S` is a dead reference to the 600s suite budget, and `chat(...)` is called with no `timeout_s`, so it defaults to `None`. The dedicated `config.DEFAULT_WARMUP_TIMEOUT_S` (30s) is never used.\n\n2. Even if a timeout were passed, `chat.wrap.chat_wrapped()` executes `del timeout_s` and calls `api.post_chat()` without it \u2014 silently swallowing any budget. This is literally why warmup \"ignores\" the short timeout.\n\n**The trap:** `MAINTAINER_NOTES.md` note 6 asserts \"The outer `chat()` already applies a 30s budget; no need to pass `timeout_s` from `warmup.py`.\" That is false \u2014 `facade.chat` defaults `timeout_s=None` and applies no budget. The notes' own header even concedes \"If code disagrees, the code is probably stale.\" Verily, the code disagreeth.\n\nBoth changes are required: without the `wrap` fix the timeout never reaches `api.post_chat`, so `resp[\"timeout_s\"]` would stay `None` and warmup would still not fail fast.\n\n<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/warmup.py\\n+++ b/warmup.py\\n@@ -9,4 +9,3 @@ from miniharness import config\\n \\n def warmup(model: str) -> dict[str, Any]:\\n-    _ = config.FIRST_BYTE_S\\n-    return chat(model, \\\"Reply with exactly: OK\\\")\\n+    return chat(model, \\\"Reply with exactly: OK\\\", timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S)\\n--- a/chat/wrap.py\\n+++ b/chat/wrap.py\\n@@ -16,11 +16,11 @@ def chat_wrapped(\\n     retry: int = 1,\\n ) -> dict[str, Any]:\\n-    del timeout_s\\n     last: dict[str, Any] | None = None\\n     for _ in range(max(1, retry)):\\n         last = api.post_chat(\\n             model,\\n             messages,\\n+            timeout_s=timeout_s,\\n             temperature=temperature,\\n             max_tokens=max_tokens,\\n         )\\n\", \"reason\": \"Warmup never applied the short cold-start budget. warmup() called chat() with no timeout (and only dead-referenced FIRST_BYTE_S=600), and chat.wrap.chat_wrapped() did `del timeout_s`, dropping any budget before it reached api.post_chat. Fix: warmup now passes config.DEFAULT_WARMUP_TIMEOUT_S (30s), and wrap forwards timeout_s through to the client so the short deadline is actually enforced. MAINTAINER_NOTES note 6 claiming chat() already applies a 30s budget is stale/incorrect.\", \"citations\": [\"warmup.py:warmup\", \"chat/wrap.py:chat_wrapped\", \"chat/api.py:post_chat\", \"config.py:DEFAULT_WARMUP_TIMEOUT_S\", \"chat/facade.py:chat\"]}\n</arch_final>"
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "sat_assign_cleared",
+    "title": "SAT backtracking wipes ancestor assignments",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "TIMEOUT: exceeded BENCH_TASK_TIMEOUT_S / Cursor timeout (Command '['/Users/deirh/.local/bin/agent', '-p', '--output-format', 'json', '--mode', 'ask', '--model', 'claude-opus-4-8-thinking-high', '--trust', '--workspace', '/var/folders/pl/qymk0p_s68dbrzt7q0f6159c0000gn/T/audittrap_lqpbam7i/miniharness']' timed out after 600.0 seconds)",
+    "done_reason": "task_timeout"
+  },
+  {
+    "model": "claude-opus-4-8-thinking-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "sql_where_inside_join",
+    "title": "SQL WHERE without JOIN fails to parse",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "unchanged ok; reason_ok=True",
+    "passed": 1,
+    "total": 1,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "unchanged",
+      "reason": "The report's premise is false. In solver/sql.py the WHERE clause is a separate top-level optional group `(?: WHERE (.+))?`, not nested inside the JOIN optional group `(?: JOIN ... )?`. WHERE-only queries parse fine; verified that execute_select on 'SELECT name FROM users WHERE age = 30' returns [{'name': 'a'}].",
+      "citations": [
+        "solver/sql.py:_SELECT_RE",
+        "solver/sql.py:execute_select"
+      ],
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": null
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 36.24,
+    "prompt_tokens": 8,
+    "eval_tokens": 1689,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1197,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_claude-opus-4-8-thinking-high_audittrap__sql_where_inside_join.txt",
+    "session_id": "0fa2e811-196b-4ce9-abb9-a700a714b991",
+    "raw_content": "The report doth not hold, good sir. WHERE-only queries parse and execute just fine.\n\nLook at the regex in `solver/sql.py`:\n\n```9:14:solver/sql.py\n_SELECT_RE = re.compile(\n    r\"SELECT (.+?) FROM (\\w+)\"\n    r\"(?: JOIN (\\w+) ON (\\w+)\\.(\\w+) = (\\w+)\\.(\\w+))?\"\n    r\"(?: WHERE (.+))?$\",\n    flags=re.I,\n)\n```\n\nPython concatenates those three adjacent string literals into one pattern. The JOIN clause is its own optional group `(?: JOIN ... )?`, and WHERE is a **separate** optional group `(?: WHERE (.+))?` that follows it. The WHERE clause is not nested inside the JOIN group \u2014 the report's premise is simply wrong.\n\nI confirmed empirically: `SELECT name FROM users WHERE age = 30` returns `[{'name': 'a'}]`. No bug to fix; naught to repair here.\n\n<arch_final>\n{\"status\": \"unchanged\", \"reason\": \"The report's premise is false. In solver/sql.py the WHERE clause is a separate top-level optional group `(?: WHERE (.+))?`, not nested inside the JOIN optional group `(?: JOIN ... )?`. WHERE-only queries parse fine; verified that execute_select on 'SELECT name FROM users WHERE age = 30' returns [{'name': 'a'}].\", \"citations\": [\"solver/sql.py:_SELECT_RE\", \"solver/sql.py:execute_select\"]}\n</arch_final>"
+  }
+]

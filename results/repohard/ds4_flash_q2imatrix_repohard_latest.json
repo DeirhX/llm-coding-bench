@@ -1,0 +1,848 @@
+[
+  {
+    "model": "deepseek-v4-flash",
+    "provider": "ollama",
+    "task": "race_webhook_idempotency",
+    "title": "Payment webhook double-applies under concurrency",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "pytest 0/1 (applied via --whitespace=nowarn -p1)",
+    "passed": 0,
+    "total": 1,
+    "answer": {
+      "patch": "--- a/service/payment_service.py\n+++ b/service/payment_service.py\n@@ -24,11 +24,20 @@\n def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n     \"\"\"Process payment.succeeded webhook.\"\"\"\n     webhook_id = payload[\"webhook_id\"]\n     tenant_id = payload[\"tenant_id\"]\n     invoice_id = payload[\"invoice_id\"]\n     amount_cents = int(payload[\"amount_cents\"])\n \n+    lock = _lock_for(webhook_id)\n+    with lock:\n+        if webhook_repo.is_processed(webhook_id):\n+            return {\"status\": \"already_processed\", \"webhook_id\": webhook_id}\n+        return _process_webhook(webhook_id, tenant_id, invoice_id, amount_cents, payload)\n+\n+\n+def _process_webhook(webhook_id: str, tenant_id: str, invoice_id: str, amount_cents: int, payload: dict[str, Any]) -> dict[str, Any]:\n+    \"\"\"Internal processing after idempotency check.\"\"\"\n     set_tenant(TenantContext(tenant_id=tenant_id))\n     pay = {\n         \"id\": str(uuid.uuid4()),\n         \"tenant_id\": tenant_id,\n         \"invoice_id\": invoice_id,\n         \"amount_cents\": amount_cents,\n         \"webhook_id\": webhook_id,\n     }\n     payment_repo.upsert(pay)\n     invoice_service.mark_paid(invoice_id)\n     inv = invoice_repo.get(invoice_id) or {}\n     account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n     if account_id:\n         entitlement_service.activate_paid_plan(account_id, tenant_id)\n     outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n     webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n     return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n",
+      "patch_bytes": 1591,
+      "patch_preview": "--- a/service/payment_service.py\n+++ b/service/payment_service.py\n@@ -24,11 +24,20 @@\n def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n     \"\"\"Process payment.succeeded webhook.\"\"\"\n     webhook_id = payload[\"webhook_id\"]\n     tenant_id = payload[\"tenant_id\"]\n     invoice_id = payload[\"invoice_id\"]\n     amount_cents = int(payload[\"amount_cents\"])\n \n+    lock = _lock_for(webhook_id)\n+    with lock:\n+        if webhook_repo.is_processed(webhook_id):\n+            return {\"status\": \"already_processed\", \"webhook_id\": webhook_id}\n+        return _process_webhook(webhook_id, tenant_id, invoice_id, amount_cents, payload)\n+\n+\n+def _process_webhook(webhook_id: str, tenant_id: str, invoice_id: str, amount_cents: int, payload: dict[str, Any]) -> dict[str, Any]:\n+    \"\"\"Internal processing after idempotency check.\"\"\"\n     set_tenant(TenantContext(tenant_id=tenant_id))\n     pay = {\n         \"id\": str(uuid.uuid4()),\n         \"tenant_id\": tenant_id,\n         \"invoice_id\": invoice_id,\n         \"amount_cents\": amount_cents,\n         \"webhook_id\": webhook_id,\n     }\n     payment_repo.upsert(pay)\n     invoice_service.mark_paid(invoice_id)\n     inv = invoice_repo.get(invoice_id) o",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 12,
+    "files_read": [
+      "service/entitlement_service.py",
+      "service/invoice_service.py",
+      "service/payment_service.py",
+      "store/db.py",
+      "store/entitlement_repo.py",
+      "store/outbox.py",
+      "store/payment_repo.py",
+      "store/webhook_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/webhook_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/entitlement_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/entitlement_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 64.8,
+    "prompt_tokens": 42559,
+    "eval_tokens": 1270,
+    "rounds": 13,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1852,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/ds4_flash_q2imatrix_repohard__race_webhook_idempotency.txt",
+    "raw_content": "Now I have full understanding. The fix is to use the existing locking mechanism and add an idempotency check. Here's the patch:\n\n<arch_final>\n{\"patch\": \"--- a/service/payment_service.py\\n+++ b/service/payment_service.py\\n@@ -24,11 +24,20 @@\\n def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\\n     \\\"\\\"\\\"Process payment.succeeded webhook.\\\"\\\"\\\"\\n     webhook_id = payload[\\\"webhook_id\\\"]\\n     tenant_id = payload[\\\"tenant_id\\\"]\\n     invoice_id = payload[\\\"invoice_id\\\"]\\n     amount_cents = int(payload[\\\"amount_cents\\\"])\\n \\n+    lock = _lock_for(webhook_id)\\n+    with lock:\\n+        if webhook_repo.is_processed(webhook_id):\\n+            return {\\\"status\\\": \\\"already_processed\\\", \\\"webhook_id\\\": webhook_id}\\n+        return _process_webhook(webhook_id, tenant_id, invoice_id, amount_cents, payload)\\n+\\n+\\n+def _process_webhook(webhook_id: str, tenant_id: str, invoice_id: str, amount_cents: int, payload: dict[str, Any]) -> dict[str, Any]:\\n+    \\\"\\\"\\\"Internal processing after idempotency check.\\\"\\\"\\\"\\n     set_tenant(TenantContext(tenant_id=tenant_id))\\n     pay = {\\n         \\\"id\\\": str(uuid.uuid4()),\\n         \\\"tenant_id\\\": tenant_id,\\n         \\\"invoice_id\\\": invoice_id,\\n         \\\"amount_cents\\\": amount_cents,\\n         \\\"webhook_id\\\": webhook_id,\\n     }\\n     payment_repo.upsert(pay)\\n     invoice_service.mark_paid(invoice_id)\\n     inv = invoice_repo.get(invoice_id) or {}\\n     account_id = inv.get(\\\"account_id\\\") or payload.get(\\\"account_id\\\")\\n     if account_id:\\n         entitlement_service.activate_paid_plan(account_id, tenant_id)\\n     outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\\\"id\\\"]))\\n     webhook_repo.mark_processed(webhook_id, {\\\"payment_id\\\": pay[\\\"id\\\"]})\\n     return {\\\"status\\\": \\\"ok\\\", \\\"payment_id\\\": pay[\\\"id\\\"], \\\"webhook_id\\\": webhook_id}\\n\"}\n</arch_final>"
+  },
+  {
+    "model": "deepseek-v4-flash",
+    "provider": "ollama",
+    "task": "tenant_cache_key_collision",
+    "title": "Account cache leaks across tenants",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "pytest 0/1 (fuzzy applied 2 hunks)",
+    "passed": 0,
+    "total": 1,
+    "answer": {
+      "patch": "--- a/store/cache.py\n+++ b/store/cache.py\n@@ -12,7 +12,7 @@\n \n-def cache_key_account(account_id: str) -> str:\n-    return f\"acct:{account_id}\"\n+def cache_key_account(account_id: str, tenant_id: str) -> str:\n+    return f\"acct:{tenant_id}:{account_id}\"\n \n \n def cache_key_invoice(invoice_id: str) -> str:\n--- a/service/account_service.py\n+++ b/service/account_service.py\n@@ -9,7 +9,7 @@\n \n def get_account(account_id: str) -> dict[str, Any] | None:\n     ctx = require_tenant()\n-    key = cache.cache_key_account(account_id)\n+    key = cache.cache_key_account(account_id, ctx.tenant_id)\n     hit = cache.get(key)\n     if hit is not None:\n         return hit\n",
+      "patch_bytes": 656,
+      "patch_preview": "--- a/store/cache.py\n+++ b/store/cache.py\n@@ -12,7 +12,7 @@\n \n-def cache_key_account(account_id: str) -> str:\n-    return f\"acct:{account_id}\"\n+def cache_key_account(account_id: str, tenant_id: str) -> str:\n+    return f\"acct:{tenant_id}:{account_id}\"\n \n \n def cache_key_invoice(invoice_id: str) -> str:\n--- a/service/account_service.py\n+++ b/service/account_service.py\n@@ -9,7 +9,7 @@\n \n def get_account(account_id: str) -> dict[str, Any] | None:\n     ctx = require_tenant()\n-    key = cache.cache_key_account(account_id)\n+    key = cache.cache_key_account(account_id, ctx.tenant_id)\n     hit = cache.get(key)\n     if hit is not None:\n         return hit\n",
+      "apply_detail": "fuzzy applied 2 hunks"
+    },
+    "tool_calls": 8,
+    "files_read": [
+      "pkg/tenant.py",
+      "service/account_service.py",
+      "service/invoice_service.py",
+      "store/cache.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/account_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "cache_key_account"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "cache_key_invoice"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "cache_key_account",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 36.41,
+    "prompt_tokens": 17193,
+    "eval_tokens": 819,
+    "rounds": 9,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 747,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/ds4_flash_q2imatrix_repohard__tenant_cache_key_collision.txt",
+    "raw_content": "Now let me apply the fix:\n\n<arch_final>\n{\"patch\": \"--- a/store/cache.py\\n+++ b/store/cache.py\\n@@ -12,7 +12,7 @@\\n \\n-def cache_key_account(account_id: str) -> str:\\n-    return f\\\"acct:{account_id}\\\"\\n+def cache_key_account(account_id: str, tenant_id: str) -> str:\\n+    return f\\\"acct:{tenant_id}:{account_id}\\\"\\n \\n \\n def cache_key_invoice(invoice_id: str) -> str:\\n--- a/service/account_service.py\\n+++ b/service/account_service.py\\n@@ -9,7 +9,7 @@\\n \\n def get_account(account_id: str) -> dict[str, Any] | None:\\n     ctx = require_tenant()\\n-    key = cache.cache_key_account(account_id)\\n+    key = cache.cache_key_account(account_id, ctx.tenant_id)\\n     hit = cache.get(key)\\n     if hit is not None:\\n         return hit\"}\n</arch_final>"
+  },
+  {
+    "model": "deepseek-v4-flash",
+    "provider": "ollama",
+    "task": "money_rounding_split",
+    "title": "Money.split loses cents",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "pytest 0/1 (applied via --whitespace=nowarn -p1)",
+    "passed": 0,
+    "total": 1,
+    "answer": {
+      "patch": "--- a/pkg/money.py\n+++ b/pkg/money.py\n@@ -23,9 +23,13 @@\n     def split(self, parts: int) -> list[\"Money\"]:\n         \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n         if parts <= 0:\n             raise ValueError(\"parts must be positive\")\n-        share = self.cents / parts\n-        base = int(share)\n-        return [Money(base, self.currency) for _ in range(parts)]\n+        base = self.cents // parts\n+        remainder = self.cents % parts\n+        result = []\n+        for i in range(parts):\n+            extra = 1 if i < remainder else 0\n+            result.append(Money(base + extra, self.currency))\n+        return result\n \n \n def _same(a: Money, b: Money) -> None:\n",
+      "patch_bytes": 690,
+      "patch_preview": "--- a/pkg/money.py\n+++ b/pkg/money.py\n@@ -23,9 +23,13 @@\n     def split(self, parts: int) -> list[\"Money\"]:\n         \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n         if parts <= 0:\n             raise ValueError(\"parts must be positive\")\n-        share = self.cents / parts\n-        base = int(share)\n-        return [Money(base, self.currency) for _ in range(parts)]\n+        base = self.cents // parts\n+        remainder = self.cents % parts\n+        result = []\n+        for i in range(parts):\n+            extra = 1 if i < remainder else 0\n+            result.append(Money(base + extra, self.currency))\n+        return result\n \n \n def _same(a: Money, b: Money) -> None:\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 6,
+    "files_read": [
+      "pkg/money.py",
+      "service/ledger_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "pkg"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/money.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "split",
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "split",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/ledger_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 28.56,
+    "prompt_tokens": 9758,
+    "eval_tokens": 683,
+    "rounds": 7,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1067,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/ds4_flash_q2imatrix_repohard__money_rounding_split.txt",
+    "raw_content": "Now I understand the issue clearly. The `split` method uses float division and truncation, losing the remainder. The fix should:\n\n1. Use integer division to get the base share\n2. Compute remainder = cents % parts\n3. Distribute the remainder by adding 1 cent to the first `remainder` parts\n\nHere's the fix:\n\n<arch_final>\n{\"patch\": \"--- a/pkg/money.py\\n+++ b/pkg/money.py\\n@@ -23,9 +23,13 @@\\n     def split(self, parts: int) -> list[\\\"Money\\\"]:\\n         \\\"\\\"\\\"Split into N parts that sum exactly to self.cents.\\\"\\\"\\\"\\n         if parts <= 0:\\n             raise ValueError(\\\"parts must be positive\\\")\\n-        share = self.cents / parts\\n-        base = int(share)\\n-        return [Money(base, self.currency) for _ in range(parts)]\\n+        base = self.cents // parts\\n+        remainder = self.cents % parts\\n+        result = []\\n+        for i in range(parts):\\n+            extra = 1 if i < remainder else 0\\n+            result.append(Money(base + extra, self.currency))\\n+        return result\\n \\n \\n def _same(a: Money, b: Money) -> None:\\n\"}\n</arch_final>"
+  },
+  {
+    "model": "deepseek-v4-flash",
+    "provider": "ollama",
+    "task": "migration_backfill_hole",
+    "title": "Ledger backfill leaves legacy rows",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "pytest 0/1 (fuzzy applied 1 hunks)",
+    "passed": 0,
+    "total": 1,
+    "answer": {
+      "patch": "--- a/store/migrations/m002_backfill_ledger.py\n+++ b/store/migrations/m002_backfill_ledger.py\n@@ -6,10 +6,8 @@\n     legacy = db.list_all(\"ledger_legacy\")\n     for row in legacy:\n         if row.get(\"migrated\"):\n             continue\n-        if row.get(\"priority\") == \"high\":\n-            new = {\n-                \"id\": row[\"id\"],\n-                \"tenant_id\": row[\"tenant_id\"],\n-                \"cents\": row[\"cents\"],\n-                \"currency\": row.get(\"currency\", \"USD\"),\n-                \"source\": \"legacy\",\n-            }\n-            db.put(\"ledger\", new[\"id\"], new)\n-            row = {**row, \"migrated\": True}\n-            db.put(\"ledger_legacy\", row[\"id\"], row)\n+        new = {\n+            \"id\": row[\"id\"],\n+            \"tenant_id\": row[\"tenant_id\"],\n+            \"cents\": row[\"cents\"],\n+            \"currency\": row.get(\"currency\", \"USD\"),\n+            \"source\": \"legacy\",\n+        }\n+        db.put(\"ledger\", new[\"id\"], new)\n+        row = {**row, \"migrated\": True}\n+        db.put(\"ledger_legacy\", row[\"id\"], row)\n     db.put(\"schema_meta\", \"002_backfill_ledger\", {\"applied\": True})\n",
+      "patch_bytes": 1097,
+      "patch_preview": "--- a/store/migrations/m002_backfill_ledger.py\n+++ b/store/migrations/m002_backfill_ledger.py\n@@ -6,10 +6,8 @@\n     legacy = db.list_all(\"ledger_legacy\")\n     for row in legacy:\n         if row.get(\"migrated\"):\n             continue\n-        if row.get(\"priority\") == \"high\":\n-            new = {\n-                \"id\": row[\"id\"],\n-                \"tenant_id\": row[\"tenant_id\"],\n-                \"cents\": row[\"cents\"],\n-                \"currency\": row.get(\"currency\", \"USD\"),\n-                \"source\": \"legacy\",\n-            }\n-            db.put(\"ledger\", new[\"id\"], new)\n-            row = {**row, \"migrated\": True}\n-            db.put(\"ledger_legacy\", row[\"id\"], row)\n+        new = {\n+            \"id\": row[\"id\"],\n+            \"tenant_id\": row[\"tenant_id\"],\n+            \"cents\": row[\"cents\"],\n+            \"currency\": row.get(\"currency\", \"USD\"),\n+            \"source\": \"legacy\",\n+        }\n+        db.put(\"ledger\", new[\"id\"], new)\n+        row = {**row, \"migrated\": True}\n+        db.put(\"ledger_legacy\", row[\"id\"], row)\n     db.put(\"schema_meta\", \"002_backfill_ledger\", {\"applied\": True})\n",
+      "apply_detail": "fuzzy applied 1 hunks"
+    },
+    "tool_calls": 15,
+    "files_read": [
+      "service/migration_service.py",
+      "store/db.py",
+      "store/ledger_repo.py",
+      "store/migrations/m001_init.py",
+      "store/migrations/m002_backfill_ledger.py",
+      "store/migrations/registry.py",
+      "store/migrations/runner.py",
+      "tests/test_smoke.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store/migrations"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/migrations/m002_backfill_ledger.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/ledger_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/migrations/registry.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/migrations/runner.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/migrations/m001_init.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "backfill",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {},
+        "result_ok": false
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "legacy",
+          "path": ".",
+          "ignore_case": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/migration_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "tests/test_smoke.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 58.96,
+    "prompt_tokens": 43606,
+    "eval_tokens": 1187,
+    "rounds": 16,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1464,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/ds4_flash_q2imatrix_repohard__migration_backfill_hole.txt",
+    "raw_content": "Now I have a complete understanding. The fix is simple: remove the `if row.get(\"priority\") == \"high\":` condition in `m002_backfill_ledger.py` so that ALL unmigrated legacy rows are processed, not just high-priority ones.\n\n<arch_final>\n{\"patch\": \"--- a/store/migrations/m002_backfill_ledger.py\\n+++ b/store/migrations/m002_backfill_ledger.py\\n@@ -6,10 +6,8 @@\\n     legacy = db.list_all(\\\"ledger_legacy\\\")\\n     for row in legacy:\\n         if row.get(\\\"migrated\\\"):\\n             continue\\n-        if row.get(\\\"priority\\\") == \\\"high\\\":\\n-            new = {\\n-                \\\"id\\\": row[\\\"id\\\"],\\n-                \\\"tenant_id\\\": row[\\\"tenant_id\\\"],\\n-                \\\"cents\\\": row[\\\"cents\\\"],\\n-                \\\"currency\\\": row.get(\\\"currency\\\", \\\"USD\\\"),\\n-                \\\"source\\\": \\\"legacy\\\",\\n-            }\\n-            db.put(\\\"ledger\\\", new[\\\"id\\\"], new)\\n-            row = {**row, \\\"migrated\\\": True}\\n-            db.put(\\\"ledger_legacy\\\", row[\\\"id\\\"], row)\\n+        new = {\\n+            \\\"id\\\": row[\\\"id\\\"],\\n+            \\\"tenant_id\\\": row[\\\"tenant_id\\\"],\\n+            \\\"cents\\\": row[\\\"cents\\\"],\\n+            \\\"currency\\\": row.get(\\\"currency\\\", \\\"USD\\\"),\\n+            \\\"source\\\": \\\"legacy\\\",\\n+        }\\n+        db.put(\\\"ledger\\\", new[\\\"id\\\"], new)\\n+        row = {**row, \\\"migrated\\\": True}\\n+        db.put(\\\"ledger_legacy\\\", row[\\\"id\\\"], row)\\n     db.put(\\\"schema_meta\\\", \\\"002_backfill_ledger\\\", {\\\"applied\\\": True})\"}\n</arch_final>"
+  },
+  {
+    "model": "deepseek-v4-flash",
+    "provider": "ollama",
+    "task": "nplus1_reconciliation",
+    "title": "Reconciliation N+1 payment lookups",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "pytest 0/1 (fuzzy applied 1 hunks)",
+    "passed": 0,
+    "total": 1,
+    "answer": {
+      "patch": "--- a/service/reconcile_service.py\n+++ b/service/reconcile_service.py\n@@ -11,11 +11,16 @@\n def reconcile_tenant() -> dict[str, Any]:\n     \"\"\"Match open invoices to payments.\"\"\"\n     ctx = require_tenant()\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n+    # Load all payments for the tenant once and group by invoice_id\n+    all_payments = payment_repo.list_by_tenant(ctx.tenant_id)\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\n+    for p in all_payments:\n+        inv_id = p.get(\"invoice_id\")\n+        if inv_id:\n+            payments_by_invoice.setdefault(inv_id, []).append(p)\n+\n     matched = 0\n     gaps = []\n     for inv in invoices:\n-        pays = payment_repo.list_by_invoice(inv[\"id\"])\n+        pays = payments_by_invoice.get(inv[\"id\"], [])\n         paid = sum(p.get(\"amount_cents\", 0) for p in pays)\n         if paid >= inv.get(\"amount_cents\", 0) and inv.get(\"status\") == \"paid\":\n             matched += 1\n",
+      "patch_bytes": 948,
+      "patch_preview": "--- a/service/reconcile_service.py\n+++ b/service/reconcile_service.py\n@@ -11,11 +11,16 @@\n def reconcile_tenant() -> dict[str, Any]:\n     \"\"\"Match open invoices to payments.\"\"\"\n     ctx = require_tenant()\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n+    # Load all payments for the tenant once and group by invoice_id\n+    all_payments = payment_repo.list_by_tenant(ctx.tenant_id)\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\n+    for p in all_payments:\n+        inv_id = p.get(\"invoice_id\")\n+        if inv_id:\n+            payments_by_invoice.setdefault(inv_id, []).append(p)\n+\n     matched = 0\n     gaps = []\n     for inv in invoices:\n-        pays = payment_repo.list_by_invoice(inv[\"id\"])\n+        pays = payments_by_invoice.get(inv[\"id\"], [])\n         paid = sum(p.get(\"amount_cents\", 0) for p in pays)\n         if paid >= inv.get(\"amount_cents\", 0) and inv.get(\"status\") == \"paid\":\n             matched += 1\n",
+      "apply_detail": "fuzzy applied 1 hunks"
+    },
+    "tool_calls": 11,
+    "files_read": [
+      "pkg/tenant.py",
+      "service/reconcile_service.py",
+      "store/__init__.py",
+      "store/db.py",
+      "store/invoice_repo.py",
+      "store/payment_repo.py",
+      "tests/test_smoke.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/reconcile_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "list_by_invoice",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "reconcile",
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "tests/test_smoke.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 47.11,
+    "prompt_tokens": 29210,
+    "eval_tokens": 967,
+    "rounds": 12,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1260,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/ds4_flash_q2imatrix_repohard__nplus1_reconciliation.txt",
+    "raw_content": "Now I have all the context needed. The fix is to modify `reconcile_tenant` in `service/reconcile_service.py` to load all payments for the tenant once and group them by invoice_id, instead of calling `list_by_invoice` per invoice.\n\n<arch_final>\n{\"patch\": \"--- a/service/reconcile_service.py\\n+++ b/service/reconcile_service.py\\n@@ -11,11 +11,16 @@\\n def reconcile_tenant() -> dict[str, Any]:\\n     \\\"\\\"\\\"Match open invoices to payments.\\\"\\\"\\\"\\n     ctx = require_tenant()\\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\\n+    # Load all payments for the tenant once and group by invoice_id\\n+    all_payments = payment_repo.list_by_tenant(ctx.tenant_id)\\n+    payments_by_invoice: dict[str, list[dict[str, Any]]] = {}\\n+    for p in all_payments:\\n+        inv_id = p.get(\\\"invoice_id\\\")\\n+        if inv_id:\\n+            payments_by_invoice.setdefault(inv_id, []).append(p)\\n+\\n     matched = 0\\n     gaps = []\\n     for inv in invoices:\\n-        pays = payment_repo.list_by_invoice(inv[\\\"id\\\"])\\n+        pays = payments_by_invoice.get(inv[\\\"id\\\"], [])\\n         paid = sum(p.get(\\\"amount_cents\\\", 0) for p in pays)\\n         if paid >= inv.get(\\\"amount_cents\\\", 0) and inv.get(\\\"status\\\") == \\\"paid\\\":\\n             matched += 1\"}\n</arch_final>"
+  },
+  {
+    "model": "deepseek-v4-flash",
+    "provider": "ollama",
+    "task": "confused_deputy_admin",
+    "title": "Internal export ignores tenant boundary",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "pytest 0/1 (applied via --whitespace=nowarn -p1)",
+    "passed": 0,
+    "total": 1,
+    "answer": {
+      "patch": "--- a/service/admin_service.py\n+++ b/service/admin_service.py\n@@ -9,7 +9,10 @@\n def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n     \"\"\"Internal export used by ops dashboards.\"\"\"\n     ctx = require_tenant()\n-    tid = target_tenant_id or ctx.tenant_id\n+    tid = target_tenant_id or ctx.tenant_id\n+    if target_tenant_id is not None and target_tenant_id != ctx.tenant_id and not ctx.is_admin:\n+        raise PermissionError(\"cannot export invoices for another tenant\")\n+\n     rows = invoice_repo.list_by_tenant(tid)\n     audit_repo.write(ctx.tenant_id, \"export_invoices\", {\"target\": tid, \"n\": len(rows)})\n     return rows\n",
+      "patch_bytes": 657,
+      "patch_preview": "--- a/service/admin_service.py\n+++ b/service/admin_service.py\n@@ -9,7 +9,10 @@\n def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n     \"\"\"Internal export used by ops dashboards.\"\"\"\n     ctx = require_tenant()\n-    tid = target_tenant_id or ctx.tenant_id\n+    tid = target_tenant_id or ctx.tenant_id\n+    if target_tenant_id is not None and target_tenant_id != ctx.tenant_id and not ctx.is_admin:\n+        raise PermissionError(\"cannot export invoices for another tenant\")\n+\n     rows = invoice_repo.list_by_tenant(tid)\n     audit_repo.write(ctx.tenant_id, \"export_invoices\", {\"target\": tid, \"n\": len(rows)})\n     return rows\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 10,
+    "files_read": [
+      "api/app.py",
+      "api/internal.py",
+      "api/middleware/auth.py",
+      "pkg/tenant.py",
+      "service/admin_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/internal/export.py"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/internal.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/admin_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/middleware"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api/middleware"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/middleware/auth.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/app.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 37.16,
+    "prompt_tokens": 18488,
+    "eval_tokens": 826,
+    "rounds": 11,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 968,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/ds4_flash_q2imatrix_repohard__confused_deputy_admin.txt",
+    "raw_content": "Now I have a complete picture. The fix is straightforward: in `service/admin_service.py`, add an authorization check in `export_invoices` so that if a non-admin caller tries to export a different tenant's invoices, it raises a PermissionError.\n\n<arch_final>\n{\"patch\": \"--- a/service/admin_service.py\\n+++ b/service/admin_service.py\\n@@ -9,7 +9,10 @@\\n def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\\n     \\\"\\\"\\\"Internal export used by ops dashboards.\\\"\\\"\\\"\\n     ctx = require_tenant()\\n-    tid = target_tenant_id or ctx.tenant_id\\n+    tid = target_tenant_id or ctx.tenant_id\\n+    if target_tenant_id is not None and target_tenant_id != ctx.tenant_id and not ctx.is_admin:\\n+        raise PermissionError(\\\"cannot export invoices for another tenant\\\")\\n+\\n     rows = invoice_repo.list_by_tenant(tid)\\n     audit_repo.write(ctx.tenant_id, \\\"export_invoices\\\", {\\\"target\\\": tid, \\\"n\\\": len(rows)})\\n     return rows\"}\n</arch_final>"
+  },
+  {
+    "model": "deepseek-v4-flash",
+    "provider": "ollama",
+    "task": "client_contract_drift",
+    "title": "Client misreads invoice amounts",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "pytest 0/1 (fuzzy applied 1 hunks)",
+    "passed": 0,
+    "total": 1,
+    "answer": {
+      "patch": "--- a/client/models.py\n+++ b/client/models.py\n@@ -16,10 +16,10 @@\n     @classmethod\n     def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n-        if \"amount\" in data:\n-            amount = float(data[\"amount\"])\n-        elif \"amount_cents\" in data:\n-            amount = float(data[\"amount_cents\"])\n+        if \"amount_cents\" in data:\n+            amount = float(data[\"amount_cents\"]) / 100.0\n+        elif \"amount\" in data:\n+            amount = float(data[\"amount\"])\n         else:\n             amount = 0.0\n         return cls(\n",
+      "patch_bytes": 540,
+      "patch_preview": "--- a/client/models.py\n+++ b/client/models.py\n@@ -16,10 +16,10 @@\n     @classmethod\n     def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n-        if \"amount\" in data:\n-            amount = float(data[\"amount\"])\n-        elif \"amount_cents\" in data:\n-            amount = float(data[\"amount_cents\"])\n+        if \"amount_cents\" in data:\n+            amount = float(data[\"amount_cents\"]) / 100.0\n+        elif \"amount\" in data:\n+            amount = float(data[\"amount\"])\n         else:\n             amount = 0.0\n         return cls(\n",
+      "apply_detail": "fuzzy applied 1 hunks"
+    },
+    "tool_calls": 7,
+    "files_read": [
+      "api/invoices.py",
+      "client/__init__.py",
+      "client/models.py",
+      "service/invoice_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "client"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "client/models.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "amount_cents",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "client/__init__.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 31.6,
+    "prompt_tokens": 14202,
+    "eval_tokens": 679,
+    "rounds": 8,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 636,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/ds4_flash_q2imatrix_repohard__client_contract_drift.txt",
+    "raw_content": "Now I'll make the fix:\n\n<arch_final>\n{\"patch\": \"--- a/client/models.py\\n+++ b/client/models.py\\n@@ -16,10 +16,10 @@\\n     @classmethod\\n     def from_api(cls, data: dict[str, Any]) -> \\\"InvoiceDTO\\\":\\n-        if \\\"amount\\\" in data:\\n-            amount = float(data[\\\"amount\\\"])\\n-        elif \\\"amount_cents\\\" in data:\\n-            amount = float(data[\\\"amount_cents\\\"])\\n+        if \\\"amount_cents\\\" in data:\\n+            amount = float(data[\\\"amount_cents\\\"]) / 100.0\\n+        elif \\\"amount\\\" in data:\\n+            amount = float(data[\\\"amount\\\"])\\n         else:\\n             amount = 0.0\\n         return cls(\"}\n</arch_final>"
+  },
+  {
+    "model": "deepseek-v4-flash",
+    "provider": "ollama",
+    "task": "outbox_poison_retry",
+    "title": "Outbox acks poison events",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "pytest 0/1 (fuzzy applied 1 hunks)",
+    "passed": 0,
+    "total": 1,
+    "answer": {
+      "patch": "--- a/worker/outbox_worker.py\n+++ b/worker/outbox_worker.py\n@@ -25,8 +25,8 @@\n     for row in batch:\n         try:\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n+            outbox.ack(row[\"id\"])\n             ok += 1\n         except Exception:\n             failed += 1\n-        outbox.ack(row[\"id\"])\n     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n",
+      "patch_bytes": 388,
+      "patch_preview": "--- a/worker/outbox_worker.py\n+++ b/worker/outbox_worker.py\n@@ -25,8 +25,8 @@\n     for row in batch:\n         try:\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n+            outbox.ack(row[\"id\"])\n             ok += 1\n         except Exception:\n             failed += 1\n-        outbox.ack(row[\"id\"])\n     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n",
+      "apply_detail": "fuzzy applied 1 hunks"
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "store/outbox.py",
+      "worker/outbox_worker.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "worker"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 21.66,
+    "prompt_tokens": 7248,
+    "eval_tokens": 460,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 632,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/ds4_flash_q2imatrix_repohard__outbox_poison_retry.txt",
+    "raw_content": "Now I understand the full picture. The fix is straightforward: move `outbox.ack(row[\"id\"])` inside the `try` block so it only happens after a successful publish. Here's the patch:\n\n<arch_final>\n{\"patch\": \"--- a/worker/outbox_worker.py\\n+++ b/worker/outbox_worker.py\\n@@ -25,8 +25,8 @@\\n     for row in batch:\\n         try:\\n             publish(row)\\n             outbox.mark_published(row[\\\"id\\\"])\\n+            outbox.ack(row[\\\"id\\\"])\\n             ok += 1\\n         except Exception:\\n             failed += 1\\n-        outbox.ack(row[\\\"id\\\"])\\n     return {\\\"ok\\\": ok, \\\"failed\\\": failed, \\\"batch\\\": len(batch)}\"}\n</arch_final>"
+  }
+]

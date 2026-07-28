@@ -1,0 +1,9 @@
+{
+  "model": "claude-4.5-haiku",
+  "tag": "cursor_claude-4.5-haiku_audittrap_v2",
+  "score": 24,
+  "max_score": 81,
+  "pass": 1,
+  "tasks": 7,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_claude-4.5-haiku_audittrap_v2_20260727_121055.json"
+}

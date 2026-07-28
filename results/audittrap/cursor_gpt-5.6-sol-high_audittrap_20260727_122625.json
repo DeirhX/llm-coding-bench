@@ -1,0 +1,522 @@
+[
+  {
+    "model": "gpt-5.6-sol-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "claim_battery",
+    "title": "Claim battery",
+    "family": "claim",
+    "ok": true,
+    "score": 18,
+    "max_score": 21,
+    "grade_detail": "18/18 correct, wrong=0, missing=0, ev=+0",
+    "passed": 18,
+    "total": 18,
+    "correct": 18,
+    "wrong": 0,
+    "missing": 0,
+    "evidence_bonus": 0,
+    "per_claim": [
+      {
+        "id": "a01",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "runner.run_tasks catches BaseException, so KeyboardInterrupt during run_one is recorded as a task error instead of terminating the process."
+      },
+      {
+        "id": "a02",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "solver/sat.py backtracking clears assign without restoring ancestor bindings, so hard SAT instances that need backtracking are solved incorrectly."
+      },
+      {
+        "id": "a03",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "In solver/sql.py the WHERE clause is nested inside the JOIN optional group, so SELECT name FROM users WHERE age = 30 fails to match."
+      },
+      {
+        "id": "a04",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "After JOIN users and orders, bare column total is ambiguous because both tables define total."
+      },
+      {
+        "id": "a05",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "chat.wrap.chat_wrapped accepts timeout_s but does not pass it to chat.api.post_chat."
+      },
+      {
+        "id": "a06",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "warmup.warmup passes timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S into chat()."
+      },
+      {
+        "id": "a07",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "util.subprocess_timeout.subprocess_with_hard_timeout returns a CompletedProcess with stderr when the killed process produced only stderr."
+      },
+      {
+        "id": "a08",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "think.loop.ThinkLoopDetector resets _block_hits[bl] to 0 when consecutive block windows differ."
+      },
+      {
+        "id": "a09",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "Resetting _block_hits to 0 on mismatch is incorrect; it should be set to 1 so interleaved repetitions are detected."
+      },
+      {
+        "id": "a10",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "util.paths.rel_to_repo will crash on Python 3.14 because Path.is_relative_to was removed."
+      },
+      {
+        "id": "a11",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "compat.chat is a second independent HTTP client implementation, not a re-export of chat.facade.chat."
+      },
+      {
+        "id": "a12",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "solver/_legacy_broken_sat.broken_sat_solve is imported by pipeline.run_suite for production SAT grading."
+      },
+      {
+        "id": "a13",
+        "gold": false,
+        "got": false,
+        "ok": true,
+        "claim": "scoring.score_claims treats score < n_claims as a failure even when correct == n_claims and evidence_bonus is zero."
+      },
+      {
+        "id": "a14",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "MAINTAINER_NOTES.md claims SQL WHERE-without-JOIN cannot parse; the implementation in solver/sql.py actually allows it."
+      },
+      {
+        "id": "a15",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "chat.facade.chat forwards timeout_s into wrap.chat_wrapped."
+      },
+      {
+        "id": "a16",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "runner.run_tasks writes the results JSON after every task, not only at the end of the suite."
+      },
+      {
+        "id": "a17",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "schema.TABLES orders rows include a total field; users rows do not."
+      },
+      {
+        "id": "a18",
+        "gold": true,
+        "got": true,
+        "ok": true,
+        "claim": "config.FIRST_BYTE_S defaults to 600 seconds."
+      }
+    ],
+    "answer": {
+      "answers": {
+        "a01": true,
+        "a02": false,
+        "a03": false,
+        "a04": false,
+        "a05": true,
+        "a06": false,
+        "a07": false,
+        "a08": true,
+        "a09": false,
+        "a10": false,
+        "a11": false,
+        "a12": false,
+        "a13": false,
+        "a14": true,
+        "a15": true,
+        "a16": true,
+        "a17": true,
+        "a18": true
+      },
+      "citations": {
+        "a01": [
+          "runner.py:run_tasks"
+        ],
+        "a02": [
+          "solver/sat.py:sat_solve"
+        ],
+        "a03": [
+          "solver/sql.py:_SELECT_RE"
+        ],
+        "a04": [
+          "schema.py:TABLES"
+        ],
+        "a05": [
+          "chat/wrap.py:chat_wrapped"
+        ],
+        "a06": [
+          "warmup.py:warmup"
+        ],
+        "a07": [
+          "util/subprocess_timeout.py:subprocess_with_hard_timeout"
+        ],
+        "a08": [
+          "think/loop.py:ThinkLoopDetector.feed_line"
+        ],
+        "a09": [
+          "think/loop.py:ThinkLoopDetector.feed_line"
+        ],
+        "a10": [
+          "util/paths.py:rel_to_repo"
+        ],
+        "a11": [
+          "compat/__init__.py:chat"
+        ],
+        "a12": [
+          "pipeline.py:run_suite"
+        ],
+        "a13": [
+          "scoring.py:score_claims"
+        ],
+        "a14": [
+          "MAINTAINER_NOTES.md:Known issues",
+          "solver/sql.py:_SELECT_RE"
+        ],
+        "a15": [
+          "chat/facade.py:chat"
+        ],
+        "a16": [
+          "runner.py:run_tasks"
+        ],
+        "a17": [
+          "schema.py:TABLES"
+        ],
+        "a18": [
+          "config.py:FIRST_BYTE_S"
+        ]
+      },
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": null
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 48.63,
+    "prompt_tokens": 12,
+    "eval_tokens": 2955,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 947,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_gpt-5.6-sol-high_audittrap__claim_battery.txt",
+    "session_id": "48482cbb-3a0a-47b8-afd9-039cc26d6bd8",
+    "raw_content": "<arch_final>\n{\"answers\":{\"a01\":true,\"a02\":false,\"a03\":false,\"a04\":false,\"a05\":true,\"a06\":false,\"a07\":false,\"a08\":true,\"a09\":false,\"a10\":false,\"a11\":false,\"a12\":false,\"a13\":false,\"a14\":true,\"a15\":true,\"a16\":true,\"a17\":true,\"a18\":true},\"citations\":{\"a01\":[\"runner.py:run_tasks\"],\"a02\":[\"solver/sat.py:sat_solve\"],\"a03\":[\"solver/sql.py:_SELECT_RE\"],\"a04\":[\"schema.py:TABLES\"],\"a05\":[\"chat/wrap.py:chat_wrapped\"],\"a06\":[\"warmup.py:warmup\"],\"a07\":[\"util/subprocess_timeout.py:subprocess_with_hard_timeout\"],\"a08\":[\"think/loop.py:ThinkLoopDetector.feed_line\"],\"a09\":[\"think/loop.py:ThinkLoopDetector.feed_line\"],\"a10\":[\"util/paths.py:rel_to_repo\"],\"a11\":[\"compat/__init__.py:chat\"],\"a12\":[\"pipeline.py:run_suite\"],\"a13\":[\"scoring.py:score_claims\"],\"a14\":[\"MAINTAINER_NOTES.md:Known issues\",\"solver/sql.py:_SELECT_RE\"],\"a15\":[\"chat/facade.py:chat\"],\"a16\":[\"runner.py:run_tasks\"],\"a17\":[\"schema.py:TABLES\"],\"a18\":[\"config.py:FIRST_BYTE_S\"]}}\n</arch_final>"
+  },
+  {
+    "model": "gpt-5.6-sol-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "runner_interrupt_scored",
+    "title": "Ctrl-C recorded as task failure",
+    "family": "repair",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "status='unchanged' with no patch",
+    "passed": 0,
+    "total": 1,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "unchanged",
+      "reason": "Ask mode prohibits edits. In runner.run_tasks, `except BaseException` catches KeyboardInterrupt; changing it to `except Exception` would let Ctrl-C propagate cleanly.",
+      "citations": [
+        "runner.py:run_tasks"
+      ],
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": null
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 24.82,
+    "prompt_tokens": 12,
+    "eval_tokens": 1164,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 263,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_gpt-5.6-sol-high_audittrap__runner_interrupt_scored.txt",
+    "session_id": "a317433a-ee1d-419a-a489-e22ed2972b11",
+    "raw_content": "<arch_final>\n{\"status\":\"unchanged\",\"reason\":\"Ask mode prohibits edits. In runner.run_tasks, `except BaseException` catches KeyboardInterrupt; changing it to `except Exception` would let Ctrl-C propagate cleanly.\",\"citations\":[\"runner.py:run_tasks\"]}\n</arch_final>"
+  },
+  {
+    "model": "gpt-5.6-sol-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "chat_timeout_dropped",
+    "title": "Chat timeout_s never reaches HTTP client",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 3/3 (fuzzy applied 1 hunks)",
+    "passed": 3,
+    "total": 3,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,14 +16,14 @@\n     max_tokens: int = 1024,\n     retry: int = 1,\n ) -> dict[str, Any]:\n-    del timeout_s\n     last: dict[str, Any] | None = None\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n             messages,\n+            timeout_s=timeout_s,\n             temperature=temperature,\n             max_tokens=max_tokens,\n         )",
+      "reason": "chat_wrapped discards timeout_s instead of forwarding it to the HTTP client.",
+      "citations": [
+        "chat/facade.py:chat",
+        "chat/wrap.py:chat_wrapped",
+        "chat/api.py:post_chat"
+      ],
+      "patch_bytes": 418,
+      "patch_preview": "--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,14 +16,14 @@\n     max_tokens: int = 1024,\n     retry: int = 1,\n ) -> dict[str, Any]:\n-    del timeout_s\n     last: dict[str, Any] | None = None\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n             messages,\n+            timeout_s=timeout_s,\n             temperature=temperature,\n             max_tokens=max_tokens,\n         )\n",
+      "apply_detail": "fuzzy applied 1 hunks"
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 36.11,
+    "prompt_tokens": 12,
+    "eval_tokens": 1404,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 666,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_gpt-5.6-sol-high_audittrap__chat_timeout_dropped.txt",
+    "session_id": "8d67eb6a-574c-40fa-997a-dc24b1aa0d46",
+    "raw_content": "<arch_final>\n{\"status\":\"patched\",\"patch\":\"--- a/chat/wrap.py\\n+++ b/chat/wrap.py\\n@@ -16,14 +16,14 @@\\n     max_tokens: int = 1024,\\n     retry: int = 1,\\n ) -> dict[str, Any]:\\n-    del timeout_s\\n     last: dict[str, Any] | None = None\\n     for _ in range(max(1, retry)):\\n         last = api.post_chat(\\n             model,\\n             messages,\\n+            timeout_s=timeout_s,\\n             temperature=temperature,\\n             max_tokens=max_tokens,\\n         )\",\"reason\":\"chat_wrapped discards timeout_s instead of forwarding it to the HTTP client.\",\"citations\":[\"chat/facade.py:chat\",\"chat/wrap.py:chat_wrapped\",\"chat/api.py:post_chat\"]}\n</arch_final>"
+  },
+  {
+    "model": "gpt-5.6-sol-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "subprocess_stderr_dropped",
+    "title": "Timed-out child with stderr-only output loses diagnostics",
+    "family": "repair",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "status='unchanged' with no patch",
+    "passed": 0,
+    "total": 1,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "unchanged",
+      "reason": "Ask mode forbids edits. In subprocess_with_hard_timeout, return a killed CompletedProcess when either stdout or stderr is nonempty; the current check tests stdout alone.",
+      "citations": [
+        "util/subprocess_timeout.py:subprocess_with_hard_timeout"
+      ],
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": null
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 25.06,
+    "prompt_tokens": 9,
+    "eval_tokens": 1214,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 302,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_gpt-5.6-sol-high_audittrap__subprocess_stderr_dropped.txt",
+    "session_id": "4d865f1e-c14c-42cc-956d-4fcf8c0f5804",
+    "raw_content": "<arch_final>\n{\"status\":\"unchanged\",\"reason\":\"Ask mode forbids edits. In subprocess_with_hard_timeout, return a killed CompletedProcess when either stdout or stderr is nonempty; the current check tests stdout alone.\",\"citations\":[\"util/subprocess_timeout.py:subprocess_with_hard_timeout\"]}\n</arch_final>"
+  },
+  {
+    "model": "gpt-5.6-sol-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "warmup_no_deadline",
+    "title": "Warmup ignores short timeout",
+    "family": "repair",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "status='unchanged' with no patch",
+    "passed": 0,
+    "total": 1,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "unchanged",
+      "reason": "Ask mode prohibits edits. Required fix: warmup() should pass config.DEFAULT_WARMUP_TIMEOUT_S to chat(), and chat_wrapped() must forward timeout_s to api.post_chat() instead of discarding it.",
+      "citations": [
+        "warmup.py:warmup",
+        "config.py:DEFAULT_WARMUP_TIMEOUT_S",
+        "chat/wrap.py:chat_wrapped"
+      ],
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": null
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 30.86,
+    "prompt_tokens": 12,
+    "eval_tokens": 1552,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 349,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_gpt-5.6-sol-high_audittrap__warmup_no_deadline.txt",
+    "session_id": "9e3fc36d-41f5-434f-999c-c87eb37cb35c",
+    "raw_content": "<arch_final>\n{\"status\":\"unchanged\",\"reason\":\"Ask mode prohibits edits. Required fix: warmup() should pass config.DEFAULT_WARMUP_TIMEOUT_S to chat(), and chat_wrapped() must forward timeout_s to api.post_chat() instead of discarding it.\",\"citations\":[\"warmup.py:warmup\",\"config.py:DEFAULT_WARMUP_TIMEOUT_S\",\"chat/wrap.py:chat_wrapped\"]}\n</arch_final>"
+  },
+  {
+    "model": "gpt-5.6-sol-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "sat_assign_cleared",
+    "title": "SAT backtracking wipes ancestor assignments",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "unchanged ok; reason_ok=True",
+    "passed": 1,
+    "total": 1,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "unchanged",
+      "reason": "The report is stale: sat_solve restores assign from snap immediately after clear(), then removes only the failed trial variable. Ancestor assignments survive backtracking. The unguarded clear() exists only in the unused legacy implementation.",
+      "citations": [
+        "solver/sat.py:sat_solve",
+        "solver/_legacy_broken_sat.py:broken_sat_solve"
+      ],
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": null
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 49.49,
+    "prompt_tokens": 12,
+    "eval_tokens": 1966,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 391,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_gpt-5.6-sol-high_audittrap__sat_assign_cleared.txt",
+    "session_id": "67e1d9a1-47d7-481a-a1c8-7b263b88d8ab",
+    "raw_content": "<arch_final>\n{\"status\":\"unchanged\",\"reason\":\"The report is stale: sat_solve restores assign from snap immediately after clear(), then removes only the failed trial variable. Ancestor assignments survive backtracking. The unguarded clear() exists only in the unused legacy implementation.\",\"citations\":[\"solver/sat.py:sat_solve\",\"solver/_legacy_broken_sat.py:broken_sat_solve\"]}\n</arch_final>"
+  },
+  {
+    "model": "gpt-5.6-sol-high",
+    "provider": "cursor",
+    "bench": "audittrap",
+    "task": "sql_where_inside_join",
+    "title": "SQL WHERE without JOIN fails to parse",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "unchanged ok; reason_ok=True",
+    "passed": 1,
+    "total": 1,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "unchanged",
+      "reason": "The report is stale: WHERE is already optional independently of JOIN, and the reported WHERE-only query executes successfully.",
+      "citations": [
+        "solver/sql.py:_SELECT_RE",
+        "solver/sql.py:execute_select"
+      ],
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": null
+    },
+    "tool_calls": null,
+    "files_read": [],
+    "tool_trace": [],
+    "wall_s": 38.4,
+    "prompt_tokens": 24,
+    "eval_tokens": 1564,
+    "rounds": 1,
+    "done_reason": "success",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 259,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_gpt-5.6-sol-high_audittrap__sql_where_inside_join.txt",
+    "session_id": "22959cda-8dc3-4267-b5ed-fb8e8f6ce44c",
+    "raw_content": "<arch_final>\n{\"status\":\"unchanged\",\"reason\":\"The report is stale: WHERE is already optional independently of JOIN, and the reported WHERE-only query executes successfully.\",\"citations\":[\"solver/sql.py:_SELECT_RE\",\"solver/sql.py:execute_select\"]}\n</arch_final>"
+  }
+]

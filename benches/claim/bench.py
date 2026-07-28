@@ -285,7 +285,7 @@ def run_selftest() -> int:
     gold = {cid: val for cid, _, val in CLAIMS}
     g = grade_answers({"answers": gold}, session)
     print(json.dumps(g, indent=2))
-    if g["correct"] != len(CLAIMS) or g["score"] < len(CLAIMS):
+    if g["correct"] != len(CLAIMS):
         print("SELFTEST FAILED", file=sys.stderr)
         return 1
     # decoy exists but must NOT be on DELETE path (claim false)

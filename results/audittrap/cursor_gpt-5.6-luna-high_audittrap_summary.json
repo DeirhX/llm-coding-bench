@@ -1,0 +1,9 @@
+{
+  "model": "gpt-5.6-luna-high",
+  "tag": "cursor_gpt-5.6-luna-high_audittrap",
+  "score": 37,
+  "max_score": 81,
+  "pass": 3,
+  "tasks": 7,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_gpt-5.6-luna-high_audittrap_20260727_132610.json"
+}

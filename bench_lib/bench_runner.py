@@ -195,7 +195,7 @@ def run_main(spec: BenchSpec) -> None:
 
             try:
                 r = spec.run_agent(task)
-            except BaseException as e:
+            except Exception as e:
                 r = _error_row(spec, task, e)
 
             # -- merge into results -------------------------------------------
@@ -235,6 +235,7 @@ def run_main(spec: BenchSpec) -> None:
     }
     print("SUMMARY", json.dumps(summary))
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    return None
 
 
 def write_atomic(contents: str, path: Path) -> None:

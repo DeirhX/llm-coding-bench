@@ -190,6 +190,7 @@ def chat(
     options: dict[str, Any] | None = None,
     think: bool | str | None = None,
     stream: bool | None = None,
+    timeout_s: float | None = None,
     on_thinking: OnDelta | None = None,
     on_content: OnDelta | None = None,
 ) -> dict[str, Any]:
@@ -227,7 +228,7 @@ def chat(
         )
         t0 = time.perf_counter()
         # First-byte budget covers cold load + prefill; then tighten to stall.
-        connect_timeout = _first_byte_s() if use_stream else 3600.0
+        connect_timeout = (timeout_s if timeout_s is not None else _first_byte_s()) if use_stream else 3600.0
         try:
             with urllib.request.urlopen(req, timeout=connect_timeout) as resp:
                 if use_stream:

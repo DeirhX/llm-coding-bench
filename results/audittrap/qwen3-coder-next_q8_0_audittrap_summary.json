@@ -1,0 +1,9 @@
+{
+  "model": "qwen3-coder-next:q8_0",
+  "tag": "qwen3-coder-next_q8_0_audittrap",
+  "score": 40,
+  "max_score": 81,
+  "pass": 3,
+  "tasks": 7,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/qwen3-coder-next_q8_0_audittrap_20260727_141951.json"
+}

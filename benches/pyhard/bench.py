@@ -145,6 +145,7 @@ def chat(
     *,
     on_thinking=None,
     on_content=None,
+    timeout_s: float | None = None,
 ) -> dict[str, Any]:
     if PROVIDER in ("cursor", "cursor-cli", "agent"):
         return chat_cursor(model, prompt)
@@ -1195,7 +1196,7 @@ def main() -> None:
     )
 
     try:
-        warm = chat(MODEL, "Reply with exactly: OK")
+        warm = chat(MODEL, "Reply with exactly: OK", timeout_s=30)
         extra = ""
         if PROVIDER == "ollama":
             with urllib.request.urlopen("http://127.0.0.1:11434/api/ps", timeout=30) as resp:

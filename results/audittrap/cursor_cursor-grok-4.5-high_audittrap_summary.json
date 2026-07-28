@@ -1,0 +1,9 @@
+{
+  "model": "cursor-grok-4.5-high",
+  "tag": "cursor_cursor-grok-4.5-high_audittrap",
+  "score": 78,
+  "max_score": 81,
+  "pass": 7,
+  "tasks": 7,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/cursor_cursor-grok-4.5-high_audittrap_20260727_132945.json"
+}
