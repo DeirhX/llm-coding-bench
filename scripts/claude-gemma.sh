@@ -57,6 +57,7 @@ CTX="64k"
 WEIGHTS="fast"
 RUNTIME="cpp"
 USE_PROMPT="auto"
+YOLO=0
 
 usage() {
   cat <<'USAGE'
@@ -81,6 +82,9 @@ Usage: claude-gemma [31b|26b] [fast|accurate] [64k|128k|max] [mlx] [options] [--
 
   --prompt       Force the skepticism system prompt on (default: on for 31b only).
   --no-prompt    Force it off.
+  --yolo         Bypass every permission check for the session. Edits, writes and
+                 shell commands run unattended, in the current directory, with no
+                 confirmation. See the warning it prints before you use it.
   --list         Show the installed variants and exit.
   -h, --help     This message.
 
@@ -109,6 +113,7 @@ while [[ $# -gt 0 ]]; do
     cpp|CPP|llamacpp) RUNTIME="cpp"; shift ;;
     --prompt) USE_PROMPT="on"; shift ;;
     --no-prompt) USE_PROMPT="off"; shift ;;
+    --yolo|-y) YOLO=1; shift ;;
     --list)
       echo "Installed Gemma variants:"
       ollama list 2>/dev/null | awk 'NR==1 || /^gemma4-(31b|26b)-(coding|mtp|mlx)-|^gemma4-coding:/ { print "  " $0 }'
@@ -173,6 +178,29 @@ if (( ${#PROMPT_ARGS} )); then
   echo "prompt: $(basename "$SKEPTIC_PROMPT")"
 else
   echo "prompt: none"
+fi
+
+# The specific reason to hesitate here, beyond the obvious one about unattended shell
+# commands: the property that makes this model safe to accept edits from is unverified on
+# this exact path. Without a system prompt the 31B scores 0/20 on confidently-worded bug
+# reports that are wrong about the code -- it patches whatever it was told to patch. With
+# prompts/skeptic_min.md it scores 20/20. But every one of those measurements used that
+# file as the *entire* system prompt, and Claude Code appends it to several thousand tokens
+# of its own. Nothing has confirmed 63 words still bind in that position. Permission
+# prompts are currently the only thing standing between an unverified disposition and your
+# working tree, and --yolo removes them.
+YOLO_ARGS=()
+if (( YOLO )); then
+  YOLO_ARGS=(--dangerously-skip-permissions)
+  echo "yolo:   ON -- no permission checks. Edits, writes and shell commands run"
+  echo "        unattended in $(pwd)."
+  if (( ! ${#PROMPT_ARGS} )); then
+    echo "        No skepticism prompt: this model patches false bug reports 20 times"
+    echo "        out of 20 in that configuration. Consider --prompt."
+  else
+    echo "        Skepticism prompt is on, but its effect has never been measured with"
+    echo "        Claude Code's own system prompt in front of it. Keep git clean."
+  fi
 fi
 
 if ! curl -sf -o /dev/null --max-time 5 "$OLLAMA_URL/api/tags"; then
@@ -240,4 +268,4 @@ JSON
 echo
 
 exec claude --model "$MODEL" --settings "$SESSION_SETTINGS" \
-  "${PROMPT_ARGS[@]}" "${CLAUDE_ARGS[@]}"
+  "${PROMPT_ARGS[@]}" "${YOLO_ARGS[@]}" "${CLAUDE_ARGS[@]}"
