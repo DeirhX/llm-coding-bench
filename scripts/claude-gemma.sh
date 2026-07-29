@@ -193,6 +193,20 @@ else
   [[ "$CTX" == "max" ]] && MODEL="gemma4-coding:31b" || MODEL="gemma4-31b-coding-${CTX}"
 fi
 
+# Claude Code sizes its own auto-compaction against the model's context window, and with
+# no value supplied it assumes a Sonnet-shaped one -- far larger than anything here. The
+# consequence was measured: a session reached 99,746 tokens against a 98,304 window before
+# compaction even triggered, and compaction then has to re-send the whole conversation,
+# which took over four minutes on a cold cache and was abandoned twice. Telling it the
+# truth moves that work to a point where it is still cheap.
+case "$CTX" in
+  64k)  CTX_TOKENS=65536 ;;
+  96k)  CTX_TOKENS=98304 ;;
+  128k) CTX_TOKENS=131072 ;;
+  max)  CTX_TOKENS=262144 ;;
+  *)    echo "internal error: no token count for CTX=$CTX" >&2; exit 1 ;;
+esac
+
 if [[ "$USE_PROMPT" == "auto" ]]; then
   [[ "$SIZE" == "31b" ]] && USE_PROMPT="on" || USE_PROMPT="off"
 fi
@@ -241,6 +255,7 @@ else
   echo "prompt: none (raw model behaviour, including LaTeX arithmetic)"
 fi
 echo "small:  $SMALL_NOTE"
+echo "window: $CTX_TOKENS tokens, declared to Claude Code so it compacts in time"
 
 # The specific reason to hesitate here, beyond the obvious one about unattended shell
 # commands: the property that makes this model safe to accept edits from is unverified on
@@ -388,7 +403,8 @@ SESSION_SETTINGS=$(cat <<JSON
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "$SMALL_SLOT",
     "ANTHROPIC_SMALL_FAST_MODEL": "$SMALL_SLOT",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0"
+    "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "$CTX_TOKENS"
   },
   "model": "$MODEL",
   "availableModels": ["$MODEL", "$SMALL_SLOT"],
@@ -416,6 +432,7 @@ export ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="$SMALL_SLOT"
 export ANTHROPIC_SMALL_FAST_MODEL="$SMALL_SLOT"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
+export CLAUDE_CODE_MAX_CONTEXT_TOKENS="$CTX_TOKENS"
 
 # The away summary re-sends the whole conversation against the main model with its own prompt
 # shape when you step away and return. That prefix displaces the conversation's, so the next
