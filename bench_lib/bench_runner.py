@@ -56,7 +56,7 @@ from typing import Any, Callable
 class TaskFields:
     """Attribute names on the task object used by the shared loop."""
 
-    id_attr: str = "id"
+    id_attr: str = "task"
     title_attr: str = "title"
     family_attr: str = "family"
     max_score_attr: str = "max_score"
@@ -95,7 +95,7 @@ class BenchSpec:
 def _safe_get(task: Any, attr: str, default: Any = None) -> Any:
     try:
         return getattr(task, attr)
-    except Exception:
+    except AttributeError:
         return default
 
 
@@ -109,7 +109,7 @@ def _error_row(spec: BenchSpec, task: Any, e: BaseException) -> dict[str, Any]:
     return {
         "model": spec.model,
         "provider": spec.provider,
-        "task": tid,
+        spec.task_fields.id_attr: tid,
         "title": _safe_get(task, spec.task_fields.title_attr, tid),
         "family": _safe_get(task, spec.task_fields.family_attr, ""),
         "ok": False,
@@ -154,7 +154,7 @@ def run_main(spec: BenchSpec) -> None:
     summary_path = spec.out_dir / f"{spec.tag}_summary.json"
 
     # -- merge latest (pre) -----------------------------------------------
-    results: list[dict[str, Any]] = []
+    results_map: dict[str, dict[str, Any]] = {}
     id_attr = spec.task_fields.id_attr
     if spec.merge_latest and latest_path.is_file():
         try:
@@ -162,21 +162,21 @@ def run_main(spec: BenchSpec) -> None:
                 latest_path.read_text(encoding="utf-8")
             )
             if isinstance(prev, list):
-                results = [r for r in prev
-                           if isinstance(r, dict)
-                           and r.get(id_attr)]
+                for r in prev:
+                    if isinstance(r, dict) and (tid := r.get(id_attr)) is not None:
+                        results_map[str(tid)] = r
         except (OSError, json.JSONDecodeError):
-            results = []
+            pass
 
     # -- warmup -----------------------------------------------------------
     try:
         spec.warmup()
     except Exception as e:
-        print(f"warmup failed: {e}", file=sys.stderr)
+        print(f"Warmup failed: {e}", file=sys.stderr)
         sys.exit(1)
 
     # -- per-task loop --------------------------------------------------
-    done_ids = {str(r.get(id_attr)) for r in results}
+    done_ids = set(results_map.keys())
 
     with out_log.open("a", encoding="utf-8") as log:
         log.write(
@@ -184,9 +184,10 @@ def run_main(spec: BenchSpec) -> None:
             f"{spec.model} tag={spec.tag} {stamp} ====\n"
         )
 
-        for task in spec.load_tasks():
+        for i, task in enumerate(spec.load_tasks()):
             tid = _safe_get(task, id_attr)
-            if spec.merge_latest and tid in done_ids:
+            str_tid = str(tid) if tid is not None else f"unknown_{i}"
+            if spec.merge_latest and str_tid in done_ids:
                 print(f"-- {tid} ... skip (merged)", flush=True)
                 continue
 
@@ -199,23 +200,24 @@ def run_main(spec: BenchSpec) -> None:
                 r = _error_row(spec, task, e)
 
             # -- merge into results -------------------------------------------
-            results = [x for x in results if x.get(id_attr) != tid]
-            results.append(r)
+            results_map[str_tid] = r
+
+            # Log and print the individual result
+            r_json = json.dumps(r, indent=2)
             exclude = spec.task_fields.exclude_from_print
             print(
-                json.dumps({k: r[k] for k in r if k not in exclude}),
-                indent=2,
+                json.dumps({k: r[k] for k in r if k not in exclude}, indent=2),
                 flush=True,
             )
-            log.write(json.dumps(r, indent=2) + "\n")
-            merged = json.dumps(results, indent=2)
+            log.write(r_json + "\n")
 
-            # Atomic write via temp file + fsync + os.replace() to prevent
-            # corruption if the process crashes mid-write (kill, OOM, etc.)
+            # Write every time to maximize safety; task counts are small enough that O(N^2) is negligible.
+            merged = json.dumps(list(results_map.values()), indent=2)
             write_atomic(merged, out_json)
             write_atomic(merged, latest_path)
 
     # -- post-loop hook (optional) -----------------------------------------
+    results = list(results_map.values())
     if spec.post_loop_hook:
         spec.post_loop_hook(results, stamp)
 
@@ -234,7 +236,7 @@ def run_main(spec: BenchSpec) -> None:
         "path": str(out_json),
     }
     print("SUMMARY", json.dumps(summary))
-    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    write_atomic(json.dumps(summary, indent=2), summary_path)
     return None
 
 
