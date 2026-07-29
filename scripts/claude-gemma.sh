@@ -333,11 +333,45 @@ WARM_START=$SECONDS
 # sets keep_alive and creates no prefix cache entry at all. An earlier version sent a real
 # "ok" turn, which cached a 17-token prefix competing with whatever conversation was warm,
 # for no purpose -- the launcher exists to keep that cache hot, not to add entries to it.
+# It deliberately does not send keep_alive either. Doing so bought 8 hours here and nothing
+# afterwards, because Claude Code's own turns omit the field and reset the expiry to the
+# server default; the effect was a launcher that looked correct while every real request
+# undid it. Relying on the default instead means what is verified below is what the session
+# will actually get.
 curl -sf -o /dev/null --max-time 600 -X POST "$OLLAMA_URL/api/chat" \
   -H 'content-type: application/json' \
-  -d "{\"model\":\"$MODEL\",\"keep_alive\":\"8h\"}" \
+  -d "{\"model\":\"$MODEL\"}" \
   || { echo "error: failed to load $MODEL" >&2; exit 1; }
 echo "ready in $((SECONDS - WARM_START))s"
+
+# Five idle minutes would otherwise unload 62 GB and cost a cold load plus a full prefill of
+# the conversation -- about four minutes at 115k tokens. Worth one HTTP call to catch.
+KEEP_MIN=$(curl -sf --max-time 10 "$OLLAMA_URL/api/ps" 2>/dev/null | python3 -c '
+import json, sys
+from datetime import datetime, timezone
+
+try:
+    models = json.load(sys.stdin).get("models") or []
+except Exception:
+    print(-1)
+    sys.exit()
+best = -1
+for m in models:
+    raw = (m.get("expires_at") or "").replace("Z", "+00:00")
+    try:
+        left = (datetime.fromisoformat(raw) - datetime.now(timezone.utc)).total_seconds()
+    except ValueError:
+        continue
+    best = max(best, left / 60)
+print(int(best))
+' 2>/dev/null || echo -1)
+
+if [[ "$KEEP_MIN" =~ ^-?[0-9]+$ ]] && (( KEEP_MIN >= 0 )) && (( KEEP_MIN < 60 )); then
+  echo
+  echo "  warning: Ollama will unload this model in ${KEEP_MIN} min of idle time, and the"
+  echo "           next turn then pays a cold load plus a full prefill. Fix it once with:"
+  echo "               scripts/ollama-keepalive.sh 8h"
+fi
 
 # enforceAvailableModels is set in the user's global settings and would reject a model
 # that is not on its list. Rather than editing that file, this session supplies its own.
