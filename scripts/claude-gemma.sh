@@ -256,6 +256,7 @@ else
 fi
 echo "small:  $SMALL_NOTE"
 echo "window: $CTX_TOKENS tokens, declared to Claude Code so it compacts in time"
+echo "limits: ${CLAUDE_GEMMA_MAX_OUTPUT:-8192} output tokens, $(( ${CLAUDE_GEMMA_TIMEOUT_MS:-1800000} / 60000 )) min request timeout"
 
 # The specific reason to hesitate here, beyond the obvious one about unattended shell
 # commands: the property that makes this model safe to accept edits from is unverified on
@@ -404,7 +405,9 @@ SESSION_SETTINGS=$(cat <<JSON
     "ANTHROPIC_SMALL_FAST_MODEL": "$SMALL_SLOT",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
-    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "$CTX_TOKENS"
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "$CTX_TOKENS",
+    "API_TIMEOUT_MS": "${CLAUDE_GEMMA_TIMEOUT_MS:-1800000}",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "${CLAUDE_GEMMA_MAX_OUTPUT:-8192}"
   },
   "model": "$MODEL",
   "availableModels": ["$MODEL", "$SMALL_SLOT"],
@@ -433,6 +436,22 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL="$SMALL_SLOT"
 export ANTHROPIC_SMALL_FAST_MODEL="$SMALL_SLOT"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
 export CLAUDE_CODE_MAX_CONTEXT_TOKENS="$CTX_TOKENS"
+
+# Claude Code abandons a request after 5 minutes when API_TIMEOUT_MS is unset, then resends
+# it. Against a cloud model that is a generous ceiling; here it is below the median turn.
+# Measured on one session: nine turns took 2m17s, 6m19s, 5m48s, 8m24s, 4m52s, 3m18s, 5m51s,
+# 2m5s and 6m59s, and the retries landed 300 and 295 seconds after their originals, to the
+# second. Worse, a resend queues behind the original, which is still generating, so the
+# model does the work twice and the client abandons both. Eight messages of progress in
+# forty minutes of continuous GPU time.
+export API_TIMEOUT_MS="${CLAUDE_GEMMA_TIMEOUT_MS:-1800000}"
+
+# The other half of the same problem. Claude Code asks for up to 32000 output tokens, which
+# at ~13 tok/s on the draft checkpoint permits a 40-minute answer: the model does not have
+# to misbehave to blow any timeout, only to be thorough. Capping it trades the tail of very
+# long single responses for turns that finish. Raise it if a large edit ever comes back cut
+# off mid-hunk.
+export CLAUDE_CODE_MAX_OUTPUT_TOKENS="${CLAUDE_GEMMA_MAX_OUTPUT:-8192}"
 
 # The away summary re-sends the whole conversation against the main model with its own prompt
 # shape when you step away and return. That prefix displaces the conversation's, so the next
