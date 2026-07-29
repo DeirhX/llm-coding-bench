@@ -4,17 +4,29 @@
 # No proxy is involved. Ollama 0.32.5 serves Anthropic's /v1/messages directly, so
 # ANTHROPIC_BASE_URL pointed at the Ollama port is the whole integration.
 #
-# THE CHOICE THIS SCRIPT EXISTS TO GET RIGHT is which weights, and it is one axis, not two.
-# An earlier version of this launcher offered "mlx" against "cpp" as if the runtime were the
-# speed lever. It is not. gemma4:31b-mlx-bf16 and gemma4:31b-coding-mtp-bf16 share 1245 of
-# 1247 layer digests: they are one checkpoint that carries an embedded ~0.4B draft network
-# (48 draft.model.* tensors, 31.7B against the plain model's 31.3B) and does speculative
-# decoding. Measured head to head at matched context, the two runners land within 5% of each
-# other -- MLX ahead below 8k, behind above 64k. All of the speed is the draft model, which
-# llama.cpp runs perfectly well, so llama.cpp is the default for both choices.
+# THE CHOICE THIS SCRIPT EXISTS TO GET RIGHT is which weights. The runtime is not a choice
+# at all, and two earlier versions of this script got that wrong in opposite directions.
 #
-#   accurate   gemma4:31b-it-bf16, dense, no draft. The best scores measured here, and the
-#              only 31B build with vision. 8.1 tok/s at short context, 6.2 at 100k.
+# Ollama picks the engine from how the model is packaged, not from anything a caller says.
+# gemma4:31b-it-bf16 ships as a GGUF blob and runs under llama-server. The draft checkpoint
+# ships as 1245 safetensors layers and runs under `ollama runner --mlx-engine`. There is no
+# GGUF build of the draft model and no safetensors build of the dense one, so the two axes
+# are perfectly confounded in the tags available here and no measurement can separate them.
+#
+# That also means gemma4:31b-mlx-bf16 and gemma4:31b-coding-mtp-bf16 are the same model:
+# 1245 of 1247 layer digests match, and the two that differ are a config JSON and a licence
+# file. Offering them as separate options, as this script briefly did, was offering one
+# thing under two names. 'mlx' is kept only as an alias so old muscle memory does not error.
+#
+# The honest claim is therefore narrow: 'fast' is ~3.4x quicker at short context and ~1.9x
+# at 100k, achieved by some combination of an embedded ~0.4B draft network doing speculative
+# decoding and the MLX runtime. Which of those contributes what is unknown and unknowable
+# with these tags.
+#
+#   accurate   gemma4:31b-it-bf16, dense, no draft, GGUF under llama-server. The best
+#              scores measured here, and the only 31B build with vision. 8.1 tok/s at short
+#              context, 6.2 at 100k. It enforces its context window: overflow is truncated,
+#              loudly, keeping the first 5 tokens and the tail.
 #
 #   fast       the draft checkpoint. 27 tok/s at short context, 20 at 32k, 15.6 at 64k,
 #              11.9 at 100k -- the advantage decays as the draft gets rejected more often,
@@ -30,6 +42,22 @@
 #               Note that overflowing a pinned window does not error: Ollama silently
 #               truncated a 132k prompt to 65,539 tokens in testing, discarding half the
 #               context, and a truncated prefix also measurably hurts draft acceptance.
+#
+#   overflow    These two engines disagree about what a context window means, and the
+#               difference matters more than the number does. llama-server enforces it and
+#               says so. The MLX runner does not: a session here sent an 80,774-token
+#               prompt to a model pinned at 65536 and it processed all 80,774, growing the
+#               KV cache to a peak of 121.5 GiB on a 128 GB machine. So on 'fast' the risk
+#               of a large context is memory exhaustion, not silent truncation.
+#
+#   small model Claude Code makes background calls of its own: session titling, and a recap
+#               when you step away. Pointed at the main model they arrive with a different
+#               prompt shape, and a competing prefix displaces the conversation's cached one.
+#               Measured on the recap: cache reuse fell from 88.7% to 27.5%, costing 108
+#               seconds to reprocess 54k tokens. Routing what can be routed at a small
+#               separate model gives it its own runner and leaves the cache alone. How many
+#               prefixes the runner will hold at once has not been established here, so the
+#               claim is only that a large competing prefix evicts, which is measured.
 #
 #   the prompt  The 31B scores 0/20 on false-bug reports with no system prompt and 20/20
 #               with 63 generic words, at no cost to anything else, on both checkpoints. So
@@ -51,6 +79,11 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OLLAMA_URL="${OLLAMA_HOST_URL:-http://127.0.0.1:11434}"
 SKEPTIC_PROMPT="$ROOT/prompts/skeptic_min.md"
+# Absorbs Claude Code's periodic background call so it does not evict the conversation's
+# prefix cache. 1.0 GB resident alongside the 78 GB model, and loading it was verified not
+# to evict that model. Must not be a thinking model: qwen3:1.7b was tried first and spent
+# its whole token budget in a <thinking> block, returning empty text on a trivial prompt.
+SMALL_MODEL="${CLAUDE_GEMMA_SMALL_MODEL:-gemma3:1b}"
 
 SIZE="31b"
 CTX="64k"
@@ -156,9 +189,29 @@ if [[ "$USE_PROMPT" == "auto" ]]; then
   [[ "$SIZE" == "31b" ]] && USE_PROMPT="on" || USE_PROMPT="off"
 fi
 
+# Gemma emits LaTeX for arithmetic, a habit from its Gemini-family training, and a terminal
+# renders none of it: "$55 \times \text{result size}$" arrives on screen exactly like that.
+# Claude Code refuses --append-system-prompt together with --append-system-prompt-file, so
+# the two are composed into a scratch file per launch. skeptic_min.md therefore stays
+# byte-identical to the file the 20/20 trap result was measured against. Note the composed
+# prompt is 28 words longer than anything measured, and on the 26B every added word has so
+# far cost fix points.
+FORMAT_RULE='Write arithmetic, formulas and units as plain text. Never use LaTeX, MathJax, or dollar-delimited math. Write "55 * result size", not "$55 \times \text{result size}$".'
+COMPOSED_PROMPT="${TMPDIR:-/tmp}/claude-gemma-system-prompt.md"
+
 PROMPT_ARGS=()
 if [[ "$USE_PROMPT" == "on" && -f "$SKEPTIC_PROMPT" ]]; then
-  PROMPT_ARGS=(--append-system-prompt-file "$SKEPTIC_PROMPT")
+  { cat "$SKEPTIC_PROMPT"; printf '\n%s\n' "$FORMAT_RULE"; } > "$COMPOSED_PROMPT"
+  PROMPT_ARGS=(--append-system-prompt-file "$COMPOSED_PROMPT")
+fi
+
+# Fall back to the main model rather than failing, so a missing small model costs cache
+# thrash rather than a launcher that will not start.
+SMALL_SLOT="$MODEL"
+SMALL_NOTE="not installed -- background calls will evict the conversation cache"
+if ollama list 2>/dev/null | awk -v m="$SMALL_MODEL" '$1 == m { f=1 } END { exit f ? 0 : 1 }'; then
+  SMALL_SLOT="$SMALL_MODEL"
+  SMALL_NOTE="$SMALL_MODEL"
 fi
 
 # Announced before the load, not after: a cold 62 GB model takes over two minutes, and
@@ -175,10 +228,11 @@ else
 fi
 [[ "$RUNTIME" == "mlx" ]] && echo "runtime: MLX (within 5% of llama.cpp; kept for comparison)"
 if (( ${#PROMPT_ARGS} )); then
-  echo "prompt: $(basename "$SKEPTIC_PROMPT")"
+  echo "prompt: $(basename "$SKEPTIC_PROMPT") + plain-text math rule"
 else
-  echo "prompt: none"
+  echo "prompt: none (raw model behaviour, including LaTeX arithmetic)"
 fi
+echo "small:  $SMALL_NOTE"
 
 # The specific reason to hesitate here, beyond the obvious one about unattended shell
 # commands: the property that makes this model safe to accept edits from is unverified on
@@ -234,11 +288,36 @@ for other in gemma4-31b-coding-64k gemma4-31b-coding-128k \
   ollama stop "$other" 2>/dev/null || true
 done
 
+# A second session against the same endpoint has a different prefix, and a large competing
+# prefix evicts the first, leaving it to reprocess its whole prompt on its next turn.
+# Measured at 33-60k prompts that is 40-70 seconds per switch, which reads as "the model is
+# slow" rather than "I have two sessions open". Warn rather than refuse: a second session is
+# sometimes worth the price.
+# Which process carries the settings varies: launched through this script they sit on the
+# `claude --model ... --settings` wrapper, but other launch paths put them on the app binary
+# instead, and the wrapper's children inherit them through the environment where ps cannot
+# see them. So key off the settings blob rather than any one binary path, and exclude both
+# the daemon's helpers and whatever inspection command happens to quote these strings.
+OTHER_SESSIONS=$(ps -eo pid,command 2>/dev/null \
+  | awk '/ANTHROPIC_BASE_URL/ \
+         && !/bg-spare|bg-pty-host|claude daemon/ \
+         && !/awk|grep|rg / { n++ } END { print n+0 }')
+if (( OTHER_SESSIONS > 0 )); then
+  echo
+  echo "  warning: $OTHER_SESSIONS other Claude Code session(s) are already using this"
+  echo "           endpoint. They share one prefix-cache slot, so each switch between"
+  echo "           them costs a full prompt reprocess. Close them for full speed."
+fi
+
 echo "loading (a couple of minutes for a cold 60 GB model)..."
 WARM_START=$SECONDS
+# No messages array, which makes this a load-only request: Ollama returns done_reason=load,
+# sets keep_alive and creates no prefix cache entry at all. An earlier version sent a real
+# "ok" turn, which cached a 17-token prefix competing with whatever conversation was warm,
+# for no purpose -- the launcher exists to keep that cache hot, not to add entries to it.
 curl -sf -o /dev/null --max-time 600 -X POST "$OLLAMA_URL/api/chat" \
   -H 'content-type: application/json' \
-  -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"ok\"}],\"stream\":false,\"keep_alive\":\"8h\",\"options\":{\"num_predict\":1}}" \
+  -d "{\"model\":\"$MODEL\",\"keep_alive\":\"8h\"}" \
   || { echo "error: failed to load $MODEL" >&2; exit 1; }
 echo "ready in $((SECONDS - WARM_START))s"
 
@@ -254,18 +333,45 @@ SESSION_SETTINGS=$(cat <<JSON
     "ANTHROPIC_DEFAULT_MODEL": "$MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "$MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "$MODEL",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "$MODEL",
-    "ANTHROPIC_SMALL_FAST_MODEL": "$MODEL",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "$SMALL_SLOT",
+    "ANTHROPIC_SMALL_FAST_MODEL": "$SMALL_SLOT",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0"
   },
   "model": "$MODEL",
-  "availableModels": ["$MODEL"],
+  "availableModels": ["$MODEL", "$SMALL_SLOT"],
   "enforceAvailableModels": false
 }
 JSON
 )
 
 echo
+
+# --settings governs this session, but ~/.claude/settings.json carries its own env block and
+# Claude Code exports that into the processes it spawns. Those workers -- the daemon's
+# bg-spare pool and whatever issues the periodic auxiliary call -- then read the environment
+# rather than this session's settings. With a stale global block that meant they talked to a
+# different model on a different port entirely, which is why the small-model routing never
+# fired and why a logging proxy saw no auxiliary traffic. Exporting here wins, because a
+# child inherits the environment before it ever reads a settings file.
+export ANTHROPIC_BASE_URL="$OLLAMA_URL"
+export ANTHROPIC_AUTH_TOKEN="ollama"
+export ANTHROPIC_API_KEY=""
+export ANTHROPIC_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$SMALL_SLOT"
+export ANTHROPIC_SMALL_FAST_MODEL="$SMALL_SLOT"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
+
+# The away summary re-sends the whole conversation against the main model with its own prompt
+# shape when you step away and return. That prefix displaces the conversation's, so the next
+# real turn matches only the small head both share and reprocesses everything after it: one
+# observed instance dropped reuse from 88.7% to 27.5% and cost 108s for a 40-word recap.
+# Unlike the titling call it cannot be routed to $SMALL_SLOT, since it needs the transcript.
+# Despite the ENABLE_ name the feature is on by default; "0" is checked before the remote gate.
+export CLAUDE_CODE_ENABLE_AWAY_SUMMARY="0"
 
 exec claude --model "$MODEL" --settings "$SESSION_SETTINGS" \
   "${PROMPT_ARGS[@]}" "${YOLO_ARGS[@]}" "${CLAUDE_ARGS[@]}"
