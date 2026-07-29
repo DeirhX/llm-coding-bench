@@ -45,12 +45,43 @@ def _env_flag(name: str, default: str = "1") -> bool:
     )
 
 
+def sampler_options(default_temperature: float = 0.1) -> dict[str, Any]:
+    """Return the temperature to send, or nothing at all.
+
+    ``BENCH_TEMPERATURE=auto`` omits the key entirely so Ollama falls back to the
+    model's own Modelfile value. That distinction is not academic: gemma4:31b ships
+    ``temperature 1`` and gemma4:26b ships no sampler at all, inheriting Ollama's
+    0.8, while every score in this repo was measured at 0.1. An interactive client
+    that sends no sampler therefore gets a model nobody here has benchmarked.
+    """
+    raw = os.environ.get("BENCH_TEMPERATURE", "").strip().lower()
+    if raw in ("auto", "model", "modelfile", "default"):
+        return {}
+    return {"temperature": float(raw) if raw else default_temperature}
+
+
+def realism_mode() -> bool:
+    """Disable every harness rescue at once, because no client provides them.
+
+    An editor or agent CLI gives the model one chance per request. Nothing watches
+    the stream for degenerate repetition and aborts it, nothing re-prompts after a
+    failed turn, and nothing salvages a final answer that was left behind in the
+    thinking channel. With ``BENCH_REALISM=1`` the bench behaves the same way, so a
+    score answers "could I code with this" instead of "could my harness rescue it".
+    """
+    return _env_flag("BENCH_REALISM", "0")
+
+
 def think_loop_enabled() -> bool:
+    if realism_mode():
+        return False
     return _env_flag("BENCH_THINK_LOOP", "1")
 
 
 def think_promote_enabled() -> bool:
     """When think is aborted or empty-content, promote a complete final from think."""
+    if realism_mode():
+        return False
     return _env_flag("BENCH_THINK_PROMOTE", "1")
 
 
@@ -60,6 +91,8 @@ def think_max_chars() -> int:
     Shared ``num_predict`` cannot stop rumination early; this client-side cap
     aborts the stream so the agent can emit (or we can promote a drafted final).
     """
+    if realism_mode():
+        return 0
     raw = os.environ.get("BENCH_THINK_MAX_CHARS", "0").strip()
     if not raw:
         return 0

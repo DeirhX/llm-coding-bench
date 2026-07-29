@@ -27,7 +27,8 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from bench_lib.ollama_chat import chat as ollama_chat  # noqa: E402
-from bench_lib.ollama_think import (  # noqa: E402
+from bench_lib.ollama_think import (
+    sampler_options,  # noqa: E402
     RoundTranscript,
     default_num_predict,
     format_think_combined,
@@ -72,7 +73,7 @@ TAG = os.environ.get(
 )
 THINK = parse_think()
 OPTIONS = {
-    "temperature": float(os.environ.get("BENCH_TEMPERATURE", "0.1")),
+    **sampler_options(0.1),
     "num_ctx": int(os.environ.get("BENCH_NUM_CTX", "65536")),
     "num_predict": default_num_predict(8192, think_base=24576),
 }

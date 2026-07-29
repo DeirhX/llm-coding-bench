@@ -28,7 +28,8 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from bench_lib.ollama_chat import chat as ollama_chat  # noqa: E402
-from bench_lib.ollama_think import (  # noqa: E402
+from bench_lib.ollama_think import (
+    sampler_options,  # noqa: E402
     RoundTranscript,
     default_num_predict,
     format_think_combined,
@@ -67,10 +68,21 @@ TAG = os.environ.get(
 )
 THINK = parse_think()
 OPTIONS = {
-    "temperature": float(os.environ.get("BENCH_TEMPERATURE", "0.1")),
+    **sampler_options(0.1),
     "num_ctx": int(os.environ.get("BENCH_NUM_CTX", "65536")),
     "num_predict": default_num_predict(8192, think_base=24576),
 }
+
+# gemma4 26B-A4B fabricates the harness half of the protocol: it emits <arch_tool>,
+# then invents the <arch_result> block that the harness is supposed to send back,
+# and repeats that dozens of times in one turn (103 fake results against 9 real
+# tool calls on the worst task). parse_tool_call() searches for the first match and
+# discards everything after it, so those tokens are already thrown away -- they buy
+# nothing and cost up to 49k tokens and a task timeout. Stopping at <arch_result>
+# leaves the preceding </arch_tool> intact, so the parser sees exactly what it saw
+# before. Off by default so existing results stay comparable.
+if os.environ.get("BENCH_STOP_FABRICATION", "0") == "1":
+    OPTIONS["stop"] = ["<arch_result>"]
 
 MAX_ROUNDS = int(os.environ.get("BENCH_MAX_ROUNDS", "40"))
 MAX_TOOL_CALLS = int(os.environ.get("BENCH_MAX_TOOL_CALLS", "40"))
