@@ -1,0 +1,9 @@
+{
+  "model": "gemma4-coding:31b-mtp",
+  "tag": "gemma4-coding_31b-mtp_arch",
+  "score": 83,
+  "max_score": 90,
+  "pass": 8,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4-coding_31b-mtp_arch_20260729_030357.json"
+}

@@ -1,0 +1,9 @@
+{
+  "model": "deepseek-v4-flash",
+  "tag": "ds4_flash_q2imatrix_sysgen_fixes_audittrap",
+  "score": 20,
+  "max_score": 40,
+  "pass": 2,
+  "tasks": 4,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/ds4_flash_q2imatrix_sysgen_fixes_audittrap_20260728_132648.json"
+}

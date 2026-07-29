@@ -1,0 +1,9 @@
+{
+  "model": "gemma4-coding:31b",
+  "tag": "gemma4-coding_31b_repohard_realism",
+  "score": 74,
+  "max_score": 80,
+  "pass": 6,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4-coding_31b_repohard_realism_20260728_232604.json"
+}

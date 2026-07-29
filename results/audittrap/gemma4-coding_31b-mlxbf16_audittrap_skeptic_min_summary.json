@@ -1,0 +1,9 @@
+{
+  "model": "gemma4-coding:31b-mlxbf16",
+  "tag": "gemma4-coding_31b-mlxbf16_audittrap_skeptic_min",
+  "score": 64,
+  "max_score": 81,
+  "pass": 4,
+  "tasks": 7,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/gemma4-coding_31b-mlxbf16_audittrap_skeptic_min_20260729_034824.json"
+}

@@ -1,0 +1,9 @@
+{
+  "model": "gemma4-coding:31b-mlxbf16",
+  "tag": "gemma4-coding_31b-mlxbf16_arch",
+  "score": 83,
+  "max_score": 90,
+  "pass": 8,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4-coding_31b-mlxbf16_arch_20260729_111622.json"
+}

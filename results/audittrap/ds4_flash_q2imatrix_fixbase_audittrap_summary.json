@@ -1,0 +1,9 @@
+{
+  "model": "deepseek-v4-flash",
+  "tag": "ds4_flash_q2imatrix_fixbase_audittrap",
+  "score": 28,
+  "max_score": 40,
+  "pass": 1,
+  "tasks": 4,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/ds4_flash_q2imatrix_fixbase_audittrap_20260728_132130.json"
+}

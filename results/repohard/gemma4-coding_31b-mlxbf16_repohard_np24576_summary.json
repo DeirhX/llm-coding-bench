@@ -1,0 +1,9 @@
+{
+  "model": "gemma4-coding:31b-mlxbf16",
+  "tag": "gemma4-coding_31b-mlxbf16_repohard_np24576",
+  "score": 74,
+  "max_score": 80,
+  "pass": 6,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4-coding_31b-mlxbf16_repohard_np24576_20260729_035052.json"
+}

@@ -1,0 +1,9 @@
+{
+  "model": "gemma4:31b-it-bf16",
+  "tag": "gemma4_31b_repohard_realism_shipped",
+  "score": 70,
+  "max_score": 80,
+  "pass": 6,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4_31b_repohard_realism_shipped_20260728_233413.json"
+}

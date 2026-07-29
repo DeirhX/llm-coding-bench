@@ -1,0 +1,270 @@
+{
+  "model": "gemma4-coding:31b-mtp",
+  "provider": "ollama",
+  "bench": "claim",
+  "tag": "gemma4-coding_31b-mtp_claim",
+  "score": 22,
+  "max_score": 23,
+  "correct": 19,
+  "wrong": 1,
+  "missing": 0,
+  "evidence_bonus": 3,
+  "files_read": [
+    "README.md",
+    "api/invoices.py",
+    "api/orders.py",
+    "api/webhooks.py",
+    "service/invoice_service.py",
+    "service/legacy_order.py",
+    "service/order_service.py",
+    "service/payment_service.py",
+    "store/invoice_repo.py",
+    "store/order_repo.py",
+    "worker/outbox_worker.py",
+    "worker/webhook_retry.py"
+  ],
+  "per_claim": [
+    {
+      "id": "c01",
+      "gold": true,
+      "got": false,
+      "ok": false,
+      "claim": "handle_delete_order calls order_service.cancel_order."
+    },
+    {
+      "id": "c02",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "cancel_order invalidates the order cache."
+    },
+    {
+      "id": "c03",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "mark_paid invalidates the order cache."
+    },
+    {
+      "id": "c04",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "get_invoice checks that invoice.tenant_id matches the current tenant."
+    },
+    {
+      "id": "c05",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "list_invoices scopes results with list_by_tenant."
+    },
+    {
+      "id": "c06",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "admin_export_invoices returns invoices for all tenants."
+    },
+    {
+      "id": "c07",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "handle_payment_webhook records processed_webhooks before inserting OrderPaid into the outbox."
+    },
+    {
+      "id": "c08",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "outbox_worker.process_once acknowledges an outbox row before calling publish."
+    },
+    {
+      "id": "c09",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "list_orders avoids per-order get_order calls (no N+1)."
+    },
+    {
+      "id": "c10",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "README invariant I1 is violated by cancel_order (no outbox write)."
+    },
+    {
+      "id": "c11",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "cancel_order_legacy is invoked on the DELETE /orders/{id} request path."
+    },
+    {
+      "id": "c12",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "soft_delete sets order status to cancelled."
+    },
+    {
+      "id": "c13",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "order_service.get_order returns cached rows without re-checking tenant_id on cache hit."
+    },
+    {
+      "id": "c14",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "webhook_retry.retry_payment_webhook bypasses payment_service and writes outbox directly."
+    },
+    {
+      "id": "c15",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "invoice_repo.get_by_id filters by tenant_id."
+    },
+    {
+      "id": "c16",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "In cancel_order, outbox.insert(OrderCancelled) runs before order_repo.soft_delete."
+    },
+    {
+      "id": "c17",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "get_order re-validates tenant_id against the current tenant on every cache hit."
+    },
+    {
+      "id": "c18",
+      "gold": true,
+      "got": true,
+      "ok": true,
+      "claim": "handle_payment_webhook calls order_service.mark_paid after inserting OrderPaid into the outbox."
+    },
+    {
+      "id": "c19",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "outbox_worker.process_once acks an outbox row only after publish succeeds."
+    },
+    {
+      "id": "c20",
+      "gold": false,
+      "got": false,
+      "ok": true,
+      "claim": "invoice_service.admin_export_invoices scopes results to the current tenant."
+    }
+  ],
+  "ok": true,
+  "detail": "19/20 correct, wrong=1, missing=0, ev=+3",
+  "answer": {
+    "answers": {
+      "c01": false,
+      "c02": true,
+      "c03": false,
+      "c04": false,
+      "c05": true,
+      "c06": true,
+      "c07": false,
+      "c08": true,
+      "c09": false,
+      "c10": false,
+      "c11": false,
+      "c12": true,
+      "c13": true,
+      "c14": false,
+      "c15": false,
+      "c16": false,
+      "c17": false,
+      "c18": true,
+      "c19": false,
+      "c20": false
+    },
+    "citations": {
+      "c01": [
+        "api/orders.py:29"
+      ],
+      "c02": [
+        "service/order_service.py:40"
+      ],
+      "c03": [
+        "service/order_service.py:44-52"
+      ],
+      "c04": [
+        "service/invoice_service.py:17",
+        "store/invoice_repo.py:14"
+      ],
+      "c05": [
+        "service/invoice_service.py:11"
+      ],
+      "c06": [
+        "service/invoice_service.py:28",
+        "store/invoice_repo.py:30"
+      ],
+      "c07": [
+        "service/payment_service.py:40-43"
+      ],
+      "c08": [
+        "worker/outbox_worker.py:15-16"
+      ],
+      "c09": [
+        "service/order_service.py:28"
+      ],
+      "c10": [
+        "service/order_service.py:39"
+      ],
+      "c11": [
+        "api/orders.py:29",
+        "service/legacy_order.py:12"
+      ],
+      "c12": [
+        "store/order_repo.py:21"
+      ],
+      "c13": [
+        "service/order_service.py:12-14"
+      ],
+      "c14": [
+        "worker/webhook_retry.py:16"
+      ],
+      "c15": [
+        "store/invoice_repo.py:14"
+      ],
+      "c16": [
+        "service/order_service.py:38-39"
+      ],
+      "c17": [
+        "service/order_service.py:12-14"
+      ],
+      "c18": [
+        "service/payment_service.py:40-41"
+      ],
+      "c19": [
+        "worker/outbox_worker.py:15-16"
+      ],
+      "c20": [
+        "service/invoice_service.py:28",
+        "store/invoice_repo.py:30"
+      ]
+    }
+  },
+  "tool_calls": 17,
+  "wall_s": 39.1,
+  "prompt_tokens": 61855,
+  "eval_tokens": 1219,
+  "rounds": 18,
+  "done_reason": "stop",
+  "num_ctx": 65536,
+  "num_predict": 24576,
+  "thinking_chars": 0,
+  "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4-coding_31b-mtp_claim__claim.txt"
+}

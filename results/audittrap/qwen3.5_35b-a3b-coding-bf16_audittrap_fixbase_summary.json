@@ -1,0 +1,9 @@
+{
+  "model": "qwen3.5:35b-a3b-coding-bf16",
+  "tag": "qwen3.5_35b-a3b-coding-bf16_audittrap_fixbase",
+  "score": 20,
+  "max_score": 40,
+  "pass": 2,
+  "tasks": 4,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/qwen3.5_35b-a3b-coding-bf16_audittrap_fixbase_20260728_130804.json"
+}

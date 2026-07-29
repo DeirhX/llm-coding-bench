@@ -1,0 +1,9 @@
+{
+  "model": "gemma4-coding:26b-a4b",
+  "tag": "gemma4-coding_26b-a4b_repohard_np24576_rep2",
+  "score": 70,
+  "max_score": 80,
+  "pass": 7,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4-coding_26b-a4b_repohard_np24576_rep2_20260729_010003.json"
+}

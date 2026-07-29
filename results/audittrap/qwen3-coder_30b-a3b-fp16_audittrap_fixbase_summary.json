@@ -1,0 +1,9 @@
+{
+  "model": "qwen3-coder:30b-a3b-fp16",
+  "tag": "qwen3-coder_30b-a3b-fp16_audittrap_fixbase",
+  "score": 8,
+  "max_score": 40,
+  "pass": 0,
+  "tasks": 4,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/qwen3-coder_30b-a3b-fp16_audittrap_fixbase_20260728_131621.json"
+}
