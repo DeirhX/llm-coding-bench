@@ -1,0 +1,27 @@
+FROM gemma4:31b-it-bf16
+
+# gemma4:31b-it-bf16 ships temperature 1 (with top_p 0.95 and top_k 64). Every score
+# measured in this repo used temperature 0.1 sent explicitly by the bench, so the
+# 77/80 on repohard was never demonstrated at the sampler a client actually gets.
+# Pinning 0.1 here makes the measured configuration the default. The shipped
+# temperature is measured separately as its own arm rather than assumed to be worse.
+PARAMETER temperature 0.1
+PARAMETER top_p 0.95
+PARAMETER top_k 64
+PARAMETER repeat_penalty 1.1
+
+# This model never ran away: 519 output tokens per repohard task, 94 per round, no
+# truncation and no timeouts. The bound is insurance against Ollama's unbounded
+# default rather than a fix for observed behaviour, and it is far above anything this
+# model has ever needed. Matched to the 26B's value so the family behaves alike.
+PARAMETER num_predict 24576
+
+# Insurance only. Unlike the 26B, this model fabricated zero tool results across all
+# eight repohard tasks, so these should never fire. Kept so both models in the family
+# behave identically under a client that sends no options. See the 26B Modelfile for
+# how <|tool_response> was obtained: it is the marker Ollama's compiled gemma4 renderer
+# emits for a tool result, and therefore the one a native tool-calling client exposes.
+PARAMETER stop "<|tool_response>"
+PARAMETER stop "<arch_result>"
+PARAMETER stop "<tool_result>"
+PARAMETER stop "</tool_result>"

@@ -1,0 +1,4 @@
+# 131072 tokens. Same reasoning as the 31B variant: bounded, larger than benchmarked,
+# smaller than the model's 262144 default.
+FROM gemma4-coding:26b-a4b
+PARAMETER num_ctx 131072

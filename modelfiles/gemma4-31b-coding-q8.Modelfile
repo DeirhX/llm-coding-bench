@@ -1,0 +1,16 @@
+FROM gemma4:31b-it-q8_0
+
+# Same sampler and stops as gemma4-31b-coding.Modelfile so the only variable is the
+# weight precision. 8-bit is the midpoint the QAT result made interesting: 4-bit cost
+# 25 of 81 audittrap points and introduced tool-call loops the bf16 model has never
+# once shown, so the question is whether that is a cliff somewhere below q8 or a slope
+# that q8 is already partway down.
+PARAMETER temperature 0.1
+PARAMETER top_p 0.95
+PARAMETER top_k 64
+PARAMETER repeat_penalty 1.1
+PARAMETER num_predict 24576
+PARAMETER stop "<|tool_response>"
+PARAMETER stop "<arch_result>"
+PARAMETER stop "<tool_result>"
+PARAMETER stop "</tool_result>"

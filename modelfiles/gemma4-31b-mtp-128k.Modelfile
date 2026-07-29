@@ -1,0 +1,5 @@
+FROM gemma4-coding:31b-mtp
+
+# Matches gemma4-31b-mlx-128k and gemma4-31b-coding-128k so the three-way comparison at
+# large contexts differs only in draft model and runner, not in window size.
+PARAMETER num_ctx 131072

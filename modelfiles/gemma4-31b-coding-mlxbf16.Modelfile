@@ -1,0 +1,23 @@
+FROM gemma4:31b-mlx-bf16
+
+# The MLX arm that was supposed to isolate the runtime. gemma4:31b-mlx turned out to be
+# nvfp4 -- a 4-bit format -- so it changed precision and runtime at once and told us
+# nothing about either in isolation. This tag is the same weights as gemma4:31b-it-bf16
+# on a different backend, which is the only way to attribute anything to MLX.
+#
+# There is a specific reason to bother. Decode on the llama.cpp bf16 model sits at 88%
+# of a memory bus that cannot be exceeded if every weight is read once per token, so a
+# backend swap should be worth almost nothing. Yet the nvfp4 MLX model measured 178% of
+# that same ceiling, with the token count confirmed against wall clock. Either Ollama
+# misreports resident size for MLX or the runner is not doing one pass per token. If it
+# is the latter, this arm inherits it at full precision and the ceiling argument is
+# wrong.
+PARAMETER temperature 0.1
+PARAMETER top_p 0.95
+PARAMETER top_k 64
+PARAMETER repeat_penalty 1.1
+PARAMETER num_predict 24576
+PARAMETER stop "<|tool_response>"
+PARAMETER stop "<arch_result>"
+PARAMETER stop "<tool_result>"
+PARAMETER stop "</tool_result>"

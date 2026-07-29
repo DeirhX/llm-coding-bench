@@ -1,0 +1,20 @@
+FROM gemma4:31b-mlx
+
+# The one candidate that changes the runtime rather than the weights: Ollama carries an
+# MLX backend alongside llama.cpp. Decode is already at 88% of the memory bus on this
+# machine so there is little for any backend to win there, but prefill is compute-bound
+# and Apple claims the M5 neural accelerators quadruple prompt processing over M4. If
+# MLX reaches them and llama.cpp does not, that shows up in the cold-prefill column.
+#
+# Sampler kept identical to the llama.cpp variants. If the MLX runner rejects any of
+# these parameters the build fails loudly and the candidate is skipped rather than
+# quietly measured under different settings.
+PARAMETER temperature 0.1
+PARAMETER top_p 0.95
+PARAMETER top_k 64
+PARAMETER repeat_penalty 1.1
+PARAMETER num_predict 24576
+PARAMETER stop "<|tool_response>"
+PARAMETER stop "<arch_result>"
+PARAMETER stop "<tool_result>"
+PARAMETER stop "</tool_result>"

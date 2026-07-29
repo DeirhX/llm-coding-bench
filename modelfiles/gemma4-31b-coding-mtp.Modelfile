@@ -1,0 +1,14 @@
+FROM gemma4:31b-coding-mtp-bf16
+
+# Same sampler as the bf16 instruct model it is being compared against. Note this base
+# is coding-specialised as well as multi-token, so a score difference here has two
+# possible causes and the speed measurement is the only clean read.
+PARAMETER temperature 0.1
+PARAMETER top_p 0.95
+PARAMETER top_k 64
+PARAMETER repeat_penalty 1.1
+PARAMETER num_predict 24576
+PARAMETER stop "<|tool_response>"
+PARAMETER stop "<arch_result>"
+PARAMETER stop "<tool_result>"
+PARAMETER stop "</tool_result>"

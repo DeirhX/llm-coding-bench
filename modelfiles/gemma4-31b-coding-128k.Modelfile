@@ -1,0 +1,5 @@
+# 131072 tokens: half the model's declared 262144 maximum, double the benchmarked 65536.
+# A middle setting for large repositories that still bounds the KV cache explicitly.
+# Quality at this length is unmeasured here -- every score in this repo used 65536.
+FROM gemma4-coding:31b
+PARAMETER num_ctx 131072

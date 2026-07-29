@@ -1,0 +1,27 @@
+FROM /Users/deirh/models/qwopus/Qwopus3.6-35B-A3B-Coder-MTP-Q8_0.gguf
+
+# Anti-repetition variant. The stock sampling (copied from qwen3.6, which is what
+# Qwen recommends) leaves this finetune in a repetition attractor: on pyhard it
+# looped verbatim on 5 of 9 tasks and looped again on all 5 harness retries,
+# emitting zero output tokens each time. qwen3.6 itself never looped once under
+# identical settings, so this is specific to the finetune/quant.
+#
+# Two knobs differ from the stock Modelfile, and both are reachable only from here
+# because the bench layer sends nothing but temperature, num_ctx and num_predict:
+#
+#   presence_penalty 1.5 -- Qwen's own documented remedy for endless repetition in
+#                           quantized models. Stock value is 0, i.e. no pressure at
+#                           all against re-emitting a token already used.
+#   repeat_penalty 1.1   -- Ollama's built-in default, which stock Qwen sampling
+#                           disables by setting 1. Notably gemma4 ships no
+#                           PARAMETER lines, so it inherits 1.1 and never looped.
+#
+# Everything else is left at the stock values so the loop behaviour is the only
+# thing under test.
+PARAMETER temperature 0.6
+PARAMETER top_k 20
+PARAMETER top_p 0.95
+PARAMETER min_p 0
+PARAMETER repeat_penalty 1.1
+PARAMETER presence_penalty 1.5
+PARAMETER num_ctx 32768
