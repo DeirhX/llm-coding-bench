@@ -293,15 +293,25 @@ done
 # Measured at 33-60k prompts that is 40-70 seconds per switch, which reads as "the model is
 # slow" rather than "I have two sessions open". Warn rather than refuse: a second session is
 # sometimes worth the price.
-# Which process carries the settings varies: launched through this script they sit on the
-# `claude --model ... --settings` wrapper, but other launch paths put them on the app binary
-# instead, and the wrapper's children inherit them through the environment where ps cannot
-# see them. So key off the settings blob rather than any one binary path, and exclude both
-# the daemon's helpers and whatever inspection command happens to quote these strings.
-OTHER_SESSIONS=$(ps -eo pid,command 2>/dev/null \
-  | awk '/ANTHROPIC_BASE_URL/ \
+# Counting processes that quote the settings blob does not work. One session is several
+# processes -- a thin `claude` client, an app wrapper and a versioned runtime -- and only
+# some of them carry the blob on their command line; the rest inherit the configuration
+# through the environment, where ps cannot see it. Counting matches therefore mixes clients
+# with runtimes and lands on a number that resembles a session count by luck: two real
+# sessions were once counted as two, from one runtime plus one unrelated client.
+# Every process belonging to a session does carry --session-id, so count the distinct ids
+# instead. Undercounting is the safe direction: a missed warning costs a prompt reprocess,
+# a false one sends you hunting for a session that does not exist.
+OTHER_SESSIONS=$(ps -eo command 2>/dev/null \
+  | awk '/--session-id/ \
          && !/bg-spare|bg-pty-host|claude daemon/ \
-         && !/awk|grep|rg / { n++ } END { print n+0 }')
+         && !/awk|grep|rg / {
+           for (i = 1; i <= NF; i++)
+             if ($i == "--session-id" && (i + 1) <= NF && !($(i + 1) in seen)) {
+               seen[$(i + 1)] = 1
+               n++
+             }
+         } END { print n+0 }')
 if (( OTHER_SESSIONS > 0 )); then
   echo
   echo "  warning: $OTHER_SESSIONS other Claude Code session(s) are already using this"
