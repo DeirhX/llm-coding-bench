@@ -1,0 +1,8 @@
+FROM gemma4-coding:31b-mtp
+
+# A middle window for long sessions on a 128 GB machine. Note what this does not do: the
+# MLX runner does not enforce it. A prompt of 80,802 tokens went to the 64k variant on
+# 2026-07-29 and all 80,774 unmatched tokens were prefilled, no truncation and no error, so
+# this number will not cap a conversation or bound the KV cache. Memory tracks the tokens
+# actually in play, measured at ~0.33 MB each on this checkpoint.
+PARAMETER num_ctx 98304

@@ -1,0 +1,5 @@
+FROM gemma4-coding:31b-mlxbf16
+
+# 98304 tokens, matching gemma4-31b-mtp-96k. Advisory only on the MLX runner, which was
+# observed prefilling 80,774 tokens on a 65536-pinned variant without truncating.
+PARAMETER num_ctx 98304

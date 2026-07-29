@@ -94,7 +94,7 @@ YOLO=0
 
 usage() {
   cat <<'USAGE'
-Usage: claude-gemma [31b|26b] [fast|accurate] [64k|128k|max] [mlx] [options] [-- claude args]
+Usage: claude-gemma [31b|26b] [fast|accurate] [64k|96k|128k|max] [mlx] [options] [-- claude args]
 
   31b            gemma4 31B, dense-attention. Stable and disciplined. (default)
   26b            gemma4 26B-A4B, sparse. Faster, but solves only half the repohard suite
@@ -106,8 +106,15 @@ Usage: claude-gemma [31b|26b] [fast|accurate] [64k|128k|max] [mlx] [options] [--
   accurate       the plain dense model: best measured quality, accepts images, 8.1 tok/s.
 
   64k            65536 context, the size most scores were measured at. (default)
+  96k            98304 context. A middle setting; see the note on enforcement below.
   128k           131072 context for large repositories. Quality there is unmeasured, and
                  the draft advantage is down to ~1.9x by 100k tokens.
+
+                 On 'fast' and 'mlx' these numbers are advisory: a prompt of 80,802 tokens
+                 went to the 64k variant and all 80,774 unmatched tokens were prefilled,
+                 with no truncation and no error. The window will not cap a conversation
+                 or bound memory, which grows with the tokens in play at ~0.33 MB each.
+                 Only 'accurate' enforces its window, and it truncates loudly.
   max            the model's full 262144. Largest window, least evidence behind it.
 
   mlx            Ollama's MLX runner instead of llama.cpp. Same weights as 'fast', within
@@ -140,6 +147,7 @@ while [[ $# -gt 0 ]]; do
     fast|draft|mtp) WEIGHTS="fast"; shift ;;
     accurate|dense|quality) WEIGHTS="accurate"; shift ;;
     64k|64K) CTX="64k"; shift ;;
+    96k|96K) CTX="96k"; shift ;;
     128k|128K) CTX="128k"; shift ;;
     max|MAX|native) CTX="max"; shift ;;
     mlx|MLX) RUNTIME="mlx"; shift ;;
@@ -276,10 +284,10 @@ fi
 
 # Two of these do not fit at once. Evict the others before loading this one, so the
 # shortfall surfaces here rather than as a stalled first request.
-for other in gemma4-31b-coding-64k gemma4-31b-coding-128k \
-             gemma4-31b-mtp-64k gemma4-31b-mtp-128k \
-             gemma4-31b-mlx-64k gemma4-31b-mlx-128k \
-             gemma4-26b-coding-64k gemma4-26b-coding-128k \
+for other in gemma4-31b-coding-64k gemma4-31b-coding-96k gemma4-31b-coding-128k \
+             gemma4-31b-mtp-64k gemma4-31b-mtp-96k gemma4-31b-mtp-128k \
+             gemma4-31b-mlx-64k gemma4-31b-mlx-96k gemma4-31b-mlx-128k \
+             gemma4-26b-coding-64k gemma4-26b-coding-96k gemma4-26b-coding-128k \
              gemma4-coding:31b gemma4-coding:31b-mtp gemma4-coding:31b-mlxbf16 \
              gemma4-coding:31b-mlx gemma4-coding:31b-q8 gemma4-coding:31b-qat \
              gemma4-coding:26b-a4b \
