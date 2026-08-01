@@ -18,3 +18,16 @@ PYTHON_EOF
 The single-quoted delimiter (`'PYTHON_EOF'`) prevents all shell expansion
 and preserves whitespace exactly. Never use `edit` for multi-line Python
 insertions or replacements.
+
+## Before touching a live model session, read `LOCAL_AGENT_OPS.md`
+
+It records what this setup costs and how it misleads you, all of it measured here and none of it
+documented upstream. The three that will bite fastest:
+
+- **Only one 31B runner fits, and `-64k`/`-96k`/`-128k` are different models to Ollama.** Naming a
+  different variant than a live session evicts its prefix cache and costs both sides ~4 minutes
+  per turn. Never start a probe against a variant the user is not already running.
+- **A reload is ~6 s of weights and up to 5 minutes of lost cache.** Judge turn cost from
+  `cache hit total=/matched=` in `~/.ollama/logs/server.log`, not from decode speed.
+- **Requests are logged on completion, and no client identity is ever logged.** Causation must be
+  established before the incident, by interposing the proxy — not after.
