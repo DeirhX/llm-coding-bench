@@ -1,0 +1,128 @@
+[
+  {
+    "task": "replace_long_body",
+    "verdict": "completed",
+    "final_ok": true,
+    "detail": "long body replaced by a single delegating call",
+    "rounds": 3,
+    "tokens": 2932,
+    "wall_s": 81.1,
+    "reads": 1,
+    "edits": 1,
+    "edit_failures": 0,
+    "first_attempt_ok": true,
+    "faults": [],
+    "old_lines": [
+      82
+    ],
+    "max_old_lines": 82,
+    "arm": "control",
+    "repeat": 1,
+    "model": "gemma4-31b-mtp-64k"
+  },
+  {
+    "task": "replace_long_body",
+    "verdict": "completed",
+    "final_ok": true,
+    "detail": "long body replaced by a single delegating call",
+    "rounds": 3,
+    "tokens": 2372,
+    "wall_s": 68.6,
+    "reads": 1,
+    "edits": 1,
+    "edit_failures": 0,
+    "first_attempt_ok": true,
+    "faults": [],
+    "old_lines": [
+      82
+    ],
+    "max_old_lines": 82,
+    "arm": "control",
+    "repeat": 2,
+    "model": "gemma4-31b-mtp-64k"
+  },
+  {
+    "task": "replace_long_body",
+    "verdict": "completed",
+    "final_ok": true,
+    "detail": "long body replaced by a single delegating call",
+    "rounds": 3,
+    "tokens": 5121,
+    "wall_s": 143.0,
+    "reads": 1,
+    "edits": 1,
+    "edit_failures": 0,
+    "first_attempt_ok": true,
+    "faults": [],
+    "old_lines": [
+      82
+    ],
+    "max_old_lines": 82,
+    "arm": "control",
+    "repeat": 3,
+    "model": "gemma4-31b-mtp-64k"
+  },
+  {
+    "task": "replace_long_body",
+    "verdict": "completed",
+    "final_ok": true,
+    "detail": "long body replaced by a single delegating call",
+    "rounds": 4,
+    "tokens": 3468,
+    "wall_s": 127.1,
+    "reads": 2,
+    "edits": 1,
+    "edit_failures": 0,
+    "first_attempt_ok": true,
+    "faults": [],
+    "old_lines": [
+      82
+    ],
+    "max_old_lines": 82,
+    "arm": "rule",
+    "repeat": 1,
+    "model": "gemma4-31b-mtp-64k"
+  },
+  {
+    "task": "replace_long_body",
+    "verdict": "completed",
+    "final_ok": true,
+    "detail": "long body replaced by a single delegating call",
+    "rounds": 3,
+    "tokens": 2892,
+    "wall_s": 91.7,
+    "reads": 1,
+    "edits": 1,
+    "edit_failures": 0,
+    "first_attempt_ok": true,
+    "faults": [],
+    "old_lines": [
+      82
+    ],
+    "max_old_lines": 82,
+    "arm": "rule",
+    "repeat": 2,
+    "model": "gemma4-31b-mtp-64k"
+  },
+  {
+    "task": "replace_long_body",
+    "verdict": "completed",
+    "final_ok": true,
+    "detail": "long body replaced by a single delegating call",
+    "rounds": 4,
+    "tokens": 4527,
+    "wall_s": 146.8,
+    "reads": 2,
+    "edits": 1,
+    "edit_failures": 0,
+    "first_attempt_ok": true,
+    "faults": [],
+    "old_lines": [
+      81
+    ],
+    "max_old_lines": 81,
+    "arm": "rule",
+    "repeat": 3,
+    "model": "gemma4-31b-mtp-64k"
+  }
+]

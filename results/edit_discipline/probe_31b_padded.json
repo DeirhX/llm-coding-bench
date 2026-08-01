@@ -1,0 +1,47 @@
+[
+  {
+    "task": "unify_builders",
+    "pad_tokens": 8000,
+    "verdict": "completed",
+    "final_ok": true,
+    "detail": "builders unified, main updated, rest intact",
+    "rounds": 5,
+    "tokens": 2412,
+    "wall_s": 111.0,
+    "reads": 2,
+    "edits": 2,
+    "edit_failures": 0,
+    "first_attempt_ok": true,
+    "faults": [],
+    "old_lines": [
+      31,
+      5
+    ],
+    "max_old_lines": 31,
+    "arm": "control",
+    "repeat": 1,
+    "model": "gemma4-31b-mtp-64k"
+  },
+  {
+    "task": "replace_long_body",
+    "pad_tokens": 8000,
+    "verdict": "completed",
+    "final_ok": true,
+    "detail": "long body replaced by a single delegating call",
+    "rounds": 3,
+    "tokens": 2027,
+    "wall_s": 122.3,
+    "reads": 1,
+    "edits": 1,
+    "edit_failures": 0,
+    "first_attempt_ok": true,
+    "faults": [],
+    "old_lines": [
+      81
+    ],
+    "max_old_lines": 81,
+    "arm": "control",
+    "repeat": 1,
+    "model": "gemma4-31b-mtp-64k"
+  }
+]
