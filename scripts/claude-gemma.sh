@@ -76,9 +76,15 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# $0 is however this was invoked, and dirname does not follow symlinks: through the
+# claude-gemma symlink in ~/.local/bin this resolved to /Users/deirh/.local, both
+# prompt files failed their -f test, and a whole session ran with no skepticism
+# prompt while the banner reported "prompt: none" as though that were the request.
+# :A resolves the link first, so the two :h steps land in the repository either way.
+ROOT="${0:A:h:h}"
 OLLAMA_URL="${OLLAMA_HOST_URL:-http://127.0.0.1:11434}"
 SKEPTIC_PROMPT="$ROOT/prompts/skeptic_min.md"
+EDIT_PROMPT="$ROOT/prompts/edit_discipline.md"
 # Absorbs Claude Code's periodic background call so it does not evict the conversation's
 # prefix cache. 1.0 GB resident alongside the 78 GB model, and loading it was verified not
 # to evict that model. Must not be a thinking model: qwen3:1.7b was tried first and spent
@@ -90,6 +96,7 @@ CTX="64k"
 WEIGHTS="fast"
 RUNTIME="cpp"
 USE_PROMPT="auto"
+USE_EDIT_RULE="auto"
 YOLO=0
 
 usage() {
@@ -117,11 +124,22 @@ Usage: claude-gemma [31b|26b] [fast|accurate] [64k|96k|128k|max] [mlx] [options]
                  Only 'accurate' enforces its window, and it truncates loudly.
   max            the model's full 262144. Largest window, least evidence behind it.
 
+                 A window applies to conversations started after this launch. Resuming
+                 an earlier conversation keeps the model it was created with, whatever
+                 is asked for here: a session launched at 96k ran all 127 of its turns
+                 against the 128k model, and Ollama loaded those weights to serve them.
+                 Start a new conversation for a change of window to take effect.
+
   mlx            Ollama's MLX runner instead of llama.cpp. Same weights as 'fast', within
                  5% on speed, and far less exercised. Kept for comparison, not advised.
 
   --prompt       Force the skepticism system prompt on (default: on for 31b only).
   --no-prompt    Force it off.
+  --edit-rule    Force the edit-discipline rule on. It follows --prompt by default.
+                 Addresses a measured fault: 4 of 31 edits in one session failed,
+                 three of them by quoting 33 to 194 lines of a file at an
+                 indentation guessed one level out. Its own effect is unmeasured.
+  --no-edit-rule Force it off.
   --yolo         Bypass every permission check for the session. Edits, writes and
                  shell commands run unattended, in the current directory, with no
                  confirmation. See the warning it prints before you use it.
@@ -135,9 +153,41 @@ Examples:
   claude-gemma accurate               31B dense: best quality and image support, 3x slower
   claude-gemma 128k                   31B draft at 131072 for a large repository
   claude-gemma 26b --no-prompt        26B, no system prompt
+  claude-gemma --all-tools            keep sub-agents, tasks and cron (+13k tokens/turn)
+  claude-gemma --no-guard             allow unbounded reads and overrunning the window
   claude-gemma -- --continue          resume the previous session
 USAGE
 }
+
+# Every request carries every tool's schema, so tools that cannot be used here are a
+# per-turn tax. Measured at 13,276 tokens for the 16 dropped below, against 4,733 for
+# everything that remains including the system prompt. Those counts come from a 1B model
+# of the same family, since no tokenizer endpoint exists for the 31B: the live session's
+# own client/server gap implies the true saving is nearer 9k. The ranking of tools by cost
+# is unaffected either way, and Workflow alone is a third of it.
+# Re-measured 30 Jul by capturing a real *interactive* request through a pty, because a `claude -p`
+# capture ships a different tool set (8 tools, no plan mode) and understated the framing at 6,418.
+# Interactive with the 16 tools below withheld came to 9,093 tokens; withholding the five added on
+# the second line brings it to 4,477, so half the remaining boilerplate was in tools this workload
+# never calls: AskUserQuestion 1,122, EnterPlanMode 944, ExitPlanMode 550, NotebookEdit 435, Skill
+# 426 -- and dropping Skill also removes the 1,094-token skills catalogue, which the client injects
+# as a separate system message only when the tool is present. What remains is Bash, Read, Edit,
+# Write, WebSearch, WebFetch at 2,021 tokens, plus 2,014 of Claude Code's own prose and 329 of ours.
+# The cost is real if you want plan mode or structured questions back: --all-tools restores them.
+# The context guard is a PreToolUse hook, and it exists because the prompt version of the same rule
+# demonstrably does not hold: with the read discipline in force, one session still read
+# benches/pyhard/bench.py twice at ~11,940 tokens each, and 82% of that conversation was tool
+# results. The hook refuses an unbounded read of a file over 500 lines, refuses a re-read of a file
+# unchanged since it was last read, and past 80% of the window refuses anything bulky while leaving
+# Write and Edit available so findings can be recorded before stopping. Verified against a fake
+# endpoint: a deny is honoured under --dangerously-skip-permissions and its text reaches the model
+# as the tool result. Lift it for a session with `touch /tmp/cc-guard-off`, or launch --no-guard.
+GUARD=1
+LEAN_TOOLS=1
+UNUSED_TOOLS="Workflow,Agent,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskStop"
+UNUSED_TOOLS="$UNUSED_TOOLS,TaskOutput,ReportFindings,SendMessage,CronCreate"
+UNUSED_TOOLS="$UNUSED_TOOLS,CronList,CronDelete,ScheduleWakeup,EnterWorktree,ExitWorktree"
+UNUSED_TOOLS="$UNUSED_TOOLS,AskUserQuestion,EnterPlanMode,ExitPlanMode,Skill,NotebookEdit"
 
 CLAUDE_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -154,7 +204,13 @@ while [[ $# -gt 0 ]]; do
     cpp|CPP|llamacpp) RUNTIME="cpp"; shift ;;
     --prompt) USE_PROMPT="on"; shift ;;
     --no-prompt) USE_PROMPT="off"; shift ;;
+    --edit-rule) USE_EDIT_RULE="on"; shift ;;
+    --no-edit-rule) USE_EDIT_RULE="off"; shift ;;
     --yolo|-y) YOLO=1; shift ;;
+    --lean-tools) LEAN_TOOLS=1; shift ;;
+    --all-tools) LEAN_TOOLS=0; shift ;;
+    --guard) GUARD=1; shift ;;
+    --no-guard) GUARD=0; shift ;;
     --list)
       echo "Installed Gemma variants:"
       ollama list 2>/dev/null | awk 'NR==1 || /^gemma4-(31b|26b)-(coding|mtp|mlx)-|^gemma4-coding:/ { print "  " $0 }'
@@ -210,21 +266,58 @@ esac
 if [[ "$USE_PROMPT" == "auto" ]]; then
   [[ "$SIZE" == "31b" ]] && USE_PROMPT="on" || USE_PROMPT="off"
 fi
+# Follows the skepticism prompt rather than defaulting on by itself. The 26B loses fix
+# points to every prompt measured so far, and this rule has no measurement of its own
+# yet, so it does not get to be the first thing switched on there by default.
+if [[ "$USE_EDIT_RULE" == "auto" ]]; then
+  USE_EDIT_RULE="$USE_PROMPT"
+fi
 
-# Gemma emits LaTeX for arithmetic, a habit from its Gemini-family training, and a terminal
-# renders none of it: "$55 \times \text{result size}$" arrives on screen exactly like that.
+# A prompt file that cannot be found used to be indistinguishable from --no-prompt.
+# Refuse rather than launch disarmed: the skepticism prompt is the difference between
+# 0 and 20 out of 20 on false-bug traps for this model.
+if [[ "$USE_PROMPT" == "on" && ! -f "$SKEPTIC_PROMPT" ]]; then
+  echo "error: skepticism prompt not found at $SKEPTIC_PROMPT" >&2
+  echo "       pass --no-prompt to run without it deliberately." >&2
+  exit 1
+fi
+if [[ "$USE_EDIT_RULE" == "on" && ! -f "$EDIT_PROMPT" ]]; then
+  echo "error: edit-discipline prompt not found at $EDIT_PROMPT" >&2
+  echo "       pass --no-edit-rule to run without it deliberately." >&2
+  exit 1
+fi
+
+# Gemma emits LaTeX, a habit from its Gemini-family training, and a terminal renders none
+# of it: "$55 \times \text{result size}$" arrives on screen exactly like that. An earlier
+# version of this rule said "arithmetic, formulas and units", and the model complied with
+# it exactly, then wrote "the task $\rightarrow$ id rename" in prose, because an arrow is a
+# symbol and not a formula. The scope was the defect, so the rule now covers any such
+# markup wherever it appears.
 # Claude Code refuses --append-system-prompt together with --append-system-prompt-file, so
 # the two are composed into a scratch file per launch. skeptic_min.md therefore stays
 # byte-identical to the file the 20/20 trap result was measured against. Note the composed
-# prompt is 28 words longer than anything measured, and on the 26B every added word has so
-# far cost fix points.
-FORMAT_RULE='Write arithmetic, formulas and units as plain text. Never use LaTeX, MathJax, or dollar-delimited math. Write "55 * result size", not "$55 \times \text{result size}$".'
+# prompt is 36 words longer than the file the trap result was measured against, or 179 with
+# the edit rule on, and on the 26B every added word has so far cost fix points.
+FORMAT_RULE='Write in plain text that a terminal can display, including symbols in prose: no LaTeX, MathJax or dollar-delimited markup anywhere. Write "task -> id" and "55 * result size", never "$\rightarrow$" or "$55 \times \text{result size}$".'
 COMPOSED_PROMPT="${TMPDIR:-/tmp}/claude-gemma-system-prompt.md"
 
 PROMPT_ARGS=()
+typeset -a PROMPT_PARTS
 if [[ "$USE_PROMPT" == "on" && -f "$SKEPTIC_PROMPT" ]]; then
   { cat "$SKEPTIC_PROMPT"; printf '\n%s\n' "$FORMAT_RULE"; } > "$COMPOSED_PROMPT"
+  PROMPT_PARTS=("$(basename "$SKEPTIC_PROMPT")" "plain-text formatting rule")
   PROMPT_ARGS=(--append-system-prompt-file "$COMPOSED_PROMPT")
+fi
+# Appended after the skepticism prompt when both are on, and able to stand alone when
+# only it is wanted, which is what an arm that isolates it needs.
+if [[ "$USE_EDIT_RULE" == "on" && -f "$EDIT_PROMPT" ]]; then
+  if (( ${#PROMPT_ARGS} )); then
+    { printf '\n'; cat "$EDIT_PROMPT"; } >> "$COMPOSED_PROMPT"
+  else
+    cat "$EDIT_PROMPT" > "$COMPOSED_PROMPT"
+    PROMPT_ARGS=(--append-system-prompt-file "$COMPOSED_PROMPT")
+  fi
+  PROMPT_PARTS+=("$(basename "$EDIT_PROMPT")")
 fi
 
 # Fall back to the main model rather than failing, so a missing small model costs cache
@@ -250,13 +343,75 @@ else
 fi
 [[ "$RUNTIME" == "mlx" ]] && echo "runtime: MLX (within 5% of llama.cpp; kept for comparison)"
 if (( ${#PROMPT_ARGS} )); then
-  echo "prompt: $(basename "$SKEPTIC_PROMPT") + plain-text math rule"
+  echo "prompt: ${(j: + :)PROMPT_PARTS}"
 else
-  echo "prompt: none (raw model behaviour, including LaTeX arithmetic)"
+  echo "prompt: none (raw model behaviour, including LaTeX markup)"
 fi
 echo "small:  $SMALL_NOTE"
-echo "window: $CTX_TOKENS tokens, declared to Claude Code so it compacts in time"
+# What the client counts and what the server renders are different numbers. Measured on
+# a live session: the client called it 99,005 input tokens for the turn that Ollama
+# rendered as 111,186. The 12,181 gap is tool schemas, system prompt and template, none
+# of which the client counts -- so declaring the true window guarantees the server
+# overflows first, and it did, by 13%, silently. On the MLX runner that shows up as a KV
+# cache growing past its pinned size (62 GB resident becoming 82) and the machine paging,
+# not as an error. The reserve is larger than the measurement because MCP tool schemas vary
+# per session.
+#
+# This reserve does NOT make the client compact earlier: nothing here compacts by itself,
+# for the reasons set out below. What it buys is an honest denominator, so the percentage in
+# the status line reaches 100 at about the point the rendered prompt reaches the real window,
+# and a human watching that number acts before the overflow rather than after it.
+# The reserve must exceed the framing, or declaring a window is worse than useless: it hands the
+# client a ceiling whose own arithmetic still overflows the runner. Measured framing is 4,733
+# tokens lean and 18,009 with every tool, so the old full-tools reserve of 16,384 left the client
+# free to render 99,929 against a 98,304 window -- 1,625 over, which is exactly the overflow that
+# costs 2-5x on decode. Each figure below is the measurement plus roughly 3k of slack, because MCP
+# tool schemas vary per session and the cost of reserving too much is one earlier compaction.
+if (( LEAN_TOOLS )); then
+  CTX_RESERVE=8192
+else
+  CTX_RESERVE=20480
+fi
+CTX_DECLARED=$(( CTX_TOKENS > CTX_RESERVE * 2 ? CTX_TOKENS - CTX_RESERVE : CTX_TOKENS ))
+echo "window: $CTX_TOKENS tokens; Claude Code told $CTX_DECLARED, leaving room for the tools"
+echo "        and framing it never counts, so the status-line percentage is honest"
+if (( LEAN_TOOLS )); then
+  echo "tools:  6 sent, 21 withheld (sub-agents, tasks, cron, worktrees, plan mode,"
+  echo "        skills, notebooks, structured questions). Framing is 4,477 tokens a turn"
+  echo "        instead of 9,093, measured on a real interactive request. --all-tools"
+  echo "        restores plan mode and the rest."
+else
+  echo "tools:  everything sent, costing 16,168 tokens of every request"
+fi
+if (( GUARD )); then
+  echo "guard:  unbounded reads over 500 lines are refused, so are re-reads of files that have"
+  echo "        not changed, and past $(( CTX_TOKENS * ${CLAUDE_GEMMA_STOP_PCT:-80} / 100 )) tokens (${CLAUDE_GEMMA_STOP_PCT:-80}%) anything bulky is refused with"
+  echo "        an instruction to record findings and stop. touch /tmp/cc-guard-off to lift."
+else
+  echo "guard:  off. Unbounded reads and window overruns are permitted; a single task can"
+  echo "        fill the window, and nothing here compacts by itself."
+fi
+echo "note:   the model and window above apply to new conversations only -- resuming one"
+echo "        keeps whatever it was created with, whatever this banner says"
 echo "limits: ${CLAUDE_GEMMA_MAX_OUTPUT:-8192} output tokens, $(( ${CLAUDE_GEMMA_TIMEOUT_MS:-1800000} / 60000 )) min request timeout"
+
+# Compaction never happens by itself on this setup, and the declared window above does not
+# change that; it only makes the percentage in the status line honest. Two independent paths
+# exist in the client and both are closed here. The threshold path needs Je("tengu_sepia_moth")
+# to be true, a remote feature gate defaulting to false that is never fetched, because gate
+# fetching needs an Anthropic credential this machine does not have -- verified by removing
+# CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC and finding cachedGrowthBookFeatures still absent.
+# The reactive path fires only when the API reports "prompt is too long", which Ollama never
+# does: it grows the KV cache instead. Both compactions in this project's history were manual,
+# at 109,754 and 116,875 tokens, and the second cost 311s of which 244s was generation at
+# 4.4 tok/s. Compacting near 75% costs a fraction of that.
+echo "compact: manual only. Auto-compaction cannot work here (no account, so the feature"
+echo "         gate stays false; and Ollama never reports an oversized prompt). The status"
+echo "         line shows the count -- /compact when it asks at 60%, which is where the"
+echo "         cost stops being 187s and starts being 311-666s. Red at 75% is late."
+echo "thinking: summaries on (showThinkingSummaries). ctrl+o expands the transcript;"
+echo "          Option+T (macOS) / Alt+T toggles thinking. Prefill is silent in the UI —"
+echo "          python3 .cursor/skills/ollama-watch/scripts/state.py while you wait."
 
 # The specific reason to hesitate here, beyond the obvious one about unattended shell
 # commands: the property that makes this model safe to accept edits from is unverified on
@@ -267,6 +422,9 @@ echo "limits: ${CLAUDE_GEMMA_MAX_OUTPUT:-8192} output tokens, $(( ${CLAUDE_GEMMA
 # of its own. Nothing has confirmed 63 words still bind in that position. Permission
 # prompts are currently the only thing standing between an unverified disposition and your
 # working tree, and --yolo removes them.
+TOOL_ARGS=()
+(( LEAN_TOOLS )) && TOOL_ARGS=(--disallowed-tools "$UNUSED_TOOLS")
+
 YOLO_ARGS=()
 if (( YOLO )); then
   YOLO_ARGS=(--dangerously-skip-permissions)
@@ -326,7 +484,7 @@ done
 # Every process belonging to a session does carry --session-id, so count the distinct ids
 # instead. Undercounting is the safe direction: a missed warning costs a prompt reprocess,
 # a false one sends you hunting for a session that does not exist.
-OTHER_SESSIONS=$(ps -eo command 2>/dev/null \
+OTHER_SESSIONS=$(ps -Eww -o command 2>/dev/null \
   | awk '/--session-id/ \
          && !/bg-spare|bg-pty-host|claude daemon/ \
          && !/awk|grep|rg / {
@@ -341,6 +499,56 @@ if (( OTHER_SESSIONS > 0 )); then
   echo "  warning: $OTHER_SESSIONS other Claude Code session(s) are already using this"
   echo "           endpoint. They share one prefix-cache slot, so each switch between"
   echo "           them costs a full prompt reprocess. Close them for full speed."
+fi
+
+# A daemon outlives the session that spawned it, and the next session attaches to whichever one
+# is already running rather than starting its own. It therefore keeps the ANTHROPIC_* values it
+# was born with, and exporting them here cannot reach it, because it is not our child.
+#
+# Measured on 2026-07-30: a daemon started eighteen hours earlier under 128k pulled in 62 GB of
+# the 128k model for a session configured for 96k and pinned it for the whole keep-alive, while
+# the 96k model the session actually named was never resident at all. Every turn therefore paid
+# a cold load, and the reduction to 96k that the session was launched for never took effect.
+# The bg-spare workers were worse still: theirs named a Qwen model from two configurations back.
+#
+# macOS hides the environment of signed system binaries but not of a user-installed node build,
+# which is what claude is, so ps can read this. Should that ever change, the extraction returns
+# nothing and the helper is reported as unreadable rather than killed on a guess.
+typeset -a STALE_HELPERS OPAQUE_HELPERS
+for pid in ${(f)"$(pgrep -f 'claude (daemon|bg-spare|bg-pty-host)' 2>/dev/null)"}; do
+  [[ -z "$pid" ]] && continue
+  helper_model=$(ps -Ewwp "$pid" 2>/dev/null | tr ' ' '\n' \
+    | awk -F= '/^ANTHROPIC_(DEFAULT_)?MODEL=/ { print $2; exit }')
+  if [[ -z "$helper_model" ]]; then
+    OPAQUE_HELPERS+=("$pid")
+  elif [[ "$helper_model" != "$MODEL" ]]; then
+    STALE_HELPERS+=("$pid:$helper_model")
+  fi
+done
+
+if (( ${#OPAQUE_HELPERS} )); then
+  echo
+  echo "  note: could not read the configuration of ${#OPAQUE_HELPERS} Claude Code helper(s)"
+  echo "        (pid ${OPAQUE_HELPERS}). If the wrong model keeps loading, kill them by hand."
+fi
+
+if (( ${#STALE_HELPERS} )); then
+  echo
+  echo "  Claude Code helpers from an earlier launch are configured for another model:"
+  for entry in $STALE_HELPERS; do
+    echo "    pid ${entry%%:*} -> ${entry#*:}"
+  done
+  if (( OTHER_SESSIONS > 0 )); then
+    echo "  refusing to launch: killing them would take down $OTHER_SESSIONS live session(s),"
+    echo "  and leaving them means this session's model may never become resident."
+    echo "  Close those sessions, then run this again."
+    exit 1
+  fi
+  echo "  nothing live depends on them, so clearing them now; the daemon that replaces them"
+  echo "  inherits this launch's settings."
+  for entry in $STALE_HELPERS; do kill -TERM "${entry%%:*}" 2>/dev/null || true; done
+  sleep 2
+  for entry in $STALE_HELPERS; do kill -KILL "${entry%%:*}" 2>/dev/null || true; done
 fi
 
 echo "loading (a couple of minutes for a cold 60 GB model)..."
@@ -389,8 +597,35 @@ if [[ "$KEEP_MIN" =~ ^-?[0-9]+$ ]] && (( KEEP_MIN >= 0 )) && (( KEEP_MIN < 60 ))
   echo "               scripts/ollama-keepalive.sh 8h"
 fi
 
+# The guard is registered only for the tools that can add bulk. Write and Edit are deliberately not
+# matched: the hook always allows them, and matching them would spawn a process per edit for nothing.
+# A missing script is a hard error rather than a silent downgrade, for the same reason the prompt
+# files are: this launcher once ran for days claiming a prompt it was not sending.
+GUARD_JSON=""
+if (( GUARD )); then
+  GUARD_SCRIPT="$ROOT/scripts/cc-context-guard.py"
+  if [[ ! -x "$GUARD_SCRIPT" ]]; then
+    echo "error: context guard missing or not executable: $GUARD_SCRIPT" >&2
+    echo "       launch with --no-guard to proceed without it" >&2
+    exit 1
+  fi
+  GUARD_CMD="$GUARD_SCRIPT --window $CTX_TOKENS --framing $CTX_RESERVE"
+  GUARD_CMD="$GUARD_CMD --stop-pct ${CLAUDE_GEMMA_STOP_PCT:-80}"
+  GUARD_JSON="  \"hooks\": { \"PreToolUse\": [ { \"matcher\": \"Read|Bash|WebFetch|WebSearch\","
+  GUARD_JSON="$GUARD_JSON \"hooks\": [ { \"type\": \"command\", \"command\": \"$GUARD_CMD\" } ] } ] },"
+fi
+
 # enforceAvailableModels is set in the user's global settings and would reject a model
 # that is not on its list. Rather than editing that file, this session supplies its own.
+#
+# showThinkingSummaries costs nothing and is worth having on. The reasoning is generated and echoed
+# back regardless of whether it is displayed -- 33 blocks and 5,828 tokens in one measured session,
+# paid on every subsequent turn -- so hiding it buys no context back, it only hides what you are
+# already being charged for. Without this key the client requests no display mode and renders the
+# blocks collapsed; with it, requests carry display "summarized" (verified in a pty capture) and the
+# text appears in the conversation. Ollama ignores the field and returns full reasoning either way.
+# ctrl+o shows the same content in the transcript view without any setting at all, and alt+t is the
+# separate toggle that turns thinking off entirely.
 SESSION_SETTINGS=$(cat <<JSON
 {
   "env": {
@@ -405,13 +640,16 @@ SESSION_SETTINGS=$(cat <<JSON
     "ANTHROPIC_SMALL_FAST_MODEL": "$SMALL_SLOT",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
-    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "$CTX_TOKENS",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "$CTX_DECLARED",
     "API_TIMEOUT_MS": "${CLAUDE_GEMMA_TIMEOUT_MS:-1800000}",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "${CLAUDE_GEMMA_MAX_OUTPUT:-8192}"
   },
+$GUARD_JSON
   "model": "$MODEL",
   "availableModels": ["$MODEL", "$SMALL_SLOT"],
-  "enforceAvailableModels": false
+  "enforceAvailableModels": false,
+  "showThinkingSummaries": true,
+  "statusLine": { "type": "command", "command": "$ROOT/scripts/cc-statusline.py" }
 }
 JSON
 )
@@ -435,7 +673,7 @@ export ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="$SMALL_SLOT"
 export ANTHROPIC_SMALL_FAST_MODEL="$SMALL_SLOT"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
-export CLAUDE_CODE_MAX_CONTEXT_TOKENS="$CTX_TOKENS"
+export CLAUDE_CODE_MAX_CONTEXT_TOKENS="$CTX_DECLARED"
 
 # Claude Code abandons a request after 5 minutes when API_TIMEOUT_MS is unset, then resends
 # it. Against a cloud model that is a generous ceiling; here it is below the median turn.
@@ -462,4 +700,4 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="${CLAUDE_GEMMA_MAX_OUTPUT:-8192}"
 export CLAUDE_CODE_ENABLE_AWAY_SUMMARY="0"
 
 exec claude --model "$MODEL" --settings "$SESSION_SETTINGS" \
-  "${PROMPT_ARGS[@]}" "${YOLO_ARGS[@]}" "${CLAUDE_ARGS[@]}"
+  "${TOOL_ARGS[@]}" "${PROMPT_ARGS[@]}" "${YOLO_ARGS[@]}" "${CLAUDE_ARGS[@]}"
