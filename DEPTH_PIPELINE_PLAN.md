@@ -69,8 +69,8 @@ head (byte-identical)  ->  adapter contract  ->  agent works  ->  Stop gate
 
 | # | Component | Done when |
 |---|---|---|
-| 1 | **Evidence recorder** — parent transcript (structured `toolUseResult`) plus `subagents/agent-*.jsonl` (rendered text, N-tab gutter) | A session with two failing tool calls records both, with their error text |
-| 2 | **Verifier library** — `file_quote`, `command_result`, `log_match`, `absence` | A quote that does not match the cited lines as read fails; a correct one passes. `file_quote` compares content with indentation normalised and reports indentation drift separately — measured: 5/5 citations correct in content, only 3/5 byte-exact |
+| 1 | ~~**Evidence recorder**~~ **done** — `scripts/cc_evidence.py` | Met: on a real session it recovered 189 calls across the parent and both subagent transcripts, 29 failures with their error text |
+| 2 | ~~**Verifier library**~~ **done** — `scripts/cc_verify.py`, tests in `scripts/test_cc_verify.py` | Met: replayed against the spike's own five citations it returns 3 `pass`, 1 `indent-drift` (accepted, reported), 1 `retouched` (one line's whitespace altered — refused, but not mislabelled as fabrication). Invented quotes `fail`, missing files are `unverified`, never `pass` |
 | 3 | **Claim ledger** — schema (claim, evidence pointers, verdict, unknowns) plus per-task adapters declaring required evidence | `arch`, `claim` and `audittrap` adapters express their requirements without schema changes |
 | 4 | **Depth gate** — `cc-depth-gate.py` on `Stop` and `SubagentStop`, one consolidated refusal, ≤3 rounds, `stop_hook_active` safe | Blocks an unsupported answer, releases a supported one, never loops. Where fresh evidence is required, it verifies new `tool_use` events appeared since its last refusal rather than instructing the model to look again |
 | 5 | **Contract injection** — `UserPromptSubmit`, adapter-keyed, head untouched | Prefix match on turn 1 stays at the warm-session figure |
@@ -78,7 +78,16 @@ head (byte-identical)  ->  adapter contract  ->  agent works  ->  Stop gate
 | 7 | **Measurement** — the gate on `arch`/`claim`/`audittrap` under `BENCH_REALISM=1`, with the historical `AgentResult`/`Config` plan as a negative fixture | The negative fixture is refused; scores on the positives do not regress |
 
 Components 1–5 are client-side code with no GPU dependency and can be built while the machine is
-busy. Only 6 and 7 need the model.
+busy. Only 6 and 7 need the model. 1 and 2 are built and tested; `python3 scripts/test_cc_verify.py`
+is the regression check, and it uses the spike's real citations as its fixture rather than invented
+ones.
+
+A verdict vocabulary came out of building 2, and the gate depends on it: `pass`, `indent-drift`
+(accepted, reported), `retouched` (content right, whitespace edited — refused, because that drift is
+the same defect behind this model's failed edits), `wrong-lines`, `fail`, and `unverified` for
+anything that could not be checked. Verifiers fail closed, which is the opposite of the hook
+convention in `cc-context-guard.py` and deliberately so: a guard that crashes should let work
+through, a verifier that cannot check something must not bless it.
 
 ## 4. Rules the implementation must not break
 
