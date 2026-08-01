@@ -774,6 +774,47 @@ rather than loading 62 GB: 6,206 of 262,144 token strings differ (the special-to
 spends indices 46–52 on `<|tool>`, `<|tool_call>` and friends where gemma3 has `<unused40>`…), and
 `add_bos_token` disagrees. llama.cpp compares vocabularies before it will accept `-md`.
 
+### The depth gate, measured on the 31B at last
+
+The mechanism was verified in Phase 0; what the model *does* when refused was not, and that was the
+untested premise the whole pipeline rested on. Two `claude -p` runs against the resident 31B with a
+`Stop` hook that refuses exactly once and demands `CLAIM:` / `EVIDENCE: path:lines` / `QUOTE:`
+blocks, with `UNKNOWN:` offered as the escape hatch (`scripts/spike/`).
+
+**It complies, immediately, and does not argue.** Neither run pushed back, restated its first
+answer, or looped; the second `Stop` arrived with `stop_hook_active=true` and was released. Schema
+adherence was perfect in both arms — five well-formed blocks in one, a single `UNKNOWN:` in the
+other — so the output is machine-parseable without coaxing.
+
+**It does not necessarily go and look again.** Arm 1 asked what happens to output when a task
+exceeds its budget, an answer the model had already gathered in round 1 across seven tool calls.
+After the refusal it made **zero** new tool calls and quoted from context, having been told
+explicitly not to answer from memory. Arm 2 asked about a JUnit XML reporter that does not exist;
+having nothing to quote, it made **12 further tool calls** after the refusal, on top of 26 before
+it. So the gate enforces *sufficiency*, not *re-reading*: the model fetches only what it lacks. A
+gate that requires fresh evidence must check the transcript for new `tool_use` events itself rather
+than ask.
+
+**Quoting from memory drifts, and only a verifier catches it.** Of arm 1's five citations, all five
+were correct in content and line range, but only **three were byte-exact**. One was re-indented by
+four spaces. One "corrected" a genuinely odd 13-space line in the file to 12 — the model tidying
+source it was told to copy verbatim. This is the same defect as the edit failures in §7, arriving
+through a different door, and it settles the verifier's design: compare content with indentation
+normalised, and report indentation drift as a separate, non-fatal finding.
+
+**No fabrication under a false premise.** Arm 2 rejected the premise in round 1 ("no XML files are
+emitted") and, after the refusal, answered with a bare `UNKNOWN:` rather than inventing a citation.
+Note the confound: arm 2 also carried `prompts/skeptic_min.md`, which arm 1 did not, so this is
+evidence that the gate and that prompt *together* resist fabrication, n=1, and not that either does
+alone. It is however the first evidence that skeptic_min binds at all behind Claude Code's own
+system prompt, which §10 has listed as unknown since the symlink bug.
+
+**The gate roughly doubles wall-clock.** Arm 1: 171 s to the refusal, 141 s after it, 311 s total.
+Arm 2: 287 s then 432 s, 719 s total. One refusal is not a cheap formatting pass — it is a full
+turn, re-prefill included, and arm 1's final request re-prefilled 15,439 of 18,700 tokens. Budget a
+gated stage at **1.8x to 2.5x** the ungated one, per round, and treat three rounds as a real cost
+rather than a safety margin.
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
@@ -825,8 +866,9 @@ Kept deliberately, because the wrong turns cost more than the right ones.
   read-and-answer task per model.
 - The 30 → 3.8 tok/s MLX collapse has no established cause. Acceptance decay is insufficient.
 - `claim` and `arch` ran 1.7× and 1.3× *slower* on MLX at identical scores, unexplained.
-- Whether `skeptic_min.md` survives Claude Code's own system prompt is **still unmeasured** — the
-  symlink bug means no interactive evidence exists at all.
+- Whether `skeptic_min.md` survives Claude Code's own system prompt: one data point now says yes
+  (the false-premise arm refused to invent a citation with it appended), but the arm did not run
+  without it, so the prompt and the gate are not separated.
 - The sharpened edit rule (gutter, no-resend, cross-file) is unmeasured; the probe tasks exist and
   need both arms once the GPU is free.
 - The 26B solves half of `repohard` deterministically and coin-flips the rest (range 20 over 5
@@ -844,8 +886,9 @@ Kept deliberately, because the wrong turns cost more than the right ones.
 - Whether the exemption for multi-child nodes leaks: their snapshots are never reclaimed, so a long
   session that branches repeatedly could sit permanently over budget with the eviction loop unable
   to find a victim (`best == nil`, break).
-- Whether the 31B argues with a `Stop`-hook refusal or complies. Same gap as the context guard: the
-  mechanism is verified, the model's reaction to it is not.
+- Whether the depth gate survives contact with a *subagent*, and whether the no-fabrication result
+  holds without `skeptic_min.md` in front of it. Both arms above are n=1, and the arms differ in
+  two variables.
 - Whether a gate can hold a *subagent* to the same standard in practice. The evidence exists in
   `subagents/agent-*.jsonl`, but no hook payload points at it and the structured tool results are
   absent, so the recorder needs a path convention rather than a documented handle.

@@ -24,6 +24,11 @@ runner, which simply serialized) both left the earlier context restoring in 0.39
 logged. It correlates instead with a second sibling splitting a leaf mid-edge after the parent
 returned on a partial restore. Unresolved, off the critical path.
 
+**A gated stage costs 1.8x to 2.5x an ungated one.** Measured across the two spike arms: 311 s
+against 171 s, and 719 s against 287 s. A refusal is a full turn with its own re-prefill, not a
+formatting pass, so three rounds is a budget decision and not a free safety margin. Stages that
+routinely need three rounds are mis-specified.
+
 **No parallelism, ever, on this hardware.** One 31B runner fits and it is `-np 1`. "Swarm" means
 many specialised agents whose context switches are nearly free — not throughput. Any design that
 needs two agents thinking at once is out of scope until the hardware changes.
@@ -65,9 +70,9 @@ head (byte-identical)  ->  adapter contract  ->  agent works  ->  Stop gate
 | # | Component | Done when |
 |---|---|---|
 | 1 | **Evidence recorder** — parent transcript (structured `toolUseResult`) plus `subagents/agent-*.jsonl` (rendered text, N-tab gutter) | A session with two failing tool calls records both, with their error text |
-| 2 | **Verifier library** — `file_quote`, `command_result`, `log_match`, `absence` | A quote that does not match the cited lines as read fails; a correct one passes |
+| 2 | **Verifier library** — `file_quote`, `command_result`, `log_match`, `absence` | A quote that does not match the cited lines as read fails; a correct one passes. `file_quote` compares content with indentation normalised and reports indentation drift separately — measured: 5/5 citations correct in content, only 3/5 byte-exact |
 | 3 | **Claim ledger** — schema (claim, evidence pointers, verdict, unknowns) plus per-task adapters declaring required evidence | `arch`, `claim` and `audittrap` adapters express their requirements without schema changes |
-| 4 | **Depth gate** — `cc-depth-gate.py` on `Stop` and `SubagentStop`, one consolidated refusal, ≤3 rounds, `stop_hook_active` safe | Blocks an unsupported answer, releases a supported one, never loops |
+| 4 | **Depth gate** — `cc-depth-gate.py` on `Stop` and `SubagentStop`, one consolidated refusal, ≤3 rounds, `stop_hook_active` safe | Blocks an unsupported answer, releases a supported one, never loops. Where fresh evidence is required, it verifies new `tool_use` events appeared since its last refusal rather than instructing the model to look again |
 | 5 | **Contract injection** — `UserPromptSubmit`, adapter-keyed, head untouched | Prefix match on turn 1 stays at the warm-session figure |
 | 6 | **Stage driver** — sequential stages, artifacts between them, tails within budget | A three-stage run keeps the shared head warm throughout |
 | 7 | **Measurement** — the gate on `arch`/`claim`/`audittrap` under `BENCH_REALISM=1`, with the historical `AgentResult`/`Config` plan as a negative fixture | The negative fixture is refused; scores on the positives do not regress |
@@ -86,9 +91,12 @@ busy. Only 6 and 7 need the model.
 
 ## 5. Risks that would change this plan
 
-- **The gate's premise is untested**: whether the 31B complies with a refusal or argues with it. The
-  mechanism is verified; the model's reaction is not. If it argues, the gate needs to become a
-  filter on output rather than a request for more work.
+- ~~The gate's premise is untested~~ **Tested 2026-08-01, and it holds** (`LOCAL_AGENT_OPS.md` §8,
+  probes in `scripts/spike/`). The model complies immediately, never argues, and holds the
+  `CLAIM`/`EVIDENCE`/`QUOTE` schema perfectly. Three consequences are folded into the components
+  below rather than left as risk: it does **not** re-read unless it lacks the material, so the gate
+  must check the transcript for new `tool_use` events itself; it quotes from memory and drifts on
+  indentation, so 2 of 5 citations were not byte-exact; and one refusal costs a full extra turn.
 - **Wipe frequency at realistic sizes.** Measured at once per session on 18k parents. If it scales
   with parent size or delegation count, the transport decision flips to scripted `claude -p`
   workers — which is cheap, because every component above is transport-agnostic.
