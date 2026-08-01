@@ -165,7 +165,10 @@ Writes a markdown leaderboard to `results/REPORT.md` (or `--out`) and prints a b
 - `LOCAL_AGENT_OPS.md` — **operating one for real work**: prefix-cache economics, Claude Code's
   undocumented behaviour (auto-compaction cannot fire), the framing tax, the edit-tool failure
   taxonomy, and the wrong hypotheses that cost us the most. Read before debugging a slow session.
+- `DEPTH_PIPELINE_PLAN.md` — the plan of record for the evidence-gated agent pipeline built on
+  those constraints: decisions taken, the measurements that forced them, and what would reverse them
 - `scripts/claude-gemma.sh` — launcher; `.cursor/skills/ollama-watch/` — live Ollama diagnosis
+- `scripts/phase0/` — the probes behind every **[measured]** claim in the two documents above
 
 ### Known limitations (Claude Code + local Ollama)
 
