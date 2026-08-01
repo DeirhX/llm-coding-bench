@@ -9,36 +9,42 @@ Each bench provides a ``BenchSpec`` dataclass with the few caller-specific parts
 
 Usage::
 
-    from bench_lib.bench_runner import BenchSpec, run_main
+    from bench_lib.bench_runner import BenchSpec, TaskFields, run_main
 
     def _warmup():
         # bench-specific warmup (ollama chat / cursor chat / fixture copy)
         ...
 
     spec = BenchSpec(
-        bench_name     = "repohard",
-        tag_suffix     = "repohard",
-        selftest       = SELFTEST,
-        model          = MODEL,
-        tag            = TAG,
-        provider       = PROVIDER,
-        out_dir        = OUT_DIR,
-        merge_latest   = MERGE_LATEST,
-        warmup         = _warmup,
-        load_tasks     = select_tasks,    # () -> list[Task]
-        run_agent      = run_agent,       # (task,) -> dict
-        task_fields    = TaskFields(
-            exclude_from_print = ("tool_trace", "pytest_output"),
-         ),
+        bench_name   = "repohard",
+        tag_suffix   = "repohard",
+        model        = MODEL,
+        tag          = TAG,
+        provider     = PROVIDER,
+        out_dir      = OUT_DIR,
+        merge_latest = MERGE_LATEST,
+        warmup       = _warmup,
+        load_tasks   = select_tasks,    # () -> list[Task]
+        run_agent    = run_agent,       # (task,) -> dict
+        task_fields  = TaskFields(
+            id_attr="id",
+            row_id_key="task",  # JSON key; must match what run_agent emits
+            exclude_from_print=("tool_trace", "pytest_output"),
+        ),
         post_loop_hook = my_post_loop,   # optional
     )
     run_main(spec)
+
+Selftests belong in each bench's ``main()``: point ``out_dir`` at a temp
+directory when ``MODEL == "selftest"`` so smoke runs never write under
+``results/``. ``run_main`` itself has no selftest mode.
 
 """
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 import tempfile
@@ -54,16 +60,17 @@ from typing import Any, Callable
 
 @dataclass(frozen=True)
 class TaskFields:
-    """Attribute names on the task object used by the shared loop."""
+    """Attribute names on the task object and keys in the result row."""
 
-    id_attr: str = "task"
+    id_attr: str = "id"        # Attribute name on the Task object
+    row_id_key: str = "task"   # JSON key; repo convention (must match emit)
     title_attr: str = "title"
     family_attr: str = "family"
     max_score_attr: str = "max_score"
 
     # Extra keys to exclude from per-task stdout print.
     exclude_from_print: tuple[str, ...] = (
-        "tool_trace", "answer", "per_claim", "pytest_output"
+        "tool_trace", "answer", "per_claim", "pytest_output", "raw_content"
     )
 
 
@@ -82,6 +89,7 @@ class BenchSpec:
     load_tasks: Callable[[], list[Any]]
     run_agent: Callable[[Any], dict[str, Any]]
     task_fields: TaskFields = field(default_factory=TaskFields)
+    latest_suffix: str = "_latest.json"
     post_loop_hook: (
         Callable[[list[dict[str, Any]], str], None] | None
     ) = None
@@ -102,14 +110,14 @@ def _safe_get(task: Any, attr: str, default: Any = None) -> Any:
 def _error_row(spec: BenchSpec, task: Any, e: BaseException) -> dict[str, Any]:
     """Construct an error result row."""
     is_timeout = (
-        type(e).__name__ == "TimeoutExpired"
+        isinstance(e, (TimeoutError, subprocess.TimeoutExpired))
         or "timed out" in str(e).lower()
     )
     tid = _safe_get(task, spec.task_fields.id_attr, "unknown")
     return {
         "model": spec.model,
         "provider": spec.provider,
-        spec.task_fields.id_attr: tid,
+        spec.task_fields.row_id_key: tid,
         "title": _safe_get(task, spec.task_fields.title_attr, tid),
         "family": _safe_get(task, spec.task_fields.family_attr, ""),
         "ok": False,
@@ -145,17 +153,19 @@ def run_main(spec: BenchSpec) -> None:
     stamp = time.strftime("%Y%m%d_%H%M%S")
 
     # -- paths -------------------------------------------------------------
-    out_json = (
-        spec.out_dir
-        / f"{spec.tag}_{spec.tag_suffix or spec.bench_name}_{stamp}.json"
-    )
+    # Tags already end with the bench name for most benches; do not double it.
+    suffix = spec.tag_suffix or spec.bench_name
+    stem = spec.tag
+    if suffix and not (stem == suffix or stem.endswith(f"_{suffix}")):
+        stem = f"{stem}_{suffix}"
+    out_json = spec.out_dir / f"{stem}_{stamp}.json"
     out_log = spec.out_dir / f"{spec.tag}.log"
     latest_path = spec.out_dir / f"{spec.tag}_latest.json"
     summary_path = spec.out_dir / f"{spec.tag}_summary.json"
 
     # -- merge latest (pre) -----------------------------------------------
     results_map: dict[str, dict[str, Any]] = {}
-    id_attr = spec.task_fields.id_attr
+    row_id_key = spec.task_fields.row_id_key
     if spec.merge_latest and latest_path.is_file():
         try:
             prev = json.loads(
@@ -163,10 +173,10 @@ def run_main(spec: BenchSpec) -> None:
             )
             if isinstance(prev, list):
                 for r in prev:
-                    if isinstance(r, dict) and (tid := r.get(id_attr)) is not None:
+                    if isinstance(r, dict) and (tid := r.get(row_id_key)) is not None:
                         results_map[str(tid)] = r
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Warning: failed to merge latest results from {latest_path}: {e}", file=sys.stderr)
 
     # -- warmup -----------------------------------------------------------
     try:
@@ -185,7 +195,7 @@ def run_main(spec: BenchSpec) -> None:
         )
 
         for i, task in enumerate(spec.load_tasks()):
-            tid = _safe_get(task, id_attr)
+            tid = _safe_get(task, spec.task_fields.id_attr)
             str_tid = str(tid) if tid is not None else f"unknown_{i}"
             if spec.merge_latest and str_tid in done_ids:
                 print(f"-- {tid} ... skip (merged)", flush=True)

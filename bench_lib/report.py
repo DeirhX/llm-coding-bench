@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from bench_lib.paths import REPO_ROOT, results_dir
-from benches.registry import BENCHES, BenchSpec, normalize_bench_id
+from benches.registry import BENCHES, BenchMetadata, normalize_bench_id
 
 # ANSI (disabled when not a TTY — callers can force via ``use_color``).
 _RESET = "\033[0m"
@@ -124,41 +124,38 @@ def summarize_claim(path: Path, data: dict[str, Any]) -> RunSummary | None:
     )
 
 
-def _accept_latest(spec: BenchSpec, path: Path) -> bool:
+def _accept_latest(spec: BenchMetadata, path: Path) -> bool:
     name = path.name
-    if spec.id == "arch":
-        if not name.endswith("_latest.json") or name.endswith("_pyhard_latest.json"):
-            return False
-        if "_claim_" in name or name.endswith("_claim_latest.json"):
-            return False
-        if "_summary" in name:
-            return False
-        return "_arch" in name or name.endswith("_arch_latest.json")
-    if spec.id == "claim":
-        return name.endswith("_latest.json") and (
-            "_claim_" in name or name.endswith("_claim_latest.json")
-        )
-    if spec.id == "repohard":
-        if "_summary" in name:
-            return False
-        return name.endswith("_latest.json") and "repohard" in name
-    if spec.id == "audittrap":
-        if "_summary" in name:
-            return False
-        return name.endswith("_latest.json") and "audittrap" in name
-    return True
+    if "_summary" in name:
+        return False
+    if not name.endswith(spec.latest_suffix):
+        return False
+    # Most benches live in their own subdirectory and tag the bench id into the
+    # filename. Pyhard writes into results/ with legacy tags that sometimes omit
+    # "pyhard"; accept those unless they clearly belong to another bench.
+    if spec.id == "pyhard":
+        foreign = ("repohard", "audittrap", "_arch_", "_claim_", "_arch_latest", "_claim_latest")
+        return not any(tok in name for tok in foreign)
+    return spec.id in name
 
 
-def _summarize_file(spec: BenchSpec, path: Path) -> RunSummary | None:
+def _summarize_file(spec: BenchMetadata, path: Path) -> RunSummary | None:
     data = _safe_json(path)
     if data is None:
         return None
     if spec.id == "claim":
-        if not isinstance(data, dict):
+        # Shared runner writes lists; legacy claim results were dicts.
+        data_to_sum = data
+        if isinstance(data, list):
+            if not data:
+                return None
+            data_to_sum = data[0]
+
+        if not isinstance(data_to_sum, dict):
             import warnings
-            warnings.warn(f"report: expected dict for claim bench, got {type(data).__name__} in {path}", UserWarning, stacklevel=2)
+            warnings.warn(f"report: expected dict for claim bench, got {type(data_to_sum).__name__} in {path}", UserWarning, stacklevel=2)
             return None
-        return summarize_claim(path, data)
+        return summarize_claim(path, data_to_sum)
     if isinstance(data, list):
         return summarize_task_list(spec.id, path, data, suffix=spec.latest_suffix)
     import warnings
