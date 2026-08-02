@@ -42,6 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import cc_evidence  # noqa: E402
 import cc_diff  # noqa: E402
+import cc_flow  # noqa: E402
 import cc_ledger  # noqa: E402
 import cc_verify  # noqa: E402
 
@@ -54,113 +55,13 @@ CACHE_HIT = re.compile(r"cache hit.*?total=(\d+)\s+matched=(\d+)")
 # Tools a stage may use. Deliberately read-only plus Bash: a stage that can edit is a stage whose
 # evidence describes a file it changed halfway through reading. Exactly one stage of an implement
 # run is allowed the editing tools, so every other stage's citations refer to a tree it did not move.
-STAGE_TOOLS = "Read,Grep,Glob,Bash"
-EDITING_TOOLS = STAGE_TOOLS + ",Edit,Write,MultiEdit"
-
-
-@dataclass
-class Stage:
-    """One pass over the problem. Stances differ; the engine and the contract do not."""
-
-    name: str
-    stance: str
-    produces: str
-    consumes: tuple[str, ...] = ()
-    verify: bool = True
-    writes: bool = False
-    # A stage may be judged on a different contract from the run's. The plan of a change cannot be
-    # held to red/green -- nothing has run yet -- but it can be held to naming the failure it
-    # expects, which is where the first implement run actually went wrong.
-    adapter: str | None = None
-    # Whether the stages after this one are worth running if this one was refused. A plan that
-    # committed to nothing was still implemented, faithfully, by the two stages below it -- which is
-    # how a change that alters no behaviour gets built and then verified.
-    blocking: bool = False
-
-    @property
-    def tools(self) -> str:
-        return EDITING_TOOLS if self.writes else STAGE_TOOLS
-
-
-DEFAULT_STAGES = [
-    Stage(
-        name="survey",
-        produces="survey.md",
-        verify=False,     # an inventory makes no claims, so there is nothing to verify yet
-        stance=("Map the territory and stop. List the files, entry points and data that bear on "
-                "the question, each with the line range you actually opened. A file here can be "
-                "longer than one read allows, so say which part of it you saw and let the next "
-                "stage search for the rest. Draw no conclusions and name no defects -- a later "
-                "stage does that, and anything you assert here it will have to re-derive. If "
-                "something looks wrong, note the location only."),
-    ),
-    Stage(
-        name="claims",
-        produces="claims.md",
-        consumes=("survey.md",),
-        stance=("Now make the claims the survey supports, and only those. Open every file you "
-                "cite, in this stage, before quoting it -- the survey is a map, not a substitute "
-                "for reading, and it saw at most the first part of a long file. To cite a line "
-                "beyond that, find it with a search and read around the hit; a line number you "
-                "have not seen is a guess even when the claim is right. Each claim gets its own "
-                "block. If the survey pointed somewhere you could not resolve, that is an "
-                "UNKNOWN, not a guess."),
-    ),
-    Stage(
-        name="adversary",
-        produces="verdict.md",
-        consumes=("claims.md",),
-        stance=("Try to break each claim above. For each one, run the cheapest thing that would "
-                "show it false and report what it printed; a claim you cannot attack survives, a "
-                "claim your attack kills is deleted, and a claim you cannot test becomes an "
-                "UNKNOWN with the reason. Do not add new findings. Do not soften the surviving "
-                "ones -- restate them with their evidence intact."),
-    ),
-]
-
-
-# The implement flow. Same engine, three stances, and only the middle one may write. The split is
-# not tidiness: a session that reads, edits and then judges its own edit has no state left that it
-# did not produce, which is the exact condition the gate cannot check anything under.
-IMPLEMENT_STAGES = [
-    Stage(
-        name="plan",
-        produces="plan.md",
-        adapter="change-plan",
-        blocking=True,
-        stance=("Find the code the task names and stop. Report the file and line range you opened, "
-                "the behaviour as it stands, and the single smallest test that would fail because "
-                "of it -- where that test goes, what it asserts, and the exact command that would "
-                "run it, and the string that command will print while the defect is there. Write "
-                "no code and change nothing. If the task's premise does not survive "
-                "reading the code, say so and stop; that is a complete and useful answer."),
-    ),
-    Stage(
-        name="implement",
-        produces="change.md",
-        consumes=("plan.md",),
-        verify=False,     # judged in the next stage, on a tree it can no longer touch
-        writes=True,
-        stance=("Do it, in this order, and report each step with what it printed. Write the test "
-                "from the plan and run it: it must fail, and the failure must be about the "
-                "behaviour, not an import or a typo. Then change the source until that same "
-                "command passes -- same command, not a narrower one. Then run the suite around it. "
-                "Change nothing the task did not ask for; a tidy-up in the same diff makes the "
-                "next stage unable to attribute either. If the test cannot be made to fail first, "
-                "stop and say why rather than writing a test that passes on both sides."),
-    ),
-    Stage(
-        name="verify",
-        produces="verdict.md",
-        consumes=("plan.md", "change.md"),
-        stance=("Prove the change is load-bearing by taking it away. Stash the source edit and "
-                "keep the test -- `git stash push -- <the source files, not the test>` -- run the "
-                "exact command from the previous stage and show it failing, then `git stash pop` "
-                "and run that same command again and show it passing. Then run the suite and cite "
-                "its counts. Report both runs as command evidence. If the test passes with the "
-                "change stashed, the change is not what made it pass, and that is the finding."),
-    ),
-]
+# What the stages are lives in cc_flow, because a Claude Code session runs the same three stances as
+# native subagents and two copies of a stance drift the moment one is edited.
+STAGE_TOOLS = cc_flow.STAGE_TOOLS
+EDITING_TOOLS = cc_flow.EDITING_TOOLS
+Stage = cc_flow.Stage
+DEFAULT_STAGES = cc_flow.DEFAULT_STAGES
+IMPLEMENT_STAGES = cc_flow.IMPLEMENT_STAGES
 
 
 @dataclass

@@ -69,10 +69,15 @@ class Verdict:
         return "%-13s %s" % (self.kind, self.detail)
 
 
-def _significant(text: str) -> list[str]:
-    """Lines that carry content, with trailing whitespace, blank lines and code fences discarded."""
+def _significant(text: str, first: int = 0) -> list[str]:
+    """Lines that carry content, with trailing whitespace, blank lines and code fences discarded.
+
+    `first` is the line number the quote is claimed to start at, which is what makes a gutter on a
+    single-line quote recognisable: one number proves nothing on its own, but one number that is
+    the line the citation names is not a coincidence.
+    """
     return [line.rstrip()
-            for line in _ungutted(_unfenced(text)).strip("\n").split("\n") if line.strip()]
+            for line in _ungutted(_unfenced(text), first).strip("\n").split("\n") if line.strip()]
 
 
 # One separator only: a bar-style gutter puts the code straight after the bar, and a space-style one
@@ -81,7 +86,7 @@ def _significant(text: str) -> list[str]:
 _GUTTER = re.compile(r"^\s{0,8}(?P<n>\d{1,6})(?:\s*[|:>]|\s)(?P<code>.*)$")
 
 
-def _ungutted(text: str) -> str:
+def _ungutted(text: str, first: int = 0) -> str:
     """Drop a line-number gutter the model pasted along with the code.
 
     Reading a file gives the model `1013 def f(` and quoting it back verbatim is the honest thing to
@@ -96,8 +101,17 @@ def _ungutted(text: str) -> str:
     """
     lines = [l for l in text.split("\n")]
     content = [l for l in lines if l.strip()]
-    if len(content) < 2:
+    if not content:
         return text
+    if len(content) == 1:
+        # One number is not a sequence, so the only thing that can vouch for it is the citation:
+        # a single-line quote whose gutter reads 1520, cited at line 1520. Single-line citations
+        # are the commonest kind, and without this every one of them carrying a gutter is reported
+        # as a fabrication.
+        found = _GUTTER.match(content[0])
+        if not found or not first or int(found.group("n")) != first:
+            return text
+        return "\n".join(found.group("code") if l is content[0] else l for l in lines)
     numbers, stripped = [], {}
     for line in content:
         found = _GUTTER.match(line)
@@ -124,8 +138,15 @@ def _unfenced(text: str) -> str:
         lines.pop(0)
     while lines and not lines[-1].strip():
         lines.pop()
-    if len(lines) >= 2 and lines[0].lstrip().startswith("```") and lines[-1].strip() == "```":
-        lines = lines[1:-1]
+    if len(lines) >= 2 and lines[0].lstrip().startswith("```"):
+        # A quote runs to the next header, and a model that quotes then explains puts its
+        # explanation inside the quote. The closing fence is a plainer boundary than the header is:
+        # a live plan stage was refused for fabrication over a quote that matched the file to the
+        # byte, with two sentences of commentary appended to it.
+        for n, line in enumerate(lines[1:], start=1):
+            if line.strip() == "```":
+                return "\n".join(lines[1:n])
+        lines = lines[1:]
     return "\n".join(lines)
 
 
@@ -146,7 +167,7 @@ def file_quote(root: str, path: str, start: int, end: int, quote: str) -> Verdic
         return Verdict(FAIL, "line range %d-%d outside %s (%d lines)" % (start, end, path, len(lines)))
 
     cited = _significant("\n".join(lines[start - 1:end]))
-    quoted = _significant(quote)
+    quoted = _significant(quote, first=start)
     if not quoted:
         return Verdict(UNVERIFIED, "empty quote")
     if cited == quoted:

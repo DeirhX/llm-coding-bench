@@ -256,3 +256,46 @@ def test_an_elision_inside_a_single_range_is_still_content(tmp_path) -> None:
     citation = claims[0]["evidence"][0]
     verdict = vf.file_quote(str(tmp_path), "m.py", 1, 3, citation["quote"])
     assert verdict.ok, verdict
+
+
+def test_a_single_line_quote_with_a_gutter_the_citation_vouches_for(tmp_path) -> None:
+    """One number is not a sequence, so the citation is what vouches for it.
+
+    Single-line citations are the commonest kind. A live plan stage was refused three times for
+    fabrication over quotes that were correct to the byte once the tab-separated gutter came off.
+    """
+    (tmp_path / "m.py").write_text("a = 1\nb = 2\nc = 3\n")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 2, 2, "2\tb = 2")
+    assert verdict.ok, verdict
+
+
+def test_a_gutter_that_disagrees_with_the_citation_is_not_stripped(tmp_path) -> None:
+    (tmp_path / "m.py").write_text("a = 1\nb = 2\nc = 3\n")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 3, 3, "2\tb = 2")
+    assert not verdict.ok, verdict
+
+
+def test_a_single_line_that_merely_starts_with_a_number_is_content(tmp_path) -> None:
+    (tmp_path / "m.py").write_text("40 pears\n")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 1, "40 pears")
+    assert verdict.ok, verdict
+
+
+def test_commentary_after_the_closing_fence_is_not_part_of_the_quote(tmp_path) -> None:
+    """A quote runs to the next header, so a model that quotes and then explains puts its
+    explanation inside the quote.
+
+    Measured: a plan stage was refused for fabrication over a quote that matched the file to the
+    byte, with two sentences of commentary appended to it.
+    """
+    (tmp_path / "m.py").write_text("def add(a, b):\n    return a + b\n")
+    quoted = ("```python\ndef add(a, b):\n    return a + b\n```\n\n"
+              "This is where the addition happens, and it is why the total is wrong.")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, quoted)
+    assert verdict.ok, verdict
+
+
+def test_an_unclosed_fence_still_gives_up_its_content(tmp_path) -> None:
+    (tmp_path / "m.py").write_text("def add(a, b):\n    return a + b\n")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, "```\ndef add(a, b):\n    return a + b")
+    assert verdict.ok, verdict

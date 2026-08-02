@@ -189,7 +189,10 @@ USAGE
 GUARD=1
 DEPTH=0
 DEPTH_ADAPTER="review"
+FLOWS=0
 LEAN_TOOLS=1
+# Task is how a flow's stages run, and TaskCreate/Update are how the client shows their progress,
+# so a flow session keeps them and pays the system-prompt tokens for them.
 UNUSED_TOOLS="Workflow,Agent,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskStop"
 UNUSED_TOOLS="$UNUSED_TOOLS,TaskOutput,ReportFindings,SendMessage,CronCreate"
 UNUSED_TOOLS="$UNUSED_TOOLS,CronList,CronDelete,ScheduleWakeup,EnterWorktree,ExitWorktree"
@@ -213,6 +216,8 @@ while [[ $# -gt 0 ]]; do
     --edit-rule) USE_EDIT_RULE="on"; shift ;;
     --no-edit-rule) USE_EDIT_RULE="off"; shift ;;
     --yolo|-y) YOLO=1; shift ;;
+    --flows) FLOWS=1; DEPTH=1; shift ;;
+    --no-flows) FLOWS=0; shift ;;
     --lean-tools) LEAN_TOOLS=1; shift ;;
     --all-tools) LEAN_TOOLS=0; shift ;;
     --guard) GUARD=1; shift ;;
@@ -440,7 +445,16 @@ echo "          python3 .cursor/skills/ollama-watch/scripts/state.py while you w
 # prompts are currently the only thing standing between an unverified disposition and your
 # working tree, and --yolo removes them.
 TOOL_ARGS=()
-(( LEAN_TOOLS )) && TOOL_ARGS=(--disallowed-tools "$UNUSED_TOOLS")
+if (( LEAN_TOOLS )); then
+  KEPT="$UNUSED_TOOLS"
+  # A flow runs its stages as subagents, so the tools that launch one and show its progress are not
+  # unused here whatever the lean list says.
+  (( FLOWS )) && KEPT="${KEPT//Agent,/}" && KEPT="${KEPT//Task,/}" \
+              && KEPT="${KEPT//TaskCreate,/}" && KEPT="${KEPT//TaskUpdate,/}" \
+              && KEPT="${KEPT//TaskList,/}" && KEPT="${KEPT//TaskGet,/}" \
+              && KEPT="${KEPT//TaskOutput,/}" && KEPT="${KEPT//TaskStop,/}"
+  TOOL_ARGS=(--disallowed-tools "$KEPT")
+fi
 
 YOLO_ARGS=()
 if (( YOLO )); then
@@ -647,6 +661,20 @@ if (( DEPTH )); then
   HOOK_EVENTS+=("\"UserPromptSubmit\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_CONTRACT\" } ] } ]")
   HOOK_EVENTS+=("\"Stop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\" } ] } ]")
   HOOK_EVENTS+=("\"SubagentStop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\" } ] } ]")
+fi
+
+# The stage loop, for a session that runs its stages as subagents so you can watch them work. The
+# scripted driver owns that loop and can simply stop; here the launches are made by the model, which
+# is the thing being held to a standard, so the ordering is enforced by a hook instead: a stage is
+# admitted only if it is the next one and nothing blocking has been refused. It needs the Task tool,
+# which the lean tool list removes, so asking for flows puts it back.
+if (( FLOWS )); then
+  FLOW_GUARD="$ROOT/scripts/cc-flow-guard.py"
+  if [[ ! -x "$FLOW_GUARD" ]]; then
+    echo "error: flow guard missing or not executable: $FLOW_GUARD" >&2
+    exit 1
+  fi
+  HOOK_EVENTS+=("\"PreToolUse\": [ { \"matcher\": \"Task|Agent\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] } ]")
 fi
 
 GUARD_JSON=""

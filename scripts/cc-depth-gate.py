@@ -44,6 +44,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import cc_diff  # noqa: E402
+import cc_flow
+import cc_flowstate
 import cc_evidence  # noqa: E402
 import cc_ledger  # noqa: E402
 import cc_verify  # noqa: E402
@@ -508,6 +510,30 @@ def refusal(gaps: list[str], claims_path: Path) -> str:
     return "%s\n\n%s\n%s" % (head, body, tail)
 
 
+def _stage_of(state: dict, agent: str, payload: dict) -> str:
+    """Which stage of the flow this subagent is, if any.
+
+    The launch is recorded by the PreToolUse hook before the agent exists, so the running stage is
+    the one with no verdict yet. With one stage in flight at a time -- which the same hook enforces
+    -- that is unambiguous.
+    """
+    if not state.get("flow"):
+        return ""
+    for entry in reversed(state.get("stages", [])):
+        if entry.get("verdict") is None:
+            if agent and entry.get("agent") and entry["agent"] != agent:
+                continue
+            return entry.get("stage", "")
+    return ""
+
+
+def _digest(text: str, limit: int = 1200) -> str:
+    """What a stage hands the next one: its claims, not its prose."""
+    kept = [line for line in (text or "").splitlines()
+            if line.startswith(("CLAIM:", "EVIDENCE:", "UNKNOWN:", "PREDICT:", "CHANGE:"))]
+    return "\n".join(kept)[:limit]
+
+
 def main() -> int:
     if OFF_SWITCH.exists():
         return allow()
@@ -530,7 +556,17 @@ def main() -> int:
     agent = payload.get("agent_id") or ""
     transcript = payload.get("agent_transcript_path") or payload.get("transcript_path") or ""
 
-    contract = cc_ledger.load_contract(session, root)
+    # A stage of a flow is judged as that stage, not as the session it belongs to. The plan of a
+    # change cannot be held to red/green -- nothing has run yet -- and holding it to the session's
+    # contract is how a plan that committed to nothing came to be accepted and then built upon.
+    state = cc_flowstate.load(session, root)
+    stage = _stage_of(state, agent, payload)
+
+    contract = None
+    if stage:
+        contract = cc_ledger.contract_for(cc_flow.adapter_for(state.get("flow", ""), stage))
+    if contract is None:
+        contract = cc_ledger.load_contract(session, root)
     if contract is None:
         adapter = os.environ.get("CC_DEPTH_ADAPTER")
         if not adapter:
@@ -554,7 +590,17 @@ def main() -> int:
     if not claims and not _session_asserted_something(calls, text):
         return allow()          # a short factual answer is not a ledger-bearing one
 
-    gaps, report = evaluate(contract, claims, unknowns, calls, root)
+    gaps, report = evaluate(contract, claims, unknowns, calls, root, answer=text)
+    if stage:
+        # What the next stage may do turns on this verdict, so it is written where the hook that
+        # admits the next launch can read it rather than left in the conversation.
+        cc_flowstate.record_verdict(state, stage, gaps, agent)
+        for entry in reversed(state.get("stages", [])):
+            if entry.get("stage") == stage and not entry.get("summary"):
+                entry["summary"] = _digest(text)
+                break
+        cc_flowstate.save(state, session, root)
+        report["stage"] = stage
     report.update({
         "session": session,
         "agent": agent or None,
