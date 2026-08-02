@@ -542,9 +542,37 @@ The cache is a compressed prefix trie in which **exactly one path is live** at a
 retained context is a per-layer snapshot paged out of the live arrays. `enforceEvictionPolicy` runs
 whenever a path is switched or a snapshot is attached, and evicts until the *bytes* of paged-out
 snapshots fall under 8 GiB. So the ceiling is a hard-coded byte budget with no relation to `num_ctx`
-— raising or lowering the context window will not move it. Retention in tokens is therefore
-8 GiB ÷ (KV bytes per token), and the probe range of 7.5k–19k tokens is the useful figure, the
-spread coming from probes that themselves attach snapshots and evict what has not been probed yet.
+— raising or lowering the context window will not move it.
+
+**Retention is not a token count at all, which is why no single token figure fitted.** A snapshot is
+taken per layer, and gemma4's 60 layers are not alike: `config.json` gives 10 `full_attention` and 50
+`sliding_attention` with a 1024-token window, 16 KV heads and `head_dim` 256 in bf16, so one layer
+costs 2 × 16 × 256 × 2 = **16 KiB per token**. The two cache types snapshot different things
+(`x/mlxrunner/cache/`): `KVCache.Snapshot(from)` keeps `[from, offset)`, the node's whole edge, while
+`RotatingKVCache.Snapshot(o)` keeps `min(o, maxSize)` — the window, and nothing else, however long
+the edge. So one paged-out node costs
+
+    50 × min(offset, 1024) × 16 KiB   +   10 × edge_tokens × 16 KiB
+    = up to 800 MiB, flat, per node   +   160 KiB per token of that node's edge
+
+and the 8 GiB budget buys **either ~9 parked nodes anywhere past the first 1024 tokens, or one node
+of ~47k tokens, or any mix**. The flat term dominates ordinary use, and it is per *node*, not per
+conversation: a session that pages out once per turn spends 800 MiB a turn on windows it will
+restore in a millisecond. That is what made 12 × 9,338 and 14 × 2,510 disagree — the probes differed
+in node count far more than in tokens, and tokens were never the variable.
+
+The alternative reading — that snapshots ignore the window and keep all 60 layers full length, at
+960 KiB per token — is ruled out by a measurement already in this document: the fan-out probe matched
+**16,387 tokens** from a paged-out node of an earlier session. At 960 KiB/token that node alone would
+have been 15 GiB and could not have survived a 8 GiB budget; at 160 KiB/token it is 3.3 GiB, and it
+did.
+
+`scripts/phase0/kv_budget.py` computes this from any model's own config, and reading it against the
+two probes is the honest test. It predicts 6 survivors at 2,510 tokens each and 3 at 9,338; the
+probes saw **3 and 2**. Same order, consistently optimistic, and the direction is the expected one —
+each probe attaches snapshots of its own, so it evicts against a budget it is itself consuming. Take
+the arithmetic as an upper bound and halve it when planning. What would settle the remaining factor
+is the runner's `paged_out:` trace line, which needs a restart to enable and has not been worth one.
 
 Two clauses in the eviction walk matter more to the design than the budget does:
 
@@ -559,7 +587,7 @@ the runner, and every later sibling restores it for free no matter how much traf
 between. That is not a happy accident of the fan-out measurements below; it is the policy. The
 corollary is the sharp edge: eviction only ever reclaims the *leaves*, so what you must budget is
 not the sum of your contexts but **the sum of the per-agent tails hanging off the shared head**,
-against 8 GiB.
+against 8 GiB — where each tail costs its own 800 MiB of windows before its first divergent token.
 
 `num_ctx` still bounds a single conversation — one agent at 96k is at the window and gets the
 context-shift treatment past it — but it never bounds the sum across agents.
@@ -815,6 +843,130 @@ turn, re-prefill included, and arm 1's final request re-prefilled 15,439 of 18,7
 gated stage at **1.8x to 2.5x** the ungated one, per round, and treat three rounds as a real cost
 rather than a safety margin.
 
+### Separating the two confounded arms, and what the real hooks broke
+
+The spike above left two things unmeasured: whether the refusal to fabricate belonged to the gate or
+to `skeptic_min.md`, and whether any of it works one level down, on a delegate. Both were rerun
+against the *production* hooks (`scripts/cc-depth-contract.py`, `scripts/cc-depth-gate.py`) rather
+than the spike's throwaway one, which is how three defects surfaced that a synthetic transcript
+could never have shown.
+
+**The prompt was not doing the work.** The false-premise question — "which module writes the JUnit
+XML report", of which this repository has none — was rerun with the depth contract and **no**
+`skeptic_min.md`. The model rejected the premise anyway, in 110 s and 8 turns, with one claim
+citing `bench_lib/report.py:337-350` (byte-exact, `write_report` writing `REPORT.md`) and the
+unanswerable half moved to `UNKNOWN:`. So the honesty is the model's, or the contract's; it is not
+that prompt's. `skeptic_min.md` and the gate are now separated, n=1 each way.
+
+**A markdown fence read as a fabrication.** That same correct citation was wrapped in
+```` ```python ````, and the verifier compared the fence lines as content: verdict `fail`, "quote
+not present in bench_lib/report.py". The one verdict that means *the model invented this*, on a
+quote copied perfectly. A gate that cries wolf when the model reaches for markdown is a gate that
+gets turned off, so an enclosing fence is now stripped (an interior one is content and stays).
+
+**The Stop hook can outrun the transcript.** The gate wrote its verdict at 23:45:24.779 about an
+answer the client stamped 23:45:24.728 — 51 ms of lag, and the gate read the file before the answer
+reached it. Its verdict: "no claims were stated", about an answer carrying a good one. Everything
+downstream inherits that: the refusal text, `gate.json`, the bench measurement. Worse, the
+window-of-recent-text fallback then judges *both* drafts after a refusal, re-reporting gaps already
+fixed and double-counting `UNKNOWN`s.
+
+**The payload already contains the answer, and on `SubagentStop` it names two transcripts.** Dumping
+the raw hook stdin settled all of it (Claude Code 2.1.218):
+
+| field | on `Stop` | on `SubagentStop` |
+|---|---|---|
+| `last_assistant_message` | the answer, in full | the delegate's answer |
+| `transcript_path` | the session | **the parent** — no answer in it yet |
+| `agent_transcript_path` | absent | `…/<session>/subagents/agent-<id>.jsonl` |
+| `agent_id`, `agent_type` | absent | e.g. `a456612eb07d25138`, `general-purpose` |
+| `stop_hook_active` | false, then true | false, then true |
+
+Reading `transcript_path` at `SubagentStop` is reading the parent while it sits inside its `Agent`
+call: empty, so the gate refused a delegate whose own file held a well-formed ledger, for "no claims
+were stated". Taking `last_assistant_message` removes the race entirely, and
+`agent_transcript_path` is also the right *coverage* scope — a sibling delegate's reads are not
+evidence that this one looked at anything.
+
+**Gating a delegate works, and the delegate complies too.** Three subagent runs: in the two before
+the fix the delegate was refused (for the wrong reason) and re-answered in the demanded form without
+arguing, exactly as the parent does. After the fix, both levels are judged on their own answers and
+written to their own `gate.json` — `artifacts/depth/<session>/gate.json` for the parent,
+`…/<session>/<agent_id>/gate.json` for each delegate — and the whole delegated task passed on the
+first try in **83 s**, with no refusal round. Note what that costs when it does refuse: a delegate's
+refusal round is paid at the delegate's context, not the parent's, which is the cheap place to pay
+it.
+
+### The llama.cpp path, priced at last: snapshots, speculation, and the translator that reaches it
+
+Three things were deferred here for months on the grounds that they needed a gemma4 GGUF, which
+does not exist locally — Ollama ships that model as safetensors. Two of them turned out not to need
+one, and the third needed only a translator.
+
+**`--swa-full` is the difference between a restore that works and one that lies.** Measured on
+`gemma3:1b`'s GGUF (`scripts/phase0/llamacpp/swa_slot_arm.sh`): prefill 25,313 tokens, save the slot,
+**kill the server**, start it again, restore, ask the same question.
+
+| | save | restore | answer after restore |
+|---|---|---|---|
+| `--swa-full` | 25,313 tokens, 115.6 MB, 21 ms | `n_restored=25313`, 19 ms | **0.02 s** |
+| default | 25,313 tokens, 115.6 MB, 21 ms | `n_restored=25313`, 20 ms | **2.09 s** — a cold prefill |
+
+Both arms report a complete restore. Only one of them avoids the work, which is the trap: the
+success code is not evidence, the timing is. And a second trap sits in front of it — with the
+default `--parallel 4` the save writes **28 bytes** and reports `n_saved: 0` with no error at all,
+because a unified KV cache has no per-slot state to write. `--parallel 1` is mandatory for any of
+this to mean anything.
+
+The save size confirms what the snapshots contain: 4 full-attention layers × 25,313 tokens + 22
+windowed layers × 512 = 115.2 MB predicted against 115.63 MB written, 0.4 % out. The same formula
+sizes gemma4-31b at 96k under `--swa-full`: 60 layers × 98,304 tokens × 16 KiB = **90 GiB of KV**
+beside 58 GiB of weights, against a 107.5 GiB Metal budget (`110100 MiB`, as llama.cpp reports it on
+this machine). **It does not fit, and cannot be made to.** The ceiling for gemma4 under `--swa-full`
+is ~54k tokens; above that the llama.cpp path has no working disk snapshots, which retires the idea
+of parking a 96k agent context on disk. Without `--swa-full` the same context needs only 15.8 GiB —
+and restores that do nothing.
+
+**N-gram speculation survives at scale, and it is free.** The old numbers came from a 1B on a
+deliberately repetitive prompt, which proves nothing about a coding agent. Rerun on
+`Qwopus3.6-35B-A3B-Coder-MTP-Q8` (the only 30B-class GGUF here) with two tasks: rewrite a real
+120-line source file with one rename (an edit — mostly verbatim reproduction), and 800 tokens of
+prose with no input to echo. Temperature 0, `n_predict` fixed, five settings:
+
+| `--spec-type` | edit | vs none | prose | vs none |
+|---|---|---|---|---|
+| none | 91.2 tok/s | 1.00× | 91.9 tok/s | 1.00× |
+| `ngram-map-k` | 307.0 | 3.37× | 91.9 | 1.00× |
+| `ngram-mod` | 356.1 | **3.91×** | 92.5 | 1.01× |
+| `draft-mtp` (the model's own head) | 153.4 | 1.68× | 112.2 | 1.22× |
+| `ngram-mod,draft-mtp` | 426.7 | **4.68×** | 113.3 | 1.23× |
+
+Every arm produced **byte-identical output** — one md5 across all five edit runs, one across all
+five prose runs — so none of this is a quality trade. Three things follow. Speculation and a draft
+head **stack**, because they miss on different tokens. `ngram-mod` costs *nothing* on prose, which
+kills the plumbing that would have switched it per task: leave it on. And the model's own MTP head,
+worth 1.68× on edits, is beaten more than twice over by a scheme that needs no draft weights at all.
+
+The caveat that keeps this honest: this is a 35B **MoE with 3B active**, not a dense 31B. Decode on
+a dense model is bound by reading 62 GB of weights per token, which is exactly the cost speculation
+amortises across a batch of drafted tokens, so the dense gain should be *larger* — but "should be"
+is not a measurement, and gemma4 has no GGUF to measure.
+
+**The translator, and what it caught.** `scripts/anthropic_proxy.py` puts an Anthropic Messages API
+in front of any OpenAI endpoint, which is what makes everything above reachable from Claude Code —
+`llama-server` speaks OpenAI and Claude Code does not. It runs stdlib-only, streams, translates
+tools both ways, and logs each request **on arrival** with its `user-agent`, so per-client
+attribution finally exists instead of being reconstructed afterwards. Verified end to end: a real
+`Read` tool call answered correctly in 20.7 s over two turns.
+
+Two findings came out of building it. Ollama's OpenAI endpoint returns a reasoning model's output in
+`reasoning` with `content` empty, so a translation that reads only `content` hands back a blank
+answer that looks like a dead model. And Claude Code sends **`claude-opus-4-8`** regardless of
+`--model`, `ANTHROPIC_MODEL`, and every other `ANTHROPIC_*_MODEL` variable — three requests, all
+404s, before it fell back. Against Ollama that is worse than an error, because a name it *does*
+have but is not the resident variant unloads 62 GB of weights. Hence `--force-model`: the port
+decides which model answers, not the client.
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
@@ -835,6 +987,12 @@ Kept deliberately, because the wrong turns cost more than the right ones.
 | A 1B could draft for the 31B | 6,206 vocabulary entries differ, and `add_bos_token` disagrees | Reading both GGUF headers |
 | The subagent cache wipe was concurrency against an `-np 1` runner | Neither concurrency nor an aborted prefill reproduces it; it follows a mid-edge sibling split after a partial parent restore, and costs one re-prefill, not the session | Two overlapping full-size requests, and a connection cut mid-prefill, both leaving the earlier context warm |
 | Delegating to a subagent would inherit the parent's cached prefix | It inherits 27 tokens of 9,740; a subagent's system prompt differs from the first token | `cache miss` on the subagent's opening request |
+| The gate reads the answer out of the transcript | The client hands it over as `last_assistant_message`; reading the file races the write and loses by ~50 ms | A verdict timestamped 51 ms after the answer it never saw |
+| `SubagentStop` hands the gate the delegate's transcript | It hands over the *parent's*; the delegate's is `agent_transcript_path`, and `agent_id` is how you keep their verdicts apart | Dumping the raw hook payload |
+| A byte-exact quote verifies | Not if the model fences it: ```` ```python ```` counted as content and produced a fabrication verdict | The false-premise arm's one and only citation |
+| A slot restore that reports success has restored something | Without `--swa-full` it reports `n_restored=25313` and re-prefills anyway; with `--parallel` above 1 it writes 28 bytes and reports `n_saved: 0` | The same prompt answered in 0.02 s and in 2.09 s after identical "successful" restores |
+| N-gram speculation might not survive real work | 3.9× on a real edit at 35B, 4.7× stacked with the model's own draft head, and free on prose | Five settings, byte-identical output in all of them |
+| `--model` and `ANTHROPIC_MODEL` decide what the client asks for | Claude Code asks for `claude-opus-4-8` anyway, and on Ollama a wrong-but-existing name evicts 62 GB | The proxy's arrival log, three 404s deep |
 | A fresh session must re-prefill its framing | It matched 16,387 tokens from an unrelated earlier session, because the head was byte-identical | The same probe's first request |
 
 **Tooling traps that silently corrupted work**, all of which produced *plausible* wrong results:
@@ -866,32 +1024,36 @@ Kept deliberately, because the wrong turns cost more than the right ones.
   read-and-answer task per model.
 - The 30 → 3.8 tok/s MLX collapse has no established cause. Acceptance decay is insufficient.
 - `claim` and `arch` ran 1.7× and 1.3× *slower* on MLX at identical scores, unexplained.
-- Whether `skeptic_min.md` survives Claude Code's own system prompt: one data point now says yes
-  (the false-premise arm refused to invent a citation with it appended), but the arm did not run
-  without it, so the prompt and the gate are not separated.
+- `skeptic_min.md` and the gate are now separated: the false-premise question was refused without
+  the prompt as well as with it. What remains unknown is whether the prompt helps *anywhere* — no
+  task has yet been found where its presence changes the answer.
 - The sharpened edit rule (gutter, no-resend, cross-file) is unmeasured; the probe tasks exist and
   need both arms once the GPU is free.
 - The 26B solves half of `repohard` deterministically and coin-flips the rest (range 20 over 5
   runs). Unquantified in a long session.
 - Whether acceptance depends on context *coherence* rather than length. Untested directly.
-- What full-size SWA (`--swa-full`) costs gemma4 at 96k, and whether that KV fits beside 62 GB of
-  weights. It decides whether disk snapshots are available at all on the llama.cpp path.
-- Whether the `ngram-mod`/`ngram-map-k` gains survive on a 31B and on real editing output. Measured
-  only on a 1B, on a deliberately repetitive prompt.
-- The KV bytes per token of a gemma4 snapshot, which is what converts the 8 GiB budget into a token
-  figure. Bracketed at 7.5k–19k tokens by probes that perturb what they measure; the clean route is
-  the runner's trace line (`paged_out:`), which needs a restart to enable.
+- ~~What full-size SWA costs gemma4 at 96k~~ **90 GiB of KV against a 107.5 GiB budget: it does not
+  fit** (§8). Disk snapshots on the llama.cpp path stop being available above ~54k tokens. What is
+  still unmeasured is gemma4 itself, since it has no GGUF; the number is its own geometry applied to
+  a formula verified to 0.4 % on gemma3.
+- ~~Whether the n-gram gains survive on a 31B and on real editing output~~ **They survive and grow**
+  (§8): 3.9× on an edit at 35B, 4.7× stacked with a draft head, free on prose. Measured on an MoE
+  with 3B active, though, so the dense-31B number is still unknown — expected higher, not verified.
+- ~~The KV bytes per token of a gemma4 snapshot~~ **Settled from the config and the runner's cache
+  types** (§8): 160 KiB per token of a node's edge, plus a flat ≤800 MiB per paged-out node from the
+  50 windowed layers. What is still unmeasured is the *flat* term end to end — the arithmetic says
+  ~9 parked nodes fill the budget, and no probe has counted nodes rather than tokens. The runner's
+  `paged_out:` trace line would confirm it directly and needs a restart to enable.
 - Whether the 8 GiB constant is reachable through configuration at all. Nothing in the runner's
   command line references it, and it is a `const`.
 - Whether the exemption for multi-child nodes leaks: their snapshots are never reclaimed, so a long
   session that branches repeatedly could sit permanently over budget with the eviction loop unable
   to find a victim (`best == nil`, break).
-- Whether the depth gate survives contact with a *subagent*, and whether the no-fabrication result
-  holds without `skeptic_min.md` in front of it. Both arms above are n=1, and the arms differ in
-  two variables.
-- Whether a gate can hold a *subagent* to the same standard in practice. The evidence exists in
-  `subagents/agent-*.jsonl`, but no hook payload points at it and the structured tool results are
-  absent, so the recorder needs a path convention rather than a documented handle.
+- ~~Whether the depth gate survives contact with a *subagent*, and whether no-fabrication holds
+  without `skeptic_min.md`~~ **Both answered** (§8): it gates a delegate through `SubagentStop`, the
+  delegate complies with a refusal, and the false premise was refused without the prompt too. The
+  payload does point at the delegate's transcript — `agent_transcript_path` — so the recorder needed
+  no path convention after all, only to stop reading the parent's.
 - Why `prefix_cache.go:255` fails to restore the parent's entry on a later resume and then frees
   every cache. It fired in both multi-subagent sessions and once in eight prior days, but never in
   a synthetic run of the same shapes and sizes, so it belongs to the client's request pattern rather

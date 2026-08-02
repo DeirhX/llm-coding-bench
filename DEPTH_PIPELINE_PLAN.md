@@ -71,16 +71,32 @@ head (byte-identical)  ->  adapter contract  ->  agent works  ->  Stop gate
 |---|---|---|
 | 1 | ~~**Evidence recorder**~~ **done** — `scripts/cc_evidence.py` | Met: on a real session it recovered 189 calls across the parent and both subagent transcripts, 29 failures with their error text |
 | 2 | ~~**Verifier library**~~ **done** — `scripts/cc_verify.py`, tests in `scripts/test_cc_verify.py` | Met: replayed against the spike's own five citations it returns 3 `pass`, 1 `indent-drift` (accepted, reported), 1 `retouched` (one line's whitespace altered — refused, but not mislabelled as fabrication). Invented quotes `fail`, missing files are `unverified`, never `pass` |
-| 3 | **Claim ledger** — schema (claim, evidence pointers, verdict, unknowns) plus per-task adapters declaring required evidence | `arch`, `claim` and `audittrap` adapters express their requirements without schema changes |
-| 4 | **Depth gate** — `cc-depth-gate.py` on `Stop` and `SubagentStop`, one consolidated refusal, ≤3 rounds, `stop_hook_active` safe | Blocks an unsupported answer, releases a supported one, never loops. Where fresh evidence is required, it verifies new `tool_use` events appeared since its last refusal rather than instructing the model to look again |
-| 5 | **Contract injection** — `UserPromptSubmit`, adapter-keyed, head untouched | Prefix match on turn 1 stays at the warm-session figure |
-| 6 | **Stage driver** — sequential stages, artifacts between them, tails within budget | A three-stage run keeps the shared head warm throughout |
-| 7 | **Measurement** — the gate on `arch`/`claim`/`audittrap` under `BENCH_REALISM=1`, with the historical `AgentResult`/`Config` plan as a negative fixture | The negative fixture is refused; scores on the positives do not regress |
+| 3 | ~~**Claim ledger**~~ **done** — `scripts/cc_ledger.py` | Met: `Contract`/`Claim`/`Evidence` plus five adapters (review, debug, refactor-proposal, ops-perf, bench-audit) express their requirements as data. Claims are read from `claims.jsonl` when the model writes one and parsed out of the reply's blocks when it does not, which is what it actually did under refusal |
+| 4 | ~~**Depth gate**~~ **done** — `scripts/cc-depth-gate.py`, tests in `scripts/test_cc_gate.py` | Met: blocks an unsupported answer, releases a supported one, 11 offline checks, 10 of 10 planted fabrications caught, 1 ms per invocation. It blocks **once**, not up to three times (see below) |
+| 5 | ~~**Contract injection**~~ **done** — `scripts/cc-depth-contract.py`, wired by `claude-gemma.sh --depth [kind]` | Met: `SessionStart` writes `contract.json`, the first `UserPromptSubmit` returns it as `additionalContext` and no later one repeats it. The head is untouched by construction — nothing is injected ahead of the conversation |
+| 6 | ~~**Stage driver**~~ **done** — `scripts/depth_pipeline.py`, tests in `scripts/test_depth_pipeline.py` | Met offline: three stages, artifacts on disk between them, one refusal per stage, head hashed and re-asserted after every stage, a lock so two drivers cannot share one runner. The warm-head figure across a real three-stage run is still unmeasured |
+| 7 | ~~**Measurement**~~ **done** — `scripts/depth_fixtures.py`, `scripts/measure_depth_gate.sh` | Met, and the fixtures are the interesting half (below). Contract arms on the resident 31B under `BENCH_REALISM=1`: arch 83 -> **85**/90, claim 23 -> **23**/23, audittrap 75 -> **75**/81, per-task identical on all seven audittrap tasks. No regression anywhere; the +2 on arch is n=1 and is not claimed as an improvement |
 
-Components 1–5 are client-side code with no GPU dependency and can be built while the machine is
-busy. Only 6 and 7 need the model. 1 and 2 are built and tested; `python3 scripts/test_cc_verify.py`
-is the regression check, and it uses the spike's real citations as its fixture rather than invented
-ones.
+Components 1-6 are built and tested offline; `scripts/test_cc_verify.py`, `scripts/test_cc_gate.py`
+and `scripts/test_depth_pipeline.py` are the regression checks, and each uses this project's own real
+sessions as fixtures rather than invented ones. Only 7 needs the model.
+
+**The gate blocks once, not three times.** The plan allowed up to three rounds; the spike priced a
+refused round at 1.8x-2.5x the original turn (141 s and 432 s in the two arms), so a second refusal
+would double a stage to buy what the first already bought. `stop_hook_active` short-circuits to
+success, which makes a loop impossible by construction rather than by a counter. The finding that
+prompted the "check for new tool_use events" requirement is honoured differently and more strictly:
+the gate never trusts an instruction to have been followed, because it re-reads every cited span
+itself and cross-checks each citation against the line ranges the recorder saw. A quote that matches
+the file but that no read in the session covered is named as such.
+
+Two things had to change once the components met each other. The block form originally carried only
+file quotes, which made `refactor-proposal` and `ops-perf` unsatisfiable -- both require evidence
+kinds the answer format could not express, so the gate would have demanded them forever; the parser
+now accepts `command:`, `absence:`, `log:`, `SEVERITY:` and `FALSIFICATION:` lines. And the probe
+floor no longer counts `ls`, `find`, `grep` or their kin, because the historical refactor proposal's
+entire evidence was five such commands and it would otherwise have cleared a floor written to stop
+exactly that.
 
 A verdict vocabulary came out of building 2, and the gate depends on it: `pass`, `indent-drift`
 (accepted, reported), `retouched` (content right, whitespace edited — refused, because that drift is
@@ -88,6 +104,62 @@ the same defect behind this model's failed edits), `wrong-lines`, `fail`, and `u
 anything that could not be checked. Verifiers fail closed, which is the opposite of the hook
 convention in `cc-context-guard.py` and deliberately so: a guard that crashes should let work
 through, a verifier that cannot check something must not bless it.
+
+### What the fixtures showed
+
+`scripts/depth_fixtures.py` runs the gate against two answers this project produced before the gate
+existed, so neither was written to pass or fail it.
+
+- The **historical refactor proposal** -- typed `AgentResult`, central `Config`, built on
+  `grep -c os.environ.get` -- is refused: no claims, no probe.
+- A **steelman of it** is also refused, and this is the result worth having. Its three citations were
+  made byte-exact and all three verify; it still fails, on the `absence` search it never ran and the
+  probe it never ran. The gate refuses the argument, not the formatting.
+- The **five spike findings** survive: four verified outright, none called a fabrication. The fifth
+  is refused for quote fidelity alone -- one line re-indented by a single space -- which costs a
+  round and keeps the finding.
+
+Two things had to be fixed to get an honest number, both of them the same mistake the gate exists to
+catch, made by the measurement instead of the model. The comparison script read the per-task file,
+which carries no score, and printed `None/None` for every arm -- readable as "the contract changed
+nothing". And it checked bench citations against this repository, where a bench's fixture paths do
+not exist, marking a correct citation unverified.
+
+### The two arms that were n=1, and the three defects they found
+
+Both remaining arms were rerun against the production hooks rather than the spike's throwaway gate
+(`LOCAL_AGENT_OPS.md` §8). That distinction is the point: every defect below needed a real client,
+and none of them could have appeared in a synthetic transcript.
+
+- **The false premise, without `skeptic_min.md`.** Still refused, still no invented citation, one
+  verified claim and an explicit `UNKNOWN`. The prompt and the gate are separated; the honesty was
+  not the prompt's.
+- **A delegate, via `SubagentStop`.** It fires, it can block, and the delegate complies with a
+  refusal exactly as the parent does — observed three times. Parent and delegate are now judged
+  separately, on their own answers, into `artifacts/depth/<session>/gate.json` and
+  `…/<session>/<agent_id>/gate.json`. The passing delegated run cost 83 s with no refusal round.
+
+The defects, all three now fixed and covered by tests:
+
+1. A quote wrapped in a ```` ```python ```` fence was compared with the fence as content, and the
+   correct citation came back `fail`, the verdict meaning *fabricated*. An enclosing fence is now
+   stripped; an interior one is content.
+2. The `Stop` hook beat the transcript write by 51 ms and judged the previous turn, reporting "no
+   claims were stated" about an answer that had one. The payload's `last_assistant_message` is now
+   authoritative, with a quiet-period read of the file as fallback.
+3. `SubagentStop` hands over the **parent's** `transcript_path`, which is empty while the parent
+   waits inside its `Agent` call. The delegate's is `agent_transcript_path`, which is also the
+   correct coverage scope: a sibling's reads are not this delegate's evidence.
+
+### A bench regression found on the way, unrelated to this work
+
+The first audittrap run scored **0 on all six fix tasks in both arms**. It was not the contract and
+not the model: the patch it produced for `chat_timeout_dropped` is byte-identical to one that scored
+10/10 on 29 July, and the grade moved from `pytest 3/3` to `pytest 0/1`. The interpreter running the
+bench had no `pytest` -- none of the three on `PATH` do, only `.venv/bin/python` -- so every fix task
+failed collection and was scored zero. Any audittrap fix score produced outside the venv is
+worthless, and it looks exactly like a model that cannot fix anything. `run_private_pytest` in both
+audittrap and repohard now refuses to grade instead of returning a zero.
 
 ## 4. Rules the implementation must not break
 
@@ -106,20 +178,39 @@ through, a verifier that cannot check something must not bless it.
   below rather than left as risk: it does **not** re-read unless it lacks the material, so the gate
   must check the transcript for new `tool_use` events itself; it quotes from memory and drifts on
   indentation, so 2 of 5 citations were not byte-exact; and one refusal costs a full extra turn.
+- ~~Whether the gate works one level down~~ **Tested 2026-08-02**: `SubagentStop` gates a delegate,
+  the delegate complies, and its verdict is kept apart from the parent's by `agent_id`.
 - **Wipe frequency at realistic sizes.** Measured at once per session on 18k parents. If it scales
   with parent size or delegation count, the transport decision flips to scripted `claude -p`
   workers — which is cheap, because every component above is transport-agnostic.
-- **KV bytes per token is unknown**, so the 8 GiB budget is only bracketed at 7.5k–19k tokens of
-  retained tail. The driver currently cannot be given a precise number.
+- ~~KV bytes per token is unknown~~ **Resolved by arithmetic, not by a probe**: a paged-out node
+  costs a flat ≤800 MiB (50 windowed layers × 1024 tokens × 16 KiB) plus 160 KiB per token of its own
+  edge (10 full-attention layers). The 8 GiB budget therefore buys ~9 parked nodes, or one node of
+  ~47k tokens. What the driver must keep small is the *number* of parked branch points, which is a
+  different instruction than "keep the tails short" — and the flat term has not been measured end to
+  end, only derived (`LOCAL_AGENT_OPS.md` §8).
 - **The multi-child exemption may leak**: pinned branch points are never reclaimed, so a long
   branching session could sit permanently over budget with the eviction loop unable to find a
   victim.
 
-## 6. Deferred, and what would revive them
+## 6. Formerly deferred, now measured
 
-- `--swa-full` KV size for gemma4 at 96k, and whether it fits beside 62 GB of weights. Revived only
-  if disk-backed context snapshots become necessary — i.e. if the 8 GiB budget proves too tight.
-- `ngram-mod` / `ngram-map-k` on the dense gemma4 GGUF against MLX+MTP decode, on real editing
-  output rather than a repetition fixture. Revived if decode, not prefill, becomes the bottleneck.
-- Anthropic-to-OpenAI translating proxy. Only if the llama.cpp path wins; it would also finally give
-  per-client attribution in the logs.
+All three were run on 2026-08-02 (`LOCAL_AGENT_OPS.md` §8, probes in `scripts/phase0/llamacpp/`).
+None of them changes this plan, and one of them closes a door for good.
+
+- **`--swa-full` for gemma4 at 96k: it does not fit.** 90 GiB of KV beside 58 GiB of weights against
+  a 107.5 GiB budget; the ceiling is ~54k tokens. Parking a 96k agent context on disk is therefore
+  not available on the llama.cpp path at all, and the MLX runner's in-RAM trie stays the only
+  mechanism this pipeline can lean on. Measured on gemma3's GGUF, whose save size the formula
+  predicts to 0.4 %; also caught two traps that make a restore *look* successful when it is not
+  (default `--parallel` saves nothing; without `--swa-full` the restore re-prefills).
+- **N-gram speculation is a 3.9× decode win on real editing output at 35B, 4.7× stacked with a draft
+  head, and free on prose** — byte-identical output in all five settings. It does not help this
+  pipeline directly, because the gate's cost is *prefill* (a refusal round re-prefills; §8 measures
+  1.8–2.5×), and speculation accelerates decode. It matters the moment a stage is generating patches
+  rather than reading, and it costs nothing to leave on.
+- **The translating proxy exists and works**: `scripts/anthropic_proxy.py`, 10 offline tests, driven
+  end to end by Claude Code through a real tool call. Two things it bought immediately: per-client
+  attribution logged on arrival rather than reconstructed, and `--force-model`, after the client was
+  caught asking for `claude-opus-4-8` regardless of every model setting — the failure mode that
+  evicts a resident 62 GB runner.

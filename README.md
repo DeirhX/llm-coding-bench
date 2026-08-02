@@ -170,6 +170,32 @@ Writes a markdown leaderboard to `results/REPORT.md` (or `--out`) and prints a b
 - `scripts/claude-gemma.sh` — launcher; `.cursor/skills/ollama-watch/` — live Ollama diagnosis
 - `scripts/phase0/` — the probes behind every **[measured]** claim in the two documents above
 
+### The depth gate
+
+A local 31B fails the same way on unrelated tasks: it stops exploring once it has a story that
+sounds complete, then asserts it with confident specifics. Prompts do not fix that — this repository
+measured the same thing for context discipline — so the stopping decision is moved out of the model.
+An answer is refused unless its claims carry evidence that survives being looked up.
+
+- `claude-gemma --depth [review|debug|refactor-proposal|ops-perf|bench-audit]` — gate a session.
+  The contract goes in with your first prompt; a thin answer is refused once, with every gap in one
+  message. `touch /tmp/cc-depth-off` lifts it without editing anything.
+- `scripts/depth_pipeline.py` — the same verifier, unattended, as sequential stages.
+- `scripts/depth_fixtures.py` — runs the gate against two real answers this project already
+  produced: the refactor proposal it exists to refuse, and five findings it must not cost.
+
+Delegates are gated too: `SubagentStop` judges each one on its own answer, and its verdict lands in
+`artifacts/depth/<session>/<agent_id>/gate.json` beside the parent's.
+
+### Reaching a non-Ollama backend
+
+`scripts/anthropic_proxy.py` speaks Anthropic Messages in front and OpenAI chat completions behind,
+so Claude Code can drive `llama-server` — streaming, tools and reasoning output included. Two
+reasons to run it even against Ollama: it logs every request **as it arrives**, with the caller's
+`user-agent`, which is the attribution the server log has never had; and `--force-model` pins the
+model at the port, after the client was caught asking for `claude-opus-4-8` regardless of every
+model setting. On Ollama a wrong-but-existing model name unloads 62 GB of resident weights.
+
 ### Known limitations (Claude Code + local Ollama)
 
 These are measured gaps, not TODOs we forgot to file:
