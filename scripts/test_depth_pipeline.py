@@ -63,11 +63,10 @@ def _run(replies, stages="survey,claims", task="does add add?", adapter="review"
     try:
         head = dp.head_file(out)
         contract = cc_ledger.contract_for(adapter)
-        results = []
-        for name in stages.split(","):
-            stage = {s.name: s for s in dp.DEFAULT_STAGES + dp.IMPLEMENT_STAGES}[name]
-            results.append(dp.run_stage(stage, contract, task, "fake-model", head, out, root,
-                                        False, False))
+        chosen = [{s.name: s for s in dp.DEFAULT_STAGES + dp.IMPLEMENT_STAGES}[n]
+                  for n in stages.split(",")]
+        results = dp.run_flow(chosen, contract, task, "fake-model", head, out, root, False, False,
+                              adapter, quiet=True)
         return results, fake, out, root
     finally:
         dp.invoke = original
@@ -243,3 +242,20 @@ def test_a_base_url_the_caller_set_is_not_overwritten(monkeypatch) -> None:
         except SystemExit:
             pass
     assert seen.get("ANTHROPIC_BASE_URL") == "http://127.0.0.1:8099", seen.get("ANTHROPIC_BASE_URL")
+
+def test_a_refused_plan_stops_the_flow() -> None:
+    """The stages below a plan execute it faithfully, which is the problem.
+
+    A plan that committed to nothing was implemented and then verified anyway, and what came
+    out passed a real red/green pair while changing no behaviour at all.
+    """
+    results, fake, _, _ = _run(["a plan with no commitment in it", "changed it", "verified"],
+                               stages="plan,implement,verify", adapter="implement")
+    assert [r.stage for r in results] == ["plan"], [r.stage for r in results]
+    assert len(fake.prompts) <= 2, fake.prompts
+
+
+def test_a_plan_that_commits_lets_the_flow_continue() -> None:
+    results, _, _, _ = _run([PLAN, "changed it", "verified"],
+                            stages="plan,implement,verify", adapter="implement")
+    assert [r.stage for r in results] == ["plan", "implement", "verify"], results

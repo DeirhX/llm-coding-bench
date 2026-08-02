@@ -199,3 +199,28 @@ def test_an_interior_fence_is_still_content(tmp_path):
     src.write_text("intro\n```sh\nls -l\n```\ntail\n")
     assert vf.file_quote(str(tmp_path), "doc.md", 1, 5,
                                 "intro\n```sh\nls -l\n```\ntail").kind == vf.PASS
+
+def test_a_quote_with_the_line_numbers_still_on_it_is_accepted(tmp_path) -> None:
+    """What a model gets from Read is numbered, and quoting it back verbatim is honest.
+
+    A live stage spent fifteen minutes refused for this, re-read the file, and produced the
+    same quote again. The verdict it got was the one reserved for fabrication.
+    """
+    (tmp_path / "m.py").write_text("def add(a, b):\n    return a + b\n")
+    numbered = "1 def add(a, b):\n2     return a + b"
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, numbered)
+    assert verdict.ok, verdict
+
+
+def test_numbers_that_do_not_count_are_left_as_content(tmp_path) -> None:
+    """A gutter counts. Two lines that happen to start with a digit are code."""
+    (tmp_path / "m.py").write_text("10 apples\n40 pears\n")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, "10 apples\n40 pears")
+    assert verdict.ok, verdict
+
+
+def test_stripping_a_gutter_cannot_rescue_a_wrong_quote(tmp_path) -> None:
+    (tmp_path / "m.py").write_text("def add(a, b):\n    return a + b\n")
+    wrong = "1 def add(a, b):\n2     return a - b"
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, wrong)
+    assert not verdict.ok, verdict

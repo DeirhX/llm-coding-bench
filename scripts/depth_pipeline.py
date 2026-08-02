@@ -71,6 +71,10 @@ class Stage:
     # held to red/green -- nothing has run yet -- but it can be held to naming the failure it
     # expects, which is where the first implement run actually went wrong.
     adapter: str | None = None
+    # Whether the stages after this one are worth running if this one was refused. A plan that
+    # committed to nothing was still implemented, faithfully, by the two stages below it -- which is
+    # how a change that alters no behaviour gets built and then verified.
+    blocking: bool = False
 
     @property
     def tools(self) -> str:
@@ -122,6 +126,7 @@ IMPLEMENT_STAGES = [
         name="plan",
         produces="plan.md",
         adapter="change-plan",
+        blocking=True,
         stance=("Find the code the task names and stop. Report the file and line range you opened, "
                 "the behaviour as it stands, and the single smallest test that would fail because "
                 "of it -- where that test goes, what it asserts, and the exact command that would "
@@ -215,8 +220,10 @@ def compose(head: Path, contract: cc_ledger.Contract, stage: Stage, task: str,
               # stage exists for, so it cannot be taken away, only aimed somewhere harmless. The one
               # stage that may edit needs the opposite instruction, or it writes its fix to scratch.
               ("Change the files the task requires and nothing else. Scratch work -- a probe, a "
-               "throwaway script -- still goes in %s, and no scratch file is part of your answer."
-               % scratch) if stage.writes else
+               "throwaway script -- still goes in %s. That path is absolute: it is not inside "
+               "this repository, and creating an out/ or scratch/ directory here instead is a "
+               "change to the repository that you will be asked to justify. No scratch file is "
+               "part of your answer." % scratch) if stage.writes else
               ("Any scratch file you write -- a repro script, a probe, a scratch test -- goes in "
                "%s and nowhere else. Do not create files in the repository you are reviewing."
                % scratch),
@@ -405,6 +412,39 @@ def head_file(out_dir: Path) -> Path:
     return head
 
 
+def run_flow(stages, contract: cc_ledger.Contract, task: str, model: str, head: Path,
+             out_dir: Path, cwd: Path, yolo: bool, dry_run: bool, adapter: str = "",
+             head_hash: str = "", quiet: bool = False) -> list[StageResult]:
+    """Every stage in order, stopping when one fails or when a blocking stage is refused.
+
+    One loop, called by main and by the tests. The tests used to carry their own copy, which is how
+    a stage that refuses the plan and then implements it anyway passed a test suite that had a test
+    for exactly that.
+    """
+    def say(text: str, err: bool = False) -> None:
+        if not quiet:
+            print(text, file=sys.stderr if err else sys.stdout, flush=True)
+
+    results: list[StageResult] = []
+    for stage in stages:
+        say("== %s (%s, %s) ..." % (stage.name, adapter or contract.adapter, model))
+        result = run_stage(stage, contract, task, model, head, out_dir, cwd, yolo, dry_run)
+        results.append(result)
+        if head_hash and hashlib.sha256(head.read_bytes()).hexdigest()[:12] != head_hash:
+            say("   head changed mid-run: every later stage now re-prefills it", err=True)
+        if result.error:
+            say("   failed: %s" % result.error, err=True)
+            break
+        say("   %.0fs, %d round(s), %d claim(s), %d gap(s), %d unknown(s), reuse %.1f%%"
+            % (result.seconds, result.rounds, result.claims, len(result.gaps),
+               len(result.unknowns), result.reuse))
+        if stage.blocking and result.gaps:
+            say("   %s was refused, and every stage after it would be acting on what it produced, "
+                "so stopping here.\n   %s" % (stage.name, "\n   ".join(result.gaps[:3])), err=True)
+            break
+    return results
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("task", help="the question the pipeline answers")
@@ -452,20 +492,8 @@ def main() -> int:
         LOCK.write_text("%s pid %d model %s\n" % (time.strftime("%F %T"), os.getpid(), args.model))
     results: list[StageResult] = []
     try:
-        for stage in stages:
-            print("== %s (%s, %s) ..." % (stage.name, args.adapter, args.model), flush=True)
-            r = run_stage(stage, contract, args.task, args.model, head, out_dir,
-                          Path(args.cwd), args.yolo, args.dry_run)
-            results.append(r)
-            if hashlib.sha256(head.read_bytes()).hexdigest()[:12] != head_hash:
-                print("   head changed mid-run: every later stage now re-prefills it",
-                      file=sys.stderr)
-            if r.error:
-                print("   failed: %s" % r.error, file=sys.stderr)
-                break
-            print("   %.0fs, %d round(s), %d claim(s), %d gap(s), %d unknown(s), reuse %.1f%%"
-                  % (r.seconds, r.rounds, r.claims, len(r.gaps), len(r.unknowns), r.reuse),
-                  flush=True)
+        results = run_flow(stages, contract, args.task, args.model, head, out_dir, Path(args.cwd),
+                           args.yolo, args.dry_run, args.adapter, head_hash)
     finally:
         if not args.dry_run:
             LOCK.unlink(missing_ok=True)

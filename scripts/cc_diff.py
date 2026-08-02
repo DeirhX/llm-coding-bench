@@ -28,6 +28,11 @@ import subprocess
 # belongs to; a wrong guess here weakens a check rather than inventing a refusal.
 _TEST_PATH = re.compile(r"(^|/)(tests?|spec)/|(^|/)(test_|conftest)|_test\.py$|\.spec\.\w+$")
 _ADDED_FILE = re.compile(r"^\+\+\+ b/(?P<path>.+)$")
+# Stages are given an absolute scratch directory and told to keep their probes there. One resolved
+# that path relative to the repository instead and created `out/scratch/` inside it, so the moment
+# untracked files started being read, a throwaway probe became a test this module had opinions
+# about. Anything under a directory called scratch is nobody's change.
+_SCRATCH = re.compile(r"(^|/)(scratch|\.depth-scratch)(/|$)")
 _ADDED_TEST = re.compile(r"^\+\s*(?:async\s+)?def\s+(?P<name>test\w*)\s*\(")
 _MOCK_ASSERT = re.compile(r"assert_called|assert_has_calls|assert_any_call|\.call_count|"
                           r"assert_awaited")
@@ -38,14 +43,46 @@ _SWALLOWED = re.compile(r"^\+\s*except\s+[\w.() ,]*:\s*$")
 _PASSES = re.compile(r"^\+\s*(pass|\.\.\.)\s*(#.*)?$")
 
 
-def diff(root: str) -> str:
-    """Everything not yet committed, staged or not. Empty string when that cannot be determined."""
+def _git(root: str, *args: str) -> str:
     try:
-        out = subprocess.run(["git", "diff", "HEAD"], cwd=root, capture_output=True, text=True,
-                             timeout=20)
+        out = subprocess.run(("git",) + args, cwd=root, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return ""
     return out.stdout if out.returncode == 0 else ""
+
+
+def diff(root: str) -> str:
+    """Everything not yet committed, tracked or not. Empty string when that cannot be determined.
+
+    A plain `git diff HEAD` cannot see a file git has never heard of, and the natural way to add a
+    failing test is to write a new file. The checks that read this were built against a change that
+    edited an existing test file, so they were silently blind to the commonest shape of the thing
+    they exist to catch. Untracked files are added with --intent-to-add inside a temporary index, so
+    they appear as ordinary additions and the caller's staging area is left exactly as it was.
+    """
+    tracked = _git(root, "diff", "HEAD")
+    listing = _git(root, "ls-files", "--others", "--exclude-standard")
+    fresh = [f for f in listing.split("\n") if f.strip()]
+    if not fresh:
+        return tracked
+    index = os.path.join(root, ".git", "cc_diff_index")
+    env = dict(os.environ, GIT_INDEX_FILE=index)
+    try:
+        subprocess.run(["git", "read-tree", "HEAD"], cwd=root, env=env, capture_output=True,
+                       timeout=30)
+        subprocess.run(["git", "add", "--intent-to-add", "--"] + fresh, cwd=root, env=env,
+                       capture_output=True, timeout=30)
+        out = subprocess.run(["git", "diff", "HEAD", "--"] + fresh, cwd=root, env=env,
+                             capture_output=True, text=True, timeout=30)
+        added = out.stdout if out.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        added = ""
+    finally:
+        try:
+            os.unlink(index)
+        except OSError:
+            pass
+    return tracked + added
 
 
 def _files(text: str):
@@ -77,7 +114,7 @@ def hollow_tests(text: str) -> list[str]:
     """
     out = []
     for path, added in _files(text):
-        if not _TEST_PATH.search(path):
+        if not _TEST_PATH.search(path) or _SCRATCH.search(path):
             continue
         name, asserts, mocky, silenced, pending = None, 0, 0, False, False
         def close() -> None:
@@ -146,7 +183,7 @@ def _new_parameters(text: str, root: str) -> dict[str, set[str]]:
     """
     out: dict[str, set[str]] = {}
     for path, _ in _files(text):
-        if _TEST_PATH.search(path) or not path.endswith(".py"):
+        if _TEST_PATH.search(path) or _SCRATCH.search(path) or not path.endswith(".py"):
             continue
         try:
             with open(os.path.join(root, path), encoding="utf-8", errors="replace") as fh:

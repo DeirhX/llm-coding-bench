@@ -9,6 +9,7 @@ header, and a body assignment being indistinguishable from a parameter to a rege
 
 from __future__ import annotations
 
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -31,7 +32,7 @@ def caller():
 '''
 
 
-def _repo(tmp: str, after: str, tests: str = "") -> str:
+def _repo(tmp: str, after: str, tests: str = "", new_file: tuple = ()) -> str:
     root = Path(tmp)
     (root / "src").mkdir()
     (root / "src/m.py").write_text(BEFORE)
@@ -46,6 +47,8 @@ def _repo(tmp: str, after: str, tests: str = "") -> str:
     (root / "src/m.py").write_text(after)
     if tests:
         (root / "tests/test_m.py").write_text("import src.m\n" + tests)
+    if new_file:
+        (root / new_file[0]).write_text(new_file[1])
     return str(root)
 
 
@@ -129,3 +132,50 @@ def test_no_git_is_silence_rather_than_a_refusal() -> None:
         assert cc_diff.diff(tmp) == ""
         assert cc_diff.hollow_tests("") == []
         assert cc_diff.inert_parameters("", tmp) == []
+
+FRESH_TEST = (
+    "import src.m\n"
+    "from unittest import mock\n"
+    "\n"
+    "\n"
+    "def test_prepare_forwards_holdings():\n"
+    "    with mock.patch('src.m.capacity') as cap:\n"
+    "        src.m.prepare('acc', [], holdings={})\n"
+    "        cap.assert_called_with(holdings={})\n"
+)
+
+
+def test_a_test_file_git_has_never_seen_is_still_read() -> None:
+    """`git diff HEAD` cannot see an untracked file, and a new test is usually a new file.
+
+    The checks that read the diff were written against a change that edited an existing test
+    file, so the commonest shape of the thing they exist to catch went straight past them.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = _repo(tmp, BEFORE, new_file=("tests/test_new.py", FRESH_TEST))
+        found = cc_diff.hollow_tests(cc_diff.diff(root))
+    assert found and "test_new.py" in found[0], found
+
+
+def test_reading_the_diff_leaves_the_index_alone() -> None:
+    """The intent-to-add happens in a throwaway index; a caller mid-commit must not notice."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = _repo(tmp, BEFORE, new_file=("tests/test_new.py", "x = 1\n"))
+        args = ["git", "status", "--porcelain"]
+        before = subprocess.run(args, cwd=root, capture_output=True, text=True).stdout
+        cc_diff.diff(root)
+        after = subprocess.run(args, cwd=root, capture_output=True, text=True).stdout
+    assert before == after, (before, after)
+    assert "??" in before, before
+
+def test_a_probe_left_in_scratch_is_not_a_test_of_the_change() -> None:
+    """A stage told to keep its probes in an absolute scratch path put them in ./out/scratch.
+
+    Harmless until untracked files started being read, at which point a throwaway probe became
+    something this module had opinions about.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = _repo(tmp, BEFORE)
+        (pathlib.Path(root) / "out/scratch").mkdir(parents=True)
+        (pathlib.Path(root) / "out/scratch/test_probe.py").write_text(FRESH_TEST)
+        assert cc_diff.hollow_tests(cc_diff.diff(root)) == []

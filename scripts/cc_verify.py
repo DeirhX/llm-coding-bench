@@ -71,7 +71,43 @@ class Verdict:
 
 def _significant(text: str) -> list[str]:
     """Lines that carry content, with trailing whitespace, blank lines and code fences discarded."""
-    return [line.rstrip() for line in _unfenced(text).strip("\n").split("\n") if line.strip()]
+    return [line.rstrip()
+            for line in _ungutted(_unfenced(text)).strip("\n").split("\n") if line.strip()]
+
+
+# One separator only: a bar-style gutter puts the code straight after the bar, and a space-style one
+# uses a single space. Eating a second space silently reindents the quote by one column, which the
+# verifier then reports as whitespace drift -- a better verdict than fabrication, but still wrong.
+_GUTTER = re.compile(r"^\s{0,8}(?P<n>\d{1,6})(?:\s*[|:>]|\s)(?P<code>.*)$")
+
+
+def _ungutted(text: str) -> str:
+    """Drop a line-number gutter the model pasted along with the code.
+
+    Reading a file gives the model `1013 def f(` and quoting it back verbatim is the honest thing to
+    do, so it does -- and the comparison then fails with "quote not present in file", the verdict
+    reserved for fabrication. One live stage spent fifteen minutes being refused for this and then
+    re-reading the same file to produce the same quote.
+
+    Only stripped when every content line carries a number and those numbers run consecutively: a
+    gutter is a gutter because it counts. That leaves code that merely begins with a digit alone,
+    and cannot turn a wrong quote into a right one, since what remains is still compared against the
+    file byte for byte.
+    """
+    lines = [l for l in text.split("\n")]
+    content = [l for l in lines if l.strip()]
+    if len(content) < 2:
+        return text
+    numbers, stripped = [], {}
+    for line in content:
+        found = _GUTTER.match(line)
+        if not found or not found.group("code").strip():
+            return text
+        numbers.append(int(found.group("n")))
+        stripped[line] = found.group("code")
+    if any(b - a != 1 for a, b in zip(numbers, numbers[1:])):
+        return text
+    return "\n".join(stripped.get(l, l) for l in lines)
 
 
 def _unfenced(text: str) -> str:
