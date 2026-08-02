@@ -510,6 +510,12 @@ def refusal(gaps: list[str], claims_path: Path) -> str:
     return "%s\n\n%s\n%s" % (head, body, tail)
 
 
+# How many times a session may be pushed back into its flow before it is let go. One is too few:
+# a three-stage flow needs at least one push per stage, and a model that stops to "wait" for a
+# subagent it has already been handed the report from will spend several. Unbounded is a hang.
+NUDGE_LIMIT = 8
+
+
 def _stage_of(state: dict, agent: str, payload: dict) -> str:
     """Which stage of the flow this subagent is, if any.
 
@@ -577,13 +583,17 @@ def main() -> int:
         if abandoned:
             cc_flowstate.save(state, session, root)
         left = cc_flowstate.next_stage(state)
-        if left:
+        nudges = int(state.get("nudges", 0))
+        if left and nudges < NUDGE_LIMIT:
             done = cc_flowstate.done(state)
+            state["nudges"] = nudges + 1
+            cc_flowstate.save(state, session, root)
             return block(
                 "The %s flow is not finished. %s %s run; %s has not. Launch a subagent whose "
-                "prompt begins with `STAGE: %s` and wait for it to report. Answering now would "
-                "give me one stage's view of this, and the stages after it exist because that view "
-                "is the one that has been wrong before."
+                "prompt begins with `STAGE: %s`. The Task tool hands you that subagent's report as "
+                "its result -- there is nothing to wait for and nothing running in the background, "
+                "so do not stop to wait. Answering now would give me one stage's view of this, and "
+                "the stages after it exist because that view is the one that has been wrong before."
                 % (state["flow"], ", ".join(done) or "No stage has",
                    "have" if len(done) > 1 else "has", left, left))
 
@@ -595,6 +605,7 @@ def main() -> int:
         running = cc_flow.stage_in(state.get("flow", ""), stage)
         if running is not None and not running.verify:
             cc_flowstate.record_verdict(state, stage, [], agent)
+            state["nudges"] = 0
             for entry in reversed(state.get("stages", [])):
                 if entry.get("stage") == stage and not entry.get("summary"):
                     entry["summary"] = _digest(text, limit=2000) or text[-1500:]
@@ -629,6 +640,7 @@ def main() -> int:
         # What the next stage may do turns on this verdict, so it is written where the hook that
         # admits the next launch can read it rather than left in the conversation.
         cc_flowstate.record_verdict(state, stage, gaps, agent)
+        state["nudges"] = 0     # a stage reported, so the budget for pushing is not being spent
         for entry in reversed(state.get("stages", [])):
             if entry.get("stage") == stage and not entry.get("summary"):
                 entry["summary"] = _digest(text)

@@ -125,8 +125,12 @@ def admits(state: dict, stage: str) -> tuple[bool, str]:
                        "one is written to consume what the one before it established."
                        % (expected, stage, flow, ", ".join(known)))
     if stage in running(state):
-        return False, ("A %s stage is already running and has not reported yet. Wait for it."
-                       % stage)
+        # Reaching here means the earlier launch never reported: tool calls are sequential, so the
+        # model cannot be issuing this one while that one is outstanding. Denying it as a duplicate
+        # leaves the session with nowhere to go -- measured, twice -- so the stale entry is dropped
+        # and the relaunch admitted.
+        state["stages"] = [e for e in state.get("stages", [])
+                           if not (e.get("stage") == stage and e.get("verdict") is None)]
     return True, ""
 
 

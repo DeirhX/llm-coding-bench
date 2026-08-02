@@ -307,3 +307,36 @@ def test_a_stage_still_running_when_the_session_stops_went_away() -> None:
     assert decision == "block", decision
     assert "STAGE: survey" in why, why
     assert cc_flowstate.running(after) == [], after
+
+
+def test_a_relaunch_of_a_stage_that_never_reported_is_admitted() -> None:
+    """Tool calls are sequential, so a launch arriving while one is outstanding means the earlier
+    one never reported. Denying it as a duplicate leaves the session nowhere to go -- twice, in
+    two live sessions, it said "I need to wait" and stopped."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.save(state, "s1", root)
+        decision, why, amended = run("STAGE: survey\n", root)
+    assert decision == "allow", why
+    assert "Map the territory" in amended["prompt"]
+
+
+def test_the_pushing_is_bounded() -> None:
+    """One push is too few for a three-stage flow; unbounded is a hang."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        state["nudges"] = 99
+        cc_flowstate.save(state, "s1", root)
+        decision, _ = _stop("I give up", root)
+    assert decision == "allow", decision
+
+
+def test_a_stage_reporting_refills_the_budget() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        state["nudges"] = 4
+        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.save(state, "s1", root)
+        _subagent_stop("survey found scripts/cc-context-guard.py:1-40", root)
+        assert cc_flowstate.load("s1", root)["nudges"] == 0
