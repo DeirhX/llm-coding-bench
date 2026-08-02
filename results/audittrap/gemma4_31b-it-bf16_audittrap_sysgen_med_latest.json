@@ -1,0 +1,332 @@
+[
+  {
+    "model": "gemma4:31b-it-bf16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "runner_interrupt_scored",
+    "title": "Ctrl-C recorded as task failure",
+    "family": "repair",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: b/runner.py: No such file or directory; fuzzy: no hunks applied (skipped=['runner.py@18'])",
+    "passed": 0,
+    "total": 0,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/runner.py\n+++ b/runner.py\n@@ -18,7 +18,7 @@\n             tid = task[\"id\"]\n             try:\n                 row = run_one(task)\n-            except BaseException as e:  # noqa: BLE001\n+            except Exception as e:\n                 row = {\n                     \"task\": tid,\n                     \"ok\": False,",
+      "reason": "Changing 'BaseException' to 'Exception' prevents KeyboardInterrupt (raised by Ctrl-C) from being caught and recorded as a task failure, allowing the process to terminate immediately as requested.",
+      "citations": [
+        "runner.py:21"
+      ],
+      "patch_bytes": 320,
+      "patch_preview": "--- a/runner.py\n+++ b/runner.py\n@@ -18,7 +18,7 @@\n             tid = task[\"id\"]\n             try:\n                 row = run_one(task)\n-            except BaseException as e:  # noqa: BLE001\n+            except Exception as e:\n                 row = {\n                     \"task\": tid,\n                     \"ok\": False,\n",
+      "apply_detail": "git apply failed: error: b/runner.py: No such file or directory; fuzzy: no hunks applied (skipped=['runner.py@18'])"
+    },
+    "tool_calls": 3,
+    "files_read": [
+      "runner.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "runner.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "BaseException",
+          "path": "."
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 262.17,
+    "prompt_tokens": 5564,
+    "eval_tokens": 2076,
+    "rounds": 4,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 636,
+    "thinking_chars": 7224,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/gemma4_31b-it-bf16_audittrap_sysgen_med__runner_interrupt_scored.txt",
+    "system_prompt": true,
+    "raw_content": "<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/runner.py\\n+++ b/runner.py\\n@@ -18,7 +18,7 @@\\n             tid = task[\\\"id\\\"]\\n             try:\\n                 row = run_one(task)\\n-            except BaseException as e:  # noqa: BLE001\\n+            except Exception as e:\\n                 row = {\\n                     \\\"task\\\": tid,\\n                     \\\"ok\\\": False,\", \"reason\": \"Changing 'BaseException' to 'Exception' prevents KeyboardInterrupt (raised by Ctrl-C) from being caught and recorded as a task failure, allowing the process to terminate immediately as requested.\", \"citations\": [\"runner.py:21\"]}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:31b-it-bf16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "chat_timeout_dropped",
+    "title": "Chat timeout_s never reaches HTTP client",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 3/3 (applied via --whitespace=nowarn -p1)",
+    "passed": 3,
+    "total": 3,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,12 +16,12 @@\n     max_tokens: int = 1024,\n     retry: int = 1,\n ) -> dict[str, Any]:\n-    del timeout_s\n     last: dict[str, Any] | None = None\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n             messages,\n+            timeout_s=timeout_s,\n             temperature=temperature,\n             max_tokens=max_tokens,\n         )",
+      "reason": "The `chat_wrapped` function in `chat/wrap.py` was explicitly deleting the `timeout_s` argument and failing to pass it to the underlying `api.post_chat` call, causing timeouts to be ignored.",
+      "citations": [
+        "chat/wrap.py:19",
+        "chat/wrap.py:22"
+      ],
+      "patch_bytes": 418,
+      "patch_preview": "--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,12 +16,12 @@\n     max_tokens: int = 1024,\n     retry: int = 1,\n ) -> dict[str, Any]:\n-    del timeout_s\n     last: dict[str, Any] | None = None\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n             messages,\n+            timeout_s=timeout_s,\n             temperature=temperature,\n             max_tokens=max_tokens,\n         )\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 6,
+    "files_read": [
+      "chat/api.py",
+      "chat/facade.py",
+      "chat/wrap.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "chat"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "timeout_s",
+          "path": "chat"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/api.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/facade.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/wrap.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 245.0,
+    "prompt_tokens": 13767,
+    "eval_tokens": 1655,
+    "rounds": 7,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 749,
+    "thinking_chars": 3483,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/gemma4_31b-it-bf16_audittrap_sysgen_med__chat_timeout_dropped.txt",
+    "system_prompt": true,
+    "raw_content": "<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/chat/wrap.py\\n+++ b/chat/wrap.py\\n@@ -16,12 +16,12 @@\\n     max_tokens: int = 1024,\\n     retry: int = 1,\\n ) -> dict[str, Any]:\\n-    del timeout_s\\n     last: dict[str, Any] | None = None\\n     for _ in range(max(1, retry)):\\n         last = api.post_chat(\\n             model,\\n             messages,\\n+            timeout_s=timeout_s,\\n             temperature=temperature,\\n             max_tokens=max_tokens,\\n         )\", \"reason\": \"The `chat_wrapped` function in `chat/wrap.py` was explicitly deleting the `timeout_s` argument and failing to pass it to the underlying `api.post_chat` call, causing timeouts to be ignored.\", \"citations\": [\"chat/wrap.py:19\", \"chat/wrap.py:22\"]}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:31b-it-bf16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "subprocess_stderr_dropped",
+    "title": "Timed-out child with stderr-only output loses diagnostics",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 3/3 (applied via --whitespace=nowarn -p1)",
+    "passed": 3,
+    "total": 3,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/util/subprocess_timeout.py\n+++ b/util/subprocess_timeout.py\n@@ -56,7 +56,7 @@\n         proc.wait(timeout=10)\n         stdout = e.stdout if e.stdout else \"\"\n         stderr = e.stderr if e.stderr else \"\"\n-        if str(stdout).strip():\n+        if str(stdout).strip() or str(stderr).strip():\n             return subprocess.CompletedProcess(\n                 args=cmd,\n                 returncode=-9,",
+      "reason": "The original code only checked for stdout content before deciding whether to return a CompletedProcess or raise ProcTimeout on timeout. This meant that if a process produced only stderr output and then timed out, the stderr was lost and a bare ProcTimeout exception was raised. Checking both stdout and stderr ensures diagnostics are preserved.",
+      "citations": [
+        "util/subprocess_timeout.py:59"
+      ],
+      "patch_bytes": 406,
+      "patch_preview": "--- a/util/subprocess_timeout.py\n+++ b/util/subprocess_timeout.py\n@@ -56,7 +56,7 @@\n         proc.wait(timeout=10)\n         stdout = e.stdout if e.stdout else \"\"\n         stderr = e.stderr if e.stderr else \"\"\n-        if str(stdout).strip():\n+        if str(stdout).strip() or str(stderr).strip():\n             return subprocess.CompletedProcess(\n                 args=cmd,\n                 returncode=-9,\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "util/subprocess_timeout.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "timeout",
+          "path": "runner.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "timeout",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "util/subprocess_timeout.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "util/subprocess_timeout.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 601.42,
+    "prompt_tokens": 13339,
+    "eval_tokens": 4738,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 886,
+    "thinking_chars": 15291,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/gemma4_31b-it-bf16_audittrap_sysgen_med__subprocess_stderr_dropped.txt",
+    "system_prompt": true,
+    "raw_content": "<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/util/subprocess_timeout.py\\n+++ b/util/subprocess_timeout.py\\n@@ -56,7 +56,7 @@\\n         proc.wait(timeout=10)\\n         stdout = e.stdout if e.stdout else \\\"\\\"\\n         stderr = e.stderr if e.stderr else \\\"\\\"\\n-        if str(stdout).strip():\\n+        if str(stdout).strip() or str(stderr).strip():\\n             return subprocess.CompletedProcess(\\n                 args=cmd,\\n                 returncode=-9,\", \"reason\": \"The original code only checked for stdout content before deciding whether to return a CompletedProcess or raise ProcTimeout on timeout. This meant that if a process produced only stderr output and then timed out, the stderr was lost and a bare ProcTimeout exception was raised. Checking both stdout and stderr ensures diagnostics are preserved.\", \"citations\": [\"util/subprocess_timeout.py:59\"]}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:31b-it-bf16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "warmup_no_deadline",
+    "title": "Warmup ignores short timeout",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 2/2 (applied via --whitespace=nowarn -p1)",
+    "passed": 2,
+    "total": 2,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/warmup.py\n+++ b/warmup.py\n@@ -10,4 +10,3 @@\n \n def warmup(model: str) -> dict[str, Any]:\n-    _ = config.FIRST_BYTE_S\n-    return chat(model, \"Reply with exactly: OK\")\n+    return chat(model, \"Reply with exactly: OK\", timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S)",
+      "reason": "The warmup function was calling `chat` without a timeout, causing it to inherit the default suite first-byte budget (600s). It should use `config.DEFAULT_WARMUP_TIMEOUT_S` (30s) as indicated in MAINTAINER_NOTES.md.",
+      "citations": [
+        "warmup.py:12",
+        "config.py:9",
+        "MAINTAINER_NOTES.md:27"
+      ],
+      "patch_bytes": 267,
+      "patch_preview": "--- a/warmup.py\n+++ b/warmup.py\n@@ -10,4 +10,3 @@\n \n def warmup(model: str) -> dict[str, Any]:\n-    _ = config.FIRST_BYTE_S\n-    return chat(model, \"Reply with exactly: OK\")\n+    return chat(model, \"Reply with exactly: OK\", timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S)\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "chat/facade.py",
+      "config.py",
+      "warmup.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "warmup",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "warmup.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/facade.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "config.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 259.45,
+    "prompt_tokens": 7559,
+    "eval_tokens": 2145,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 638,
+    "thinking_chars": 5705,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/gemma4_31b-it-bf16_audittrap_sysgen_med__warmup_no_deadline.txt",
+    "system_prompt": true,
+    "raw_content": "<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/warmup.py\\n+++ b/warmup.py\\n@@ -10,4 +10,3 @@\\n \\n def warmup(model: str) -> dict[str, Any]:\\n-    _ = config.FIRST_BYTE_S\\n-    return chat(model, \\\"Reply with exactly: OK\\\")\\n+    return chat(model, \\\"Reply with exactly: OK\\\", timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S)\", \"reason\": \"The warmup function was calling `chat` without a timeout, causing it to inherit the default suite first-byte budget (600s). It should use `config.DEFAULT_WARMUP_TIMEOUT_S` (30s) as indicated in MAINTAINER_NOTES.md.\", \"citations\": [\"warmup.py:12\", \"config.py:9\", \"MAINTAINER_NOTES.md:27\"]}\n</arch_final>"
+  }
+]

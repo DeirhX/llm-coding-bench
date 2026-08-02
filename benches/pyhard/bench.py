@@ -27,6 +27,7 @@ _REPO = Path(__file__).resolve().parents[2]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
+from bench_lib.bench_runner import BenchSpec, TaskFields, run_main
 from bench_lib.assignment import load_markdown_assignment  # noqa: E402
 from bench_lib.ollama_chat import chat as ollama_chat  # noqa: E402
 from bench_lib.ollama_think import (  # noqa: E402
@@ -45,6 +46,9 @@ OUT_DIR = results_dir()
 _ASSIGN_DIR = Path(__file__).resolve().parent / "assignment"
 
 SELFTEST = os.environ.get("BENCH_SELFTEST") == "1"
+if SELFTEST:
+    OUT_DIR = Path(tempfile.gettempdir()) / "llm-coding-bench" / "pyhard"
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
 PROVIDER = os.environ.get("BENCH_PROVIDER", "ollama").strip().lower()
 MODEL = "selftest" if SELFTEST else os.environ.get("BENCH_MODEL", "")
 if not SELFTEST and not MODEL:
@@ -1156,10 +1160,158 @@ TASKS: list[Task] = [
 ]
 
 
-def log(path: Path, s: str) -> None:
-    print(s, end="")
-    with path.open("a", encoding="utf-8") as f:
-        f.write(s)
+def do_warmup() -> None:
+    """Warmup check to ensure model is available."""
+    if MODEL == "selftest":
+        return
+    try:
+        chat(MODEL, "Reply with exactly: OK", timeout_s=30)
+        if PROVIDER == "ollama":
+            with urllib.request.urlopen("http://127.0.0.1:11434/api/ps", timeout=30) as resp:
+                ps = json.loads(resp.read().decode())
+            m = next(
+                (x for x in ps.get("models") or [] if x.get("name") == MODEL or x.get("model") == MODEL),
+                None,
+            )
+    except Exception as e:
+        raise SystemExit(f"warmup failed: {e}")
+
+
+def load_tasks() -> list[Task]:
+    run_tasks = [t for t in TASKS if not _TASK_FILTER or t.id in _TASK_FILTER]
+    if _TASK_FILTER:
+        unknown = sorted(_TASK_FILTER - {t.id for t in TASKS})
+        if unknown:
+            raise SystemExit(f"Unknown BENCH_TASKS: {unknown}")
+    return run_tasks
+
+
+def run_agent(task: Task) -> dict[str, Any]:
+    """Run the agent on a single task and grade it."""
+    if MODEL == "selftest":
+        return {
+            "model": MODEL,
+            "provider": PROVIDER,
+            "task": task.id,
+            "title": task.title,
+            "ok": False,
+            "score": 0,
+            "max_score": task.max_score,
+            "grade_detail": "selftest dummy",
+            "done_reason": "selftest",
+        }
+    try:
+        live = RoundTranscript(OUT_DIR, TAG, task.id)
+        live.begin_round(1)
+        resp = chat(
+            MODEL,
+            task.prompt,
+            on_thinking=live.on_thinking_delta,
+            on_content=live.on_content_delta,
+        )
+        live.end_round(
+            thinking=resp.get("thinking") or "",
+            content=resp.get("content") or "",
+            done_reason=resp.get("done_reason"),
+            eval_tokens=resp.get("eval_tokens"),
+        )
+
+        # One recovery shot if thinking aborted (loop/budget) with empty content.
+        if (
+            resp.get("done_reason") in ("think_loop", "think_budget")
+            and not (resp.get("content") or "").strip()
+        ):
+            live.add_note(
+                f"{(resp.get('done_reason') or 'think_loop').upper()} aborted: "
+                f"{resp.get('think_loop_detail') or resp.get('done_reason')}; retry"
+            )
+            live.begin_round(2)
+            nudge = think_loop_nudge(
+                thinking=resp.get("thinking") or "", protocol="pyhard"
+            )
+            retry_prompt = (
+                nudge + "\n\nOriginal task:\n" + (task.prompt or "")[:6000]
+            )
+            resp = chat(
+                MODEL,
+                retry_prompt,
+                on_thinking=live.on_thinking_delta,
+                on_content=live.on_content_delta,
+            )
+            live.end_round(
+                thinking=resp.get("thinking") or "",
+                content=resp.get("content") or "",
+                done_reason=resp.get("done_reason"),
+                eval_tokens=resp.get("eval_tokens"),
+            )
+        transcript_path = live.save()
+
+        grade_src = resp.get("grade_text")
+        if grade_src is None:
+            grade_src = resp.get("combined") or resp.get("content") or ""
+        g = task.grade(grade_src)
+        mx = g["max_score"] or task.max_score
+
+        truncated_empty = (
+            resp.get("done_reason") == "length"
+            and not (resp.get("content") or "").strip()
+            and bool(resp.get("thinking"))
+        )
+        if truncated_empty and g["score"] == 0:
+            detail = g.get("detail") or ""
+            g["detail"] = (
+                "truncated_empty_content: think burned num_predict; graded empty answer.\n"
+                + detail
+            ).rstrip()
+
+        row = {
+            "model": MODEL,
+            "provider": PROVIDER,
+            "task": task.id,
+            "title": task.title,
+            "ok": g["ok"],
+            "score": g["score"],
+            "max_score": mx,
+            "grade_detail": g["detail"],
+            "wall_s": round(resp.get("wall_s") or 0, 2),
+            "eval_tokens": int(resp.get("eval_tokens") or 0),
+            "prompt_tokens": int(resp.get("prompt_tokens") or 0),
+            "toks_per_s": round(resp.get("toks_per_s") or 0, 2),
+            "done_reason": resp.get("done_reason", "unknown"),
+            "content_chars": len(resp.get("content") or ""),
+            "thinking_chars": len(resp.get("thinking") or ""),
+            "code_chars": len(g.get("code") or ""),
+            "truncated_empty_content": truncated_empty,
+            "think": resp.get("think", THINK),
+            "num_ctx": OPTIONS["num_ctx"],
+            "num_predict": OPTIONS["num_predict"],
+            "python": sys.version.split()[0],
+            "transcript": str(transcript_path),
+        }
+
+        # Write the code file as before
+        (OUT_DIR / f"{TAG}___{task.id}__code.py").write_text(g.get("code") or "", encoding="utf-8")
+
+        return row
+    except Exception as e:
+        # The runner handles exceptions by calling _error_row, but we can provide a basic dict here
+        # if we want to customize the error. However, letting it bubble up is cleaner for run_main.
+        raise e
+
+spec = BenchSpec(
+    bench_name="pyhard",
+    tag_suffix="pyhard",
+    model=MODEL,
+    tag=TAG,
+    provider=PROVIDER,
+    out_dir=OUT_DIR,
+    merge_latest=MERGE_LATEST,
+    warmup=do_warmup,
+    load_tasks=load_tasks,
+    run_agent=run_agent,
+    task_fields=TaskFields(id_attr="id", row_id_key="task"),
+    latest_suffix="_latest.json",
+)
 
 
 def main() -> None:
@@ -1182,180 +1334,13 @@ def main() -> None:
         if not all_ok:
             raise SystemExit("SELFTEST FAILED")
         print("SELFTEST OK")
+
+        # Also exercise the shared runner loop with a minimal task set.
+        os.environ["BENCH_TASKS"] = "regex_match"
+        run_main(spec)
         return
 
-    log_path = OUT_DIR / f"{TAG}_pyhard.log"
-    summary_path = OUT_DIR / f"{TAG}_pyhard_{time.strftime('%Y%m%d_%H%M%S')}.json"
-    log_path.write_text("", encoding="utf-8")
-    log(log_path, f"Python hard bench {time.strftime('%Y-%m-%d %H:%M:%S %z')}\n")
-    log(
-        log_path,
-        f"provider={PROVIDER}\nmodel={MODEL}\npython={PYTHON}\nversion={sys.version}\n"
-        f"think={THINK!r} thinking_enabled={thinking_enabled(THINK)}\n"
-        f"options={OPTIONS}\n",
-    )
-
-    try:
-        warm = chat(MODEL, "Reply with exactly: OK", timeout_s=30)
-        extra = ""
-        if PROVIDER == "ollama":
-            with urllib.request.urlopen("http://127.0.0.1:11434/api/ps", timeout=30) as resp:
-                ps = json.loads(resp.read().decode())
-            m = next(
-                (
-                    x
-                    for x in ps.get("models") or []
-                    if x.get("name") == MODEL or x.get("model") == MODEL
-                ),
-                None,
-            )
-            size = (m["size"] / 2**30) if m else 0
-            ctx = m.get("context_length", "?") if m else "?"
-            extra = f" ctx={ctx} size_gib={size:.1f}"
-        log(
-            log_path,
-            f"warmup ok wall={warm['wall_s']:.1f}s load={warm['load_s']:.1f}s "
-            f"eval_tokens={warm['eval_tokens']}{extra}\n",
-        )
-    except Exception as e:
-        log(log_path, f"warmup ERROR: {e}\n")
-
-    run_tasks = [t for t in TASKS if not _TASK_FILTER or t.id in _TASK_FILTER]
-    if _TASK_FILTER:
-        unknown = sorted(_TASK_FILTER - {t.id for t in TASKS})
-        if unknown:
-            raise SystemExit(f"Unknown BENCH_TASKS: {unknown}")
-        log(log_path, f"BENCH_TASKS={','.join(t.id for t in run_tasks)} merge={MERGE_LATEST}\n")
-
-    results: list[dict[str, Any]] = []
-    for task in run_tasks:
-        log(log_path, f"\n-- {task.id} ...\n")
-        try:
-            live = RoundTranscript(OUT_DIR, TAG, task.id)
-            live.begin_round(1)
-            resp = chat(
-                MODEL,
-                task.prompt,
-                on_thinking=live.on_thinking_delta,
-                on_content=live.on_content_delta,
-            )
-            live.end_round(
-                thinking=resp.get("thinking") or "",
-                content=resp.get("content") or "",
-                done_reason=resp.get("done_reason"),
-                eval_tokens=resp.get("eval_tokens"),
-            )
-            # One recovery shot if thinking aborted (loop/budget) with empty content.
-            if (
-                resp.get("done_reason") in ("think_loop", "think_budget")
-                and not (resp.get("content") or "").strip()
-            ):
-                live.add_note(
-                    f"{(resp.get('done_reason') or 'think_loop').upper()} aborted: "
-                    f"{resp.get('think_loop_detail') or resp.get('done_reason')}; retry"
-                )
-                live.begin_round(2)
-                nudge = think_loop_nudge(
-                    thinking=resp.get("thinking") or "", protocol="pyhard"
-                )
-                retry_prompt = (
-                    nudge + "\n\nOriginal task:\n" + (task.prompt or "")[:6000]
-                )
-                resp = chat(
-                    MODEL,
-                    retry_prompt,
-                    on_thinking=live.on_thinking_delta,
-                    on_content=live.on_content_delta,
-                )
-                live.end_round(
-                    thinking=resp.get("thinking") or "",
-                    content=resp.get("content") or "",
-                    done_reason=resp.get("done_reason"),
-                    eval_tokens=resp.get("eval_tokens"),
-                )
-            transcript_path = live.save()
-            grade_src = resp.get("grade_text")
-            if grade_src is None:
-                grade_src = resp.get("combined") or resp.get("content") or ""
-            g = task.grade(grade_src)
-            mx = g["max_score"] or task.max_score
-            truncated_empty = (
-                resp.get("done_reason") == "length"
-                and not (resp.get("content") or "").strip()
-                and bool(resp.get("thinking"))
-            )
-            if truncated_empty and g["score"] == 0:
-                detail = g.get("detail") or ""
-                g["detail"] = (
-                    "truncated_empty_content: think burned num_predict; graded empty answer.\n"
-                    + detail
-                ).rstrip()
-            row = {
-                "model": MODEL,
-                "provider": PROVIDER,
-                "task": task.id,
-                "title": task.title,
-                "ok": g["ok"],
-                "score": g["score"],
-                "max_score": mx,
-                "grade_detail": g["detail"],
-                "wall_s": round(resp.get("wall_s") or 0, 2),
-                "eval_tokens": int(resp.get("eval_tokens") or 0),
-                "prompt_tokens": int(resp.get("prompt_tokens") or 0),
-                "toks_per_s": round(resp.get("toks_per_s") or 0, 2),
-                "done_reason": resp.get("done_reason", "unknown"),
-                "content_chars": len(resp.get("content") or ""),
-                "thinking_chars": len(resp.get("thinking") or ""),
-                "code_chars": len(g.get("code") or ""),
-                "truncated_empty_content": truncated_empty,
-                "think": resp.get("think", THINK),
-                "num_ctx": OPTIONS["num_ctx"],
-                "num_predict": OPTIONS["num_predict"],
-                "python": sys.version.split()[0],
-                "transcript": str(transcript_path),
-            }
-            results.append(row)
-            (OUT_DIR / f"{TAG}__{task.id}__code.py").write_text(g.get("code") or "", encoding="utf-8")
-            log(log_path, json.dumps(row, indent=2) + "\n")
-        except Exception as e:
-            row = {
-                "model": MODEL,
-                "task": task.id,
-                "ok": False,
-                "score": 0,
-                "max_score": task.max_score,
-                "error": str(e),
-            }
-            results.append(row)
-            log(log_path, f"ERROR: {e}\n")
-        summary_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
-
-    latest_path = OUT_DIR / f"{TAG}_pyhard_latest.json"
-    if MERGE_LATEST and latest_path.is_file():
-        by_task = {r["task"]: r for r in json.loads(latest_path.read_text(encoding="utf-8"))}
-        for row in results:
-            by_task[row["task"]] = row
-        # Preserve original TASKS order when possible.
-        order = [t.id for t in TASKS]
-        merged = [by_task[t] for t in order if t in by_task]
-        for t, row in by_task.items():
-            if t not in order:
-                merged.append(row)
-        results = merged
-        log(log_path, f"merged into existing {latest_path.name} ({len(results)} tasks)\n")
-
-    total = sum(r.get("score", 0) for r in results)
-    mx = sum(r.get("max_score", 0) for r in results)
-    passed = sum(1 for r in results if r.get("ok"))
-    tps = [r["toks_per_s"] for r in results if r.get("toks_per_s")]
-    avg_tps = sum(tps) / len(tps) if tps else 0.0
-    log(
-        log_path,
-        f"\n===== PYHARD {MODEL} =====\n"
-        f"pass {passed}/{len(results)}  score {total}/{mx}  avg tok/s {avg_tps:.1f}\n"
-        f"Wrote {summary_path}\n",
-    )
-    latest_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    run_main(spec)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ import re
 import shutil
 import sys
 import time
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -28,7 +29,8 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from bench_lib.ollama_chat import chat as ollama_chat  # noqa: E402
-from bench_lib.ollama_think import (  # noqa: E402
+from bench_lib.ollama_think import (
+    sampler_options,  # noqa: E402
     RoundTranscript,
     default_num_predict,
     format_think_combined,
@@ -38,6 +40,7 @@ from bench_lib.ollama_think import (  # noqa: E402
     think_loop_nudge,
 )
 from bench_lib.paths import results_dir  # noqa: E402
+from bench_lib.bench_runner import BenchSpec, TaskFields, run_main
 from benches.repohard.tasks import (  # noqa: E402
     TASK_IDS,
     Task,
@@ -56,6 +59,9 @@ from benches.repohard.tools import (  # noqa: E402
 OUT_DIR = results_dir("repohard")
 
 SELFTEST = os.environ.get("BENCH_SELFTEST") == "1"
+if SELFTEST:
+    OUT_DIR = Path(tempfile.gettempdir()) / "llm-coding-bench" / "repohard"
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
 PROVIDER = os.environ.get("BENCH_PROVIDER", "ollama").strip().lower()
 MODEL = "selftest" if SELFTEST else os.environ.get("BENCH_MODEL", "")
 _TAG_BASE = re.sub(r"[^a-zA-Z0-9._-]", "_", MODEL or "model")
@@ -67,10 +73,21 @@ TAG = os.environ.get(
 )
 THINK = parse_think()
 OPTIONS = {
-    "temperature": float(os.environ.get("BENCH_TEMPERATURE", "0.1")),
+    **sampler_options(0.1),
     "num_ctx": int(os.environ.get("BENCH_NUM_CTX", "65536")),
     "num_predict": default_num_predict(8192, think_base=24576),
 }
+
+# gemma4 26B-A4B fabricates the harness half of the protocol: it emits <arch_tool>,
+# then invents the <arch_result> block that the harness is supposed to send back,
+# and repeats that dozens of times in one turn (103 fake results against 9 real
+# tool calls on the worst task). parse_tool_call() searches for the first match and
+# discards everything after it, so those tokens are already thrown away -- they buy
+# nothing and cost up to 49k tokens and a task timeout. Stopping at <arch_result>
+# leaves the preceding </arch_tool> intact, so the parser sees exactly what it saw
+# before. Off by default so existing results stay comparable.
+if os.environ.get("BENCH_STOP_FABRICATION", "0") == "1":
+    OPTIONS["stop"] = ["<arch_result>"]
 
 MAX_ROUNDS = int(os.environ.get("BENCH_MAX_ROUNDS", "40"))
 MAX_TOOL_CALLS = int(os.environ.get("BENCH_MAX_TOOL_CALLS", "40"))
@@ -407,6 +424,17 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
 
 
 def run_agent(task: Task) -> dict[str, Any]:
+    if MODEL == "selftest":
+        return {
+            "model": MODEL,
+            "task": task.id,
+            "title": task.title,
+            "ok": False,
+            "score": 0,
+            "max_score": task.max_score,
+            "grade_detail": "selftest dummy",
+            "done_reason": "selftest",
+        }
     if PROVIDER in ("cursor", "cursor-cli", "agent"):
         return run_agent_cursor(task)
     if PROVIDER != "ollama":
@@ -451,39 +479,10 @@ def run_selftest() -> int:
     return 0
 
 
-def select_tasks() -> list[Task]:
-    all_tasks = build_tasks()
-    filt = os.environ.get("BENCH_TASKS", "").strip()
-    if not filt:
-        return all_tasks
-    want = {x.strip() for x in filt.split(",") if x.strip()}
-    chosen = [t for t in all_tasks if t.id in want]
-    if not chosen:
-        raise SystemExit(f"No tasks matched BENCH_TASKS={filt!r}")
-    return chosen
-
-
-def main() -> int:
-    if SELFTEST:
-        return run_selftest()
-    if not MODEL:
-        raise SystemExit("Set BENCH_MODEL or BENCH_SELFTEST=1")
-    tasks = select_tasks()
-
-    stamp = time.strftime("%Y%m%d_%H%M%S")
-    out_json = OUT_DIR / f"{TAG}_{stamp}.json"
-    out_log = OUT_DIR / f"{TAG}.log"
-    latest_path = OUT_DIR / f"{TAG}_latest.json"
-    merge_latest = os.environ.get("BENCH_MERGE_LATEST", "0") == "1"
-    results: list[dict[str, Any]] = []
-    if merge_latest and latest_path.is_file():
-        try:
-            prev = json.loads(latest_path.read_text(encoding="utf-8"))
-            if isinstance(prev, list):
-                results = [r for r in prev if isinstance(r, dict) and r.get("task")]
-        except (OSError, json.JSONDecodeError):
-            results = []
-
+def do_warmup() -> None:
+    """Warmup check to ensure model is available."""
+    if MODEL == "selftest":
+        return
     try:
         if PROVIDER in ("cursor", "cursor-cli", "agent"):
             from bench_lib import cursor_cli
@@ -499,61 +498,53 @@ def main() -> int:
                     timeout_s=min(120.0, cursor_timeout_s()),
                 )
             finally:
+                import shutil
                 shutil.rmtree(warm.parent, ignore_errors=True)
         else:
             chat(MODEL, [{"role": "user", "content": "Reply with the single word: pong"}])
-    except Exception as e:  # noqa: BLE001
-        print(f"warmup failed: {e}", file=sys.stderr)
-        return 2
+    except Exception as e:
+        raise SystemExit(f"warmup failed: {e}")
 
-    done_ids = {str(r.get("task")) for r in results}
-    with out_log.open("a", encoding="utf-8") as log:
-        log.write(f"\n==== repohard provider={PROVIDER} {MODEL} tag={TAG} {stamp} ====\n")
-        for t in tasks:
-            if merge_latest and t.id in done_ids:
-                print(f"-- {t.id} ... skip (merged)", flush=True)
-                continue
-            print(f"-- {t.id} ...", flush=True)
-            log.write(f"-- {t.id} ...\n")
-            try:
-                r = run_agent(t)
-            except Exception as e:  # noqa: BLE001
-                name = type(e).__name__
-                detail = f"ERROR: {name}: {e}"
-                if name == "TimeoutExpired" or "timed out" in str(e).lower():
-                    detail = f"TIMEOUT: exceeded BENCH_TASK_TIMEOUT_S / Cursor timeout ({e})"
-                r = {
-                    "model": MODEL,
-                    "provider": PROVIDER,
-                    "task": t.id,
-                    "title": t.title,
-                    "ok": False,
-                    "score": 0,
-                    "max_score": t.max_score,
-                    "grade_detail": detail,
-                    "done_reason": "task_timeout" if detail.startswith("TIMEOUT") else "error",
-                }
-            results = [x for x in results if x.get("task") != t.id]
-            results.append(r)
-            print(json.dumps({k: r[k] for k in r if k not in ("tool_trace", "pytest_output")}, indent=2))
-            log.write(json.dumps(r, indent=2) + "\n")
-            out_json.write_text(json.dumps(results, indent=2), encoding="utf-8")
-            latest_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
-    total = sum(r.get("score", 0) for r in results)
-    mx = sum(r.get("max_score", 0) for r in results)
-    passed = sum(1 for r in results if r.get("ok"))
-    summary = {
-        "model": MODEL,
-        "tag": TAG,
-        "score": total,
-        "max_score": mx,
-        "pass": passed,
-        "tasks": len(results),
-        "path": str(out_json),
-    }
-    print("SUMMARY", json.dumps(summary))
-    (OUT_DIR / f"{TAG}_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+def select_tasks() -> list[Task]:
+    all_tasks = build_tasks()
+    filt = os.environ.get("BENCH_TASKS", "").strip()
+    if not filt:
+        return all_tasks
+    want = {x.strip() for x in filt.split(",") if x.strip()}
+    chosen = [t for t in all_tasks if t.id in want]
+    if not chosen:
+        raise SystemExit(f"No tasks matched BENCH_TASKS={filt!r}")
+    return chosen
+
+
+spec = BenchSpec(
+    bench_name="repohard",
+    tag_suffix="repohard",
+    model=MODEL,
+    tag=TAG,
+    provider=PROVIDER,
+    out_dir=OUT_DIR,
+    merge_latest=os.environ.get("BENCH_MERGE_LATEST", "0") == "1",
+    warmup=do_warmup,
+    load_tasks=select_tasks,
+    run_agent=run_agent,
+    task_fields=TaskFields(id_attr="id", row_id_key="task"),
+    latest_suffix="_latest.json",
+)
+
+
+def main() -> int:
+    if SELFTEST:
+        res = run_selftest()
+        # Also exercise the shared runner loop with a minimal task set.
+        os.environ["BENCH_TASKS"] = "money_rounding_split"
+        run_main(spec)
+        return res
+    if not MODEL:
+        raise SystemExit("Set BENCH_MODEL or BENCH_SELFTEST=1")
+
+    run_main(spec)
     return 0
 
 

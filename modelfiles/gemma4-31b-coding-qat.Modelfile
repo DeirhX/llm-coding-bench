@@ -1,0 +1,14 @@
+FROM gemma4:31b-it-qat
+
+# Identical sampler, bound and stop markers to gemma4-31b-coding.Modelfile, so a
+# comparison against that model isolates the weights. See that file for why each of
+# these is here; repeating the reasoning would only let the two drift apart.
+PARAMETER temperature 0.1
+PARAMETER top_p 0.95
+PARAMETER top_k 64
+PARAMETER repeat_penalty 1.1
+PARAMETER num_predict 24576
+PARAMETER stop "<|tool_response>"
+PARAMETER stop "<arch_result>"
+PARAMETER stop "<tool_result>"
+PARAMETER stop "</tool_result>"

@@ -1,0 +1,6 @@
+FROM gemma4-coding:31b-mlxbf16
+
+# 65536 is the only context window any score in this repo was measured at, on either
+# backend. Pinning it here keeps the MLX build comparable to the llama.cpp variants
+# rather than inheriting Ollama's full 262144 default.
+PARAMETER num_ctx 65536

@@ -9,36 +9,42 @@ Each bench provides a ``BenchSpec`` dataclass with the few caller-specific parts
 
 Usage::
 
-    from bench_lib.bench_runner import BenchSpec, run_main
+    from bench_lib.bench_runner import BenchSpec, TaskFields, run_main
 
     def _warmup():
         # bench-specific warmup (ollama chat / cursor chat / fixture copy)
         ...
 
     spec = BenchSpec(
-        bench_name     = "repohard",
-        tag_suffix     = "repohard",
-        selftest       = SELFTEST,
-        model          = MODEL,
-        tag            = TAG,
-        provider       = PROVIDER,
-        out_dir        = OUT_DIR,
-        merge_latest   = MERGE_LATEST,
-        warmup         = _warmup,
-        load_tasks     = select_tasks,    # () -> list[Task]
-        run_agent      = run_agent,       # (task,) -> dict
-        task_fields    = TaskFields(
-            exclude_from_print = ("tool_trace", "pytest_output"),
-         ),
+        bench_name   = "repohard",
+        tag_suffix   = "repohard",
+        model        = MODEL,
+        tag          = TAG,
+        provider     = PROVIDER,
+        out_dir      = OUT_DIR,
+        merge_latest = MERGE_LATEST,
+        warmup       = _warmup,
+        load_tasks   = select_tasks,    # () -> list[Task]
+        run_agent    = run_agent,       # (task,) -> dict
+        task_fields  = TaskFields(
+            id_attr="id",
+            row_id_key="task",  # JSON key; must match what run_agent emits
+            exclude_from_print=("tool_trace", "pytest_output"),
+        ),
         post_loop_hook = my_post_loop,   # optional
     )
     run_main(spec)
+
+Selftests belong in each bench's ``main()``: point ``out_dir`` at a temp
+directory when ``MODEL == "selftest"`` so smoke runs never write under
+``results/``. ``run_main`` itself has no selftest mode.
 
 """
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 import tempfile
@@ -54,16 +60,17 @@ from typing import Any, Callable
 
 @dataclass(frozen=True)
 class TaskFields:
-    """Attribute names on the task object used by the shared loop."""
+    """Attribute names on the task object and keys in the result row."""
 
-    id_attr: str = "id"
+    id_attr: str = "id"        # Attribute name on the Task object
+    row_id_key: str = "task"   # JSON key; repo convention (must match emit)
     title_attr: str = "title"
     family_attr: str = "family"
     max_score_attr: str = "max_score"
 
     # Extra keys to exclude from per-task stdout print.
     exclude_from_print: tuple[str, ...] = (
-        "tool_trace", "answer", "per_claim", "pytest_output"
+        "tool_trace", "answer", "per_claim", "pytest_output", "raw_content"
     )
 
 
@@ -82,6 +89,7 @@ class BenchSpec:
     load_tasks: Callable[[], list[Any]]
     run_agent: Callable[[Any], dict[str, Any]]
     task_fields: TaskFields = field(default_factory=TaskFields)
+    latest_suffix: str = "_latest.json"
     post_loop_hook: (
         Callable[[list[dict[str, Any]], str], None] | None
     ) = None
@@ -95,21 +103,21 @@ class BenchSpec:
 def _safe_get(task: Any, attr: str, default: Any = None) -> Any:
     try:
         return getattr(task, attr)
-    except Exception:
+    except AttributeError:
         return default
 
 
 def _error_row(spec: BenchSpec, task: Any, e: BaseException) -> dict[str, Any]:
     """Construct an error result row."""
     is_timeout = (
-        type(e).__name__ == "TimeoutExpired"
+        isinstance(e, (TimeoutError, subprocess.TimeoutExpired))
         or "timed out" in str(e).lower()
     )
     tid = _safe_get(task, spec.task_fields.id_attr, "unknown")
     return {
         "model": spec.model,
         "provider": spec.provider,
-        "task": tid,
+        spec.task_fields.row_id_key: tid,
         "title": _safe_get(task, spec.task_fields.title_attr, tid),
         "family": _safe_get(task, spec.task_fields.family_attr, ""),
         "ok": False,
@@ -145,38 +153,40 @@ def run_main(spec: BenchSpec) -> None:
     stamp = time.strftime("%Y%m%d_%H%M%S")
 
     # -- paths -------------------------------------------------------------
-    out_json = (
-        spec.out_dir
-        / f"{spec.tag}_{spec.tag_suffix or spec.bench_name}_{stamp}.json"
-    )
+    # Tags already end with the bench name for most benches; do not double it.
+    suffix = spec.tag_suffix or spec.bench_name
+    stem = spec.tag
+    if suffix and not (stem == suffix or stem.endswith(f"_{suffix}")):
+        stem = f"{stem}_{suffix}"
+    out_json = spec.out_dir / f"{stem}_{stamp}.json"
     out_log = spec.out_dir / f"{spec.tag}.log"
     latest_path = spec.out_dir / f"{spec.tag}_latest.json"
     summary_path = spec.out_dir / f"{spec.tag}_summary.json"
 
     # -- merge latest (pre) -----------------------------------------------
-    results: list[dict[str, Any]] = []
-    id_attr = spec.task_fields.id_attr
+    results_map: dict[str, dict[str, Any]] = {}
+    row_id_key = spec.task_fields.row_id_key
     if spec.merge_latest and latest_path.is_file():
         try:
             prev = json.loads(
                 latest_path.read_text(encoding="utf-8")
             )
             if isinstance(prev, list):
-                results = [r for r in prev
-                           if isinstance(r, dict)
-                           and r.get(id_attr)]
-        except (OSError, json.JSONDecodeError):
-            results = []
+                for r in prev:
+                    if isinstance(r, dict) and (tid := r.get(row_id_key)) is not None:
+                        results_map[str(tid)] = r
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Warning: failed to merge latest results from {latest_path}: {e}", file=sys.stderr)
 
     # -- warmup -----------------------------------------------------------
     try:
         spec.warmup()
     except Exception as e:
-        print(f"warmup failed: {e}", file=sys.stderr)
+        print(f"Warmup failed: {e}", file=sys.stderr)
         sys.exit(1)
 
     # -- per-task loop --------------------------------------------------
-    done_ids = {str(r.get(id_attr)) for r in results}
+    done_ids = set(results_map.keys())
 
     with out_log.open("a", encoding="utf-8") as log:
         log.write(
@@ -184,9 +194,10 @@ def run_main(spec: BenchSpec) -> None:
             f"{spec.model} tag={spec.tag} {stamp} ====\n"
         )
 
-        for task in spec.load_tasks():
-            tid = _safe_get(task, id_attr)
-            if spec.merge_latest and tid in done_ids:
+        for i, task in enumerate(spec.load_tasks()):
+            tid = _safe_get(task, spec.task_fields.id_attr)
+            str_tid = str(tid) if tid is not None else f"unknown_{i}"
+            if spec.merge_latest and str_tid in done_ids:
                 print(f"-- {tid} ... skip (merged)", flush=True)
                 continue
 
@@ -199,23 +210,24 @@ def run_main(spec: BenchSpec) -> None:
                 r = _error_row(spec, task, e)
 
             # -- merge into results -------------------------------------------
-            results = [x for x in results if x.get(id_attr) != tid]
-            results.append(r)
+            results_map[str_tid] = r
+
+            # Log and print the individual result
+            r_json = json.dumps(r, indent=2)
             exclude = spec.task_fields.exclude_from_print
             print(
-                json.dumps({k: r[k] for k in r if k not in exclude}),
-                indent=2,
+                json.dumps({k: r[k] for k in r if k not in exclude}, indent=2),
                 flush=True,
             )
-            log.write(json.dumps(r, indent=2) + "\n")
-            merged = json.dumps(results, indent=2)
+            log.write(r_json + "\n")
 
-            # Atomic write via temp file + fsync + os.replace() to prevent
-            # corruption if the process crashes mid-write (kill, OOM, etc.)
+            # Write every time to maximize safety; task counts are small enough that O(N^2) is negligible.
+            merged = json.dumps(list(results_map.values()), indent=2)
             write_atomic(merged, out_json)
             write_atomic(merged, latest_path)
 
     # -- post-loop hook (optional) -----------------------------------------
+    results = list(results_map.values())
     if spec.post_loop_hook:
         spec.post_loop_hook(results, stamp)
 
@@ -234,7 +246,7 @@ def run_main(spec: BenchSpec) -> None:
         "path": str(out_json),
     }
     print("SUMMARY", json.dumps(summary))
-    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    write_atomic(json.dumps(summary, indent=2), summary_path)
     return None
 
 

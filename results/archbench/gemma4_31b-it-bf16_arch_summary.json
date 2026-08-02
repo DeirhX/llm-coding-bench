@@ -1,0 +1,9 @@
+{
+  "model": "gemma4:31b-it-bf16",
+  "tag": "gemma4_31b-it-bf16_arch",
+  "score": 83,
+  "max_score": 90,
+  "pass": 8,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4_31b-it-bf16_arch_20260728_194719.json"
+}

@@ -51,7 +51,7 @@ Graders stay in Python (they must execute). Prompts/claims are data.
 ### Adding a new bench
 
 1. Create `benches/<id>/` with `assignment/` (or equivalent data) + `bench.py` exposing `main()`
-2. Add `__main__.py` and register a `BenchSpec` in `benches/registry.py`
+2. Add `__main__.py` and register a `BenchMetadata` in `benches/registry.py`
 3. Optionally teach reporting about its `*_latest.json` suffix
 
 ## Requirements
@@ -96,13 +96,13 @@ python3.14 run.py run all
 python3.14 run.py report
 ```
 
-Or per-phase modules:
+Or per-phase modules (requires `BENCH_MODEL` or `BENCH_SELFTEST=1` to avoid warmup failures):
 
 ```bash
-python3.14 -m benches.pyhard
-python3.14 -m benches.arch
-python3.14 -m benches.claim
-python3.14 -m benches.repohard
+BENCH_SELFTEST=1 python3.14 -m benches.pyhard
+BENCH_SELFTEST=1 python3.14 -m benches.arch
+BENCH_SELFTEST=1 python3.14 -m benches.claim
+BENCH_SELFTEST=1 python3.14 -m benches.repohard
 ```
 
 ## Cursor Agent CLI backend
@@ -157,6 +157,29 @@ python3.14 run.py report --out results/my_board.md
 ```
 
 Writes a markdown leaderboard to `results/REPORT.md` (or `--out`) and prints a bar-chart table to the terminal.
+
+## Hardware, runners and operations
+
+- `M5_MAX_128GB_VIABILITY.md` — **which** models fit an M5 Max 128 GB
+- `RUNNERS_MACOS_METAL.md` — **what** to run them with (Ollama's dual engine, MLX vs llama.cpp)
+- `LOCAL_AGENT_OPS.md` — **operating one for real work**: prefix-cache economics, Claude Code's
+  undocumented behaviour (auto-compaction cannot fire), the framing tax, the edit-tool failure
+  taxonomy, and the wrong hypotheses that cost us the most. Read before debugging a slow session.
+- `scripts/claude-gemma.sh` — launcher; `.cursor/skills/ollama-watch/` — live Ollama diagnosis
+
+### Known limitations (Claude Code + local Ollama)
+
+These are measured gaps, not TODOs we forgot to file:
+
+- **Auto-compaction cannot fire** without an Anthropic account / feature-gate fetch, and Ollama
+  never returns “prompt is too long”. Use `/compact` by hand; the status line nags at 60%.
+- **`skeptic_min.md` under Claude Code’s own system prompt is unverified.** Every 20/20 trap score
+  used that file as the *entire* system prompt.
+- **No long soak** in a large repo has been graded end-to-end; verification was short tasks.
+- **Thinking UI:** `showThinkingSummaries` shows summarized reasoning (`ctrl+o` expands;
+  `Option+T` / `Alt+T` toggles). Prefill is silent in the UI — use `ollama-watch` / `state.py`.
+- **Windows / resume:** `--model` and lean-tool / guard settings apply to **new** conversations;
+  `--continue` keeps whatever the session was created with.
 
 ## Published compare notes (Ollama, Jul 2026)
 

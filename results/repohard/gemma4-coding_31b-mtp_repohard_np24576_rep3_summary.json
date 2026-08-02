@@ -1,0 +1,9 @@
+{
+  "model": "gemma4-coding:31b-mtp",
+  "tag": "gemma4-coding_31b-mtp_repohard_np24576_rep3",
+  "score": 63,
+  "max_score": 80,
+  "pass": 6,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4-coding_31b-mtp_repohard_np24576_rep3_20260729_040002.json"
+}

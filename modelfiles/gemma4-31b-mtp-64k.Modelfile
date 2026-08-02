@@ -1,0 +1,6 @@
+FROM gemma4-coding:31b-mtp
+
+# Pinned to match gemma4-31b-mlx-64k and gemma4-31b-coding-64k. Without this the MTP model
+# sizes itself to the full 262144 while the arms it is being compared against sit at 65536,
+# and a KV cache four times larger is a confound in any throughput measurement.
+PARAMETER num_ctx 65536

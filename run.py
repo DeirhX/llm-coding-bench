@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from benches.registry import BENCHES, BenchSpec, get_bench, list_benches  # noqa: E402
+from benches.registry import BENCHES, BenchMetadata, get_bench, list_benches  # noqa: E402
 from bench_lib import report as report_lib  # noqa: E402
 
 
@@ -51,11 +51,11 @@ def _resolve_ids(names: list[str]) -> list[str]:
 def _foreach_bench(
     names: list[str],
     label: str,
-    run: Callable[[BenchSpec], int],
+    run: Callable[[BenchMetadata], int],
     *,
     title: bool = False,
-    ok: Callable[[BenchSpec], str] | None = None,
-    fail: Callable[[BenchSpec, int], str] | None = None,
+    ok: Callable[[BenchMetadata], str] | None = None,
+    fail: Callable[[BenchMetadata, int], str] | None = None,
 ) -> int:
     rc = 0
     for bid in _resolve_ids(names):
@@ -75,7 +75,7 @@ def _foreach_bench(
     return rc
 
 
-def _run_bench(spec: BenchSpec) -> int:
+def _run_bench(spec: BenchMetadata) -> int:
     try:
         return spec.run()
     except SystemExit as exc:
@@ -85,7 +85,7 @@ def _run_bench(spec: BenchSpec) -> int:
         return 1
 
 
-def _selftest_bench(spec: BenchSpec) -> int:
+def _selftest_bench(spec: BenchMetadata) -> int:
     proc = subprocess.run(
         [sys.executable, "-m", f"benches.{spec.id}"],
         cwd=str(ROOT),

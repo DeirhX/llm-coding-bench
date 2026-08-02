@@ -1,0 +1,9 @@
+{
+  "model": "gemma4:31b-it-bf16",
+  "tag": "gemma4_31b-it-bf16_audittrap_fix_med",
+  "score": 20,
+  "max_score": 40,
+  "pass": 2,
+  "tasks": 4,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/gemma4_31b-it-bf16_audittrap_fix_med_20260728_151235.json"
+}

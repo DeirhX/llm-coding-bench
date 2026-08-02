@@ -1,0 +1,9 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-bf16",
+  "tag": "qwen3.6_35b-a3b-coding-bf16_audittrap_sysgen_high",
+  "score": 20,
+  "max_score": 40,
+  "pass": 2,
+  "tasks": 4,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/qwen3.6_35b-a3b-coding-bf16_audittrap_sysgen_high_20260728_120743.json"
+}

@@ -1,0 +1,335 @@
+[
+  {
+    "model": "gemma4:31b-it-bf16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "runner_interrupt_scored",
+    "title": "Ctrl-C recorded as task failure",
+    "family": "repair",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "TIMEOUT: exceeded BENCH_TASK_TIMEOUT_S; partial patch_apply: empty patch",
+    "passed": 0,
+    "total": 0,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": "empty patch"
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "pipeline.py",
+      "runner.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "runner.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pipeline.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "BaseException",
+          "path": "."
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 1562.11,
+    "prompt_tokens": 4056,
+    "eval_tokens": 2349,
+    "rounds": 4,
+    "done_reason": "task_timeout",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 97,
+    "thinking_chars": 8779,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/gemma4_31b-it-bf16_audittrap_fix_med__runner_interrupt_scored.txt",
+    "system_prompt": false,
+    "raw_content": "<arch_tool>\n{\"name\": \"grep\", \"arguments\": {\"pattern\": \"BaseException\", \"path\": \".\"}}\n</arch_tool>"
+  },
+  {
+    "model": "gemma4:31b-it-bf16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "chat_timeout_dropped",
+    "title": "Chat timeout_s never reaches HTTP client",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 3/3 (applied via --whitespace=nowarn -p1)",
+    "passed": 3,
+    "total": 3,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,12 +16,12 @@\n     max_tokens: int = 1024,\n     retry: int = 1,\n ) -> dict[str, Any]:\n-    del timeout_s\n     last: dict[str, Any] | None = None\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n             messages,\n+            timeout_s=timeout_s,\n             temperature=temperature,\n             max_tokens=max_tokens,\n         )",
+      "reason": "The `chat_wrapped` function in `chat/wrap.py` was explicitly deleting the `timeout_s` argument and failing to pass it to the underlying `api.post_chat` call, causing the timeout value to be lost before reaching the HTTP layer.",
+      "citations": [
+        "chat/wrap.py:19",
+        "chat/wrap.py:22"
+      ],
+      "patch_bytes": 418,
+      "patch_preview": "--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,12 +16,12 @@\n     max_tokens: int = 1024,\n     retry: int = 1,\n ) -> dict[str, Any]:\n-    del timeout_s\n     last: dict[str, Any] | None = None\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n             messages,\n+            timeout_s=timeout_s,\n             temperature=temperature,\n             max_tokens=max_tokens,\n         )\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 6,
+    "files_read": [
+      "chat/api.py",
+      "chat/facade.py",
+      "chat/wrap.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "chat"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "timeout_s",
+          "path": "chat"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/api.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/facade.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/wrap.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 772.21,
+    "prompt_tokens": 10414,
+    "eval_tokens": 1122,
+    "rounds": 7,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 786,
+    "thinking_chars": 2211,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/gemma4_31b-it-bf16_audittrap_fix_med__chat_timeout_dropped.txt",
+    "system_prompt": false,
+    "raw_content": "<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/chat/wrap.py\\n+++ b/chat/wrap.py\\n@@ -16,12 +16,12 @@\\n     max_tokens: int = 1024,\\n     retry: int = 1,\\n ) -> dict[str, Any]:\\n-    del timeout_s\\n     last: dict[str, Any] | None = None\\n     for _ in range(max(1, retry)):\\n         last = api.post_chat(\\n             model,\\n             messages,\\n+            timeout_s=timeout_s,\\n             temperature=temperature,\\n             max_tokens=max_tokens,\\n         )\", \"reason\": \"The `chat_wrapped` function in `chat/wrap.py` was explicitly deleting the `timeout_s` argument and failing to pass it to the underlying `api.post_chat` call, causing the timeout value to be lost before reaching the HTTP layer.\", \"citations\": [\"chat/wrap.py:19\", \"chat/wrap.py:22\"]}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:31b-it-bf16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "subprocess_stderr_dropped",
+    "title": "Timed-out child with stderr-only output loses diagnostics",
+    "family": "repair",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 3/3 (applied via --whitespace=nowarn -p1)",
+    "passed": 3,
+    "total": 3,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/util/subprocess_timeout.py\n+++ b/util/subprocess_timeout.py\n@@ -56,7 +56,7 @@\n         proc.wait(timeout=10)\n         stdout = e.stdout if e.stdout else \"\"\n         stderr = e.stderr if e.stderr else \"\"\n-        if str(stdout).strip():\n+        if stdout.strip() or stderr.strip():\n             return subprocess.CompletedProcess(\n                 args=cmd,\n                 returncode=-9,",
+      "reason": "The original code only checked for the presence of stdout before deciding whether to return a CompletedProcess with captured output or raise a ProcTimeout exception. This caused diagnostics in stderr to be lost if no stdout was produced during a timeout. Changing the condition to check both stdout and stderr ensures that any available output is preserved.",
+      "citations": [
+        "util/subprocess_timeout.py:59"
+      ],
+      "patch_bytes": 396,
+      "patch_preview": "--- a/util/subprocess_timeout.py\n+++ b/util/subprocess_timeout.py\n@@ -56,7 +56,7 @@\n         proc.wait(timeout=10)\n         stdout = e.stdout if e.stdout else \"\"\n         stderr = e.stderr if e.stderr else \"\"\n-        if str(stdout).strip():\n+        if stdout.strip() or stderr.strip():\n             return subprocess.CompletedProcess(\n                 args=cmd,\n                 returncode=-9,\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 3,
+    "files_read": [
+      "util/subprocess_timeout.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "subprocess",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "util/subprocess_timeout.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 2202.37,
+    "prompt_tokens": 5050,
+    "eval_tokens": 2918,
+    "rounds": 4,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 889,
+    "thinking_chars": 9462,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/gemma4_31b-it-bf16_audittrap_fix_med__subprocess_stderr_dropped.txt",
+    "system_prompt": false,
+    "raw_content": "<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/util/subprocess_timeout.py\\n+++ b/util/subprocess_timeout.py\\n@@ -56,7 +56,7 @@\\n         proc.wait(timeout=10)\\n         stdout = e.stdout if e.stdout else \\\"\\\"\\n         stderr = e.stderr if e.stderr else \\\"\\\"\\n-        if str(stdout).strip():\\n+        if stdout.strip() or stderr.strip():\\n             return subprocess.CompletedProcess(\\n                 args=cmd,\\n                 returncode=-9,\", \"reason\": \"The original code only checked for the presence of stdout before deciding whether to return a CompletedProcess with captured output or raise a ProcTimeout exception. This caused diagnostics in stderr to be lost if no stdout was produced during a timeout. Changing the condition to check both stdout and stderr ensures that any available output is preserved.\", \"citations\": [\"util/subprocess_timeout.py:59\"]}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:31b-it-bf16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "warmup_no_deadline",
+    "title": "Warmup ignores short timeout",
+    "family": "repair",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "TIMEOUT: exceeded BENCH_TASK_TIMEOUT_S; partial patch_apply: empty patch",
+    "passed": 0,
+    "total": 0,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "patch": "\n",
+      "patch_bytes": 1,
+      "patch_preview": "\n",
+      "apply_detail": "empty patch"
+    },
+    "tool_calls": 7,
+    "files_read": [
+      "chat/__init__.py",
+      "chat/facade.py",
+      "chat/wrap.py",
+      "config.py",
+      "warmup.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "warmup.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "chat"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/facade.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/wrap.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "config.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 1202.58,
+    "prompt_tokens": 8381,
+    "eval_tokens": 1127,
+    "rounds": 7,
+    "done_reason": "task_timeout",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 110,
+    "thinking_chars": 3095,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/gemma4_31b-it-bf16_audittrap_fix_med__warmup_no_deadline.txt",
+    "system_prompt": false,
+    "raw_content": "<arch_tool>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"config.py\"}}\n</arch_tool><tool_call|><|tool_response>"
+  }
+]

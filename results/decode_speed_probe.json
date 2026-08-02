@@ -1,0 +1,485 @@
+[
+  {
+    "model": "gemma4-coding:31b",
+    "size_gb": 63.66250926,
+    "short": [
+      {
+        "label": "short#1",
+        "wall_s": 31.579962253570557,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 8.254157370798094,
+        "prefill_tps": 171.66322893169144,
+        "load_s": 0.190238791,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#2",
+        "wall_s": 29.824241876602173,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 8.716334816619723,
+        "prefill_tps": 267.17652854196757,
+        "load_s": 0.195114208,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#3",
+        "wall_s": 29.802881956100464,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 8.72602074161496,
+        "prefill_tps": 271.7252857361208,
+        "load_s": 0.204563833,
+        "done_reason": "length"
+      }
+    ],
+    "long": [
+      {
+        "label": "long#1",
+        "wall_s": 51.98924398422241,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 8.427476919412186,
+        "prefill_tps": 470.35196521997113,
+        "load_s": 4.062821709,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#2",
+        "wall_s": 30.549622058868408,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 8.479809342086705,
+        "prefill_tps": 59289.305055125245,
+        "load_s": 0.206192166,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#3",
+        "wall_s": 30.669419050216675,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 8.444113394151621,
+        "prefill_tps": 59244.567092100726,
+        "load_s": 0.198001625,
+        "done_reason": "length"
+      }
+    ],
+    "effective_gbps": 554.9037459763135
+  },
+  {
+    "model": "gemma4-coding:26b-a4b",
+    "size_gb": 51.321335971,
+    "short": [
+      {
+        "label": "short#1",
+        "wall_s": 4.7394468784332275,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 58.28964076959631,
+        "prefill_tps": 517.405856387537,
+        "load_s": 0.221939917,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#2",
+        "wall_s": 4.603155136108398,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 58.810461921719146,
+        "prefill_tps": 1261.4565881541341,
+        "load_s": 0.195728625,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#3",
+        "wall_s": 4.628137111663818,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 58.64907805252987,
+        "prefill_tps": 1094.5596962596842,
+        "load_s": 0.196671625,
+        "done_reason": "length"
+      }
+    ],
+    "long": [
+      {
+        "label": "long#1",
+        "wall_s": 11.735563039779663,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 55.596613558146345,
+        "prefill_tps": 1985.4965311577719,
+        "load_s": 2.962946417,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#2",
+        "wall_s": 4.861048221588135,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 55.41445793512309,
+        "prefill_tps": 269888.03771361226,
+        "load_s": 0.196025833,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#3",
+        "wall_s": 4.817934036254883,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 55.90153119971455,
+        "prefill_tps": 320616.03080154007,
+        "load_s": 0.197465125,
+        "done_reason": "length"
+      }
+    ],
+    "effective_gbps": 3009.949039123288
+  },
+  {
+    "model": "gemma4-coding:31b-qat",
+    "size_gb": 19.887942532,
+    "short": [
+      {
+        "label": "short#1",
+        "wall_s": 10.280411005020142,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 26.07027384887775,
+        "prefill_tps": 235.8803496926184,
+        "load_s": 0.187425083,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#2",
+        "wall_s": 10.183987855911255,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 25.95066353109665,
+        "prefill_tps": 593.7471008442342,
+        "load_s": 0.191916417,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#3",
+        "wall_s": 10.129449844360352,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 26.115547013595386,
+        "prefill_tps": 601.4868001842053,
+        "load_s": 0.19521475,
+        "done_reason": "length"
+      }
+    ],
+    "long": [
+      {
+        "label": "long#1",
+        "wall_s": 29.471396923065186,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 23.112995462268938,
+        "prefill_tps": 507.65913164794694,
+        "load_s": 2.140699625,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#2",
+        "wall_s": 11.522911071777344,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 22.827410155415432,
+        "prefill_tps": 121229.94573768806,
+        "load_s": 0.224226208,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#3",
+        "wall_s": 11.302145004272461,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 23.267413841493653,
+        "prefill_tps": 128207.52076140711,
+        "load_s": 0.219234125,
+        "done_reason": "length"
+      }
+    ],
+    "effective_gbps": 518.4841080999831
+  },
+  {
+    "model": "gemma4-coding:31b-mtp",
+    "size_gb": 62.588992673,
+    "short": [
+      {
+        "label": "short#1",
+        "wall_s": 10.943974018096924,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 24.000067967442483,
+        "prefill_tps": 273.9979674916396,
+        "load_s": 0.040161292,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#2",
+        "wall_s": 9.555555820465088,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 26.954094531615684,
+        "prefill_tps": 6887645.286267757,
+        "load_s": 0.056422542,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#3",
+        "wall_s": 8.988271951675415,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 28.63599138627142,
+        "prefill_tps": 5647224.918379952,
+        "load_s": 0.046798042,
+        "done_reason": "length"
+      }
+    ],
+    "long": [
+      {
+        "label": "long#1",
+        "wall_s": 25.07507300376892,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 22.704277440416877,
+        "prefill_tps": 600.3376097730974,
+        "load_s": 0.054910209,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#2",
+        "wall_s": 10.4828519821167,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 24.856301630152238,
+        "prefill_tps": 59691.748163208016,
+        "load_s": 0.033474791,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#3",
+        "wall_s": 10.442174911499023,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 24.62470026972343,
+        "prefill_tps": 549600000.0,
+        "load_s": 0.031917875,
+        "done_reason": "length"
+      }
+    ],
+    "effective_gbps": 1687.0296251466436
+  },
+  {
+    "model": "gemma4-coding:31b-q8",
+    "size_gb": 34.885001543,
+    "short": [
+      {
+        "label": "short#1",
+        "wall_s": 16.31765389442444,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 16.152906441040848,
+        "prefill_tps": 229.2009125061329,
+        "load_s": 0.187912291,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#2",
+        "wall_s": 16.162019729614258,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 16.20084798782304,
+        "prefill_tps": 455.8437025904743,
+        "load_s": 0.199193041,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#3",
+        "wall_s": 16.407495737075806,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 15.97614063247419,
+        "prefill_tps": 465.40715854385735,
+        "load_s": 0.216305,
+        "done_reason": "length"
+      }
+    ],
+    "long": [
+      {
+        "label": "long#1",
+        "wall_s": 38.00179409980774,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 14.815618184851806,
+        "prefill_tps": 473.4628495054915,
+        "load_s": 3.295145416,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#2",
+        "wall_s": 17.400055170059204,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 14.973923147683236,
+        "prefill_tps": 97237.6211931778,
+        "load_s": 0.203735166,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#3",
+        "wall_s": 17.72769021987915,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 14.688302459688213,
+        "prefill_tps": 97610.64671197518,
+        "load_s": 0.199176084,
+        "done_reason": "length"
+      }
+    ],
+    "effective_gbps": 563.4941661196447
+  },
+  {
+    "model": "gemma4-coding:31b-mlx",
+    "size_gb": 18.463474445,
+    "short": [
+      {
+        "label": "short#1",
+        "wall_s": 4.654721021652222,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 57.28211950107386,
+        "prefill_tps": 437.7186990521509,
+        "load_s": 0.038141792,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#2",
+        "wall_s": 4.355777978897095,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 59.447805929661435,
+        "prefill_tps": 6071530.215349588,
+        "load_s": 0.047985458,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#3",
+        "wall_s": 4.3710410594940186,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 59.26964002115301,
+        "prefill_tps": 8628825.67075637,
+        "load_s": 0.050221834,
+        "done_reason": "length"
+      }
+    ],
+    "long": [
+      {
+        "label": "long#1",
+        "wall_s": 19.524658918380737,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 45.41556181522541,
+        "prefill_tps": 596.2975196963439,
+        "load_s": 0.047965625,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#2",
+        "wall_s": 6.09070897102356,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 42.7801079266088,
+        "prefill_tps": 141102.97235875955,
+        "load_s": 0.035748625,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#3",
+        "wall_s": 5.914930105209351,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 43.65736599208433,
+        "prefill_tps": 632160110.42098,
+        "load_s": 0.036470708,
+        "done_reason": "length"
+      }
+    ],
+    "effective_gbps": 1094.323483894908
+  },
+  {
+    "model": "gemma4-coding:31b-mlxbf16",
+    "size_gb": 62.588992673,
+    "short": [
+      {
+        "label": "short#1",
+        "wall_s": 10.92046308517456,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 24.016827071664803,
+        "prefill_tps": 301.69728386555073,
+        "load_s": 0.044793,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#2",
+        "wall_s": 8.474386930465698,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 30.407064482033146,
+        "prefill_tps": 6193748.1854253365,
+        "load_s": 0.053633375,
+        "done_reason": "length"
+      },
+      {
+        "label": "short#3",
+        "wall_s": 7.972189903259277,
+        "prompt_tokens": 64,
+        "eval_tokens": 256,
+        "decode_tps": 32.27710601576226,
+        "prefill_tps": 7718282.6821032325,
+        "load_s": 0.039400292,
+        "done_reason": "length"
+      }
+    ],
+    "long": [
+      {
+        "label": "long#1",
+        "wall_s": 23.050145149230957,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 23.787097578611682,
+        "prefill_tps": 673.6965378224337,
+        "load_s": 0.038408375,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#2",
+        "wall_s": 9.981215000152588,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 26.151568727352995,
+        "prefill_tps": 60792.238344332676,
+        "load_s": 0.043187666,
+        "done_reason": "length"
+      },
+      {
+        "label": "long#3",
+        "wall_s": 10.713325023651123,
+        "prompt_tokens": 8244,
+        "eval_tokens": 256,
+        "decode_tps": 24.031805532127322,
+        "prefill_tps": 389492582.4435415,
+        "load_s": 0.046748791,
+        "done_reason": "length"
+      }
+    ],
+    "effective_gbps": 1903.1475360734112
+  }
+]

@@ -1,0 +1,514 @@
+[
+  {
+    "model": "qwen3-coder:30b-a3b-fp16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "runner_interrupt_scored",
+    "title": "Ctrl-C recorded as task failure",
+    "family": "repair",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: patch fragment without header at line 1: @@ -19,12 +19,18 @@; fuzzy: no hunks applied (skipped=[])",
+    "passed": 0,
+    "total": 0,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "@@ -19,12 +19,18 @@\n     for task in tasks:\n         tid = task[\"id\"]\n         try:\n             row = run_one(task)\n         except BaseException as e:  # noqa: BLE001\n+            # Handle interruption signals specially\n+            if isinstance(e, (KeyboardInterrupt, SystemExit)):\n+                # For clean interruptions, mark as interrupted rather than error\n+                row = {\n+                    \"task\": tid,\n+                    \"ok\": False,\n+                    \"score\": 0,\n+                    \"error\": f\"{type(e).__name__}: {e}\",\n+                    \"done_reason\": \"interrupted\",\n+                }\n+            else:\n+                # For other exceptions, keep original error behavior\n                 row = {\n                     \"task\": tid,\n                     \"ok\": False,\n                     \"score\": 0,\n                     \"error\": f\"{type(e).__name__}: {e}\",\n                     \"done_reason\": \"error\",\n                 }\n         results.append(row)\n         out_path.write_text(json.dumps(results, indent=2), encoding=\"utf-8\")\n     return results\n",
+      "reason": "The issue is that when Ctrl-C interrupts a long test suite, KeyboardInterrupt exceptions are caught by the broad BaseException handler and treated as regular errors with 'done_reason': 'error'. This causes a scored failure row to be written instead of a clean interruption. The fix specifically handles KeyboardInterrupt and SystemExit to mark them as 'done_reason': 'interrupted' instead of 'error', which allows operators to distinguish clean interruptions from actual test failures.",
+      "citations": [
+        "runner.py"
+      ],
+      "patch_bytes": 1086,
+      "patch_preview": "@@ -19,12 +19,18 @@\n     for task in tasks:\n         tid = task[\"id\"]\n         try:\n             row = run_one(task)\n         except BaseException as e:  # noqa: BLE001\n+            # Handle interruption signals specially\n+            if isinstance(e, (KeyboardInterrupt, SystemExit)):\n+                # For clean interruptions, mark as interrupted rather than error\n+                row = {\n+                    \"task\": tid,\n+                    \"ok\": False,\n+                    \"score\": 0,\n+                    \"error\": f\"{type(e).__name__}: {e}\",\n+                    \"done_reason\": \"interrupted\",\n+                }\n+            else:\n+                # For other exceptions, keep original error behavior\n                 row = {\n                     \"task\": tid,\n                     \"ok\": False,\n                     \"score\": 0,\n                     \"error\": f\"{type(e).__name__}: {e}\",\n                     \"done_reason\": \"error\",\n                 }\n         results.append(row)\n         out_path.write_text(json.dumps(results, indent=2), encoding=\"utf-8\")\n     return results\n",
+      "apply_detail": "git apply failed: error: patch fragment without header at line 1: @@ -19,12 +19,18 @@; fuzzy: no hunks applied (skipped=[])"
+    },
+    "tool_calls": 12,
+    "files_read": [
+      "MAINTAINER_NOTES.md",
+      "README.md",
+      "__init__.py",
+      "pipeline.py",
+      "runner.py",
+      "scoring.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "runner.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "scoring.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pipeline.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "pattern": "Ctrl-C|interrupt|signal|SIGINT",
+          "path": "."
+        },
+        "result_ok": false
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "signal|interrupt|SIG",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "util"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "MAINTAINER_NOTES.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "KeyboardInterrupt|signal",
+          "path": "runner.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "runner.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 26.24,
+    "prompt_tokens": 35939,
+    "eval_tokens": 1231,
+    "rounds": 13,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 1734,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/qwen3-coder_30b-a3b-fp16_audittrap_sysgen_fixes__runner_interrupt_scored.txt",
+    "system_prompt": true,
+    "raw_content": "<arch_final>\n{\"status\": \"patched\", \"patch\": \"@@ -19,12 +19,18 @@\\n     for task in tasks:\\n         tid = task[\\\"id\\\"]\\n         try:\\n             row = run_one(task)\\n         except BaseException as e:  # noqa: BLE001\\n+            # Handle interruption signals specially\\n+            if isinstance(e, (KeyboardInterrupt, SystemExit)):\\n+                # For clean interruptions, mark as interrupted rather than error\\n+                row = {\\n+                    \\\"task\\\": tid,\\n+                    \\\"ok\\\": False,\\n+                    \\\"score\\\": 0,\\n+                    \\\"error\\\": f\\\"{type(e).__name__}: {e}\\\",\\n+                    \\\"done_reason\\\": \\\"interrupted\\\",\\n+                }\\n+            else:\\n+                # For other exceptions, keep original error behavior\\n                 row = {\\n                     \\\"task\\\": tid,\\n                     \\\"ok\\\": False,\\n                     \\\"score\\\": 0,\\n                     \\\"error\\\": f\\\"{type(e).__name__}: {e}\\\",\\n                     \\\"done_reason\\\": \\\"error\\\",\\n                 }\\n         results.append(row)\\n         out_path.write_text(json.dumps(results, indent=2), encoding=\\\"utf-8\\\")\\n     return results\\n\", \"reason\": \"The issue is that when Ctrl-C interrupts a long test suite, KeyboardInterrupt exceptions are caught by the broad BaseException handler and treated as regular errors with 'done_reason': 'error'. This causes a scored failure row to be written instead of a clean interruption. The fix specifically handles KeyboardInterrupt and SystemExit to mark them as 'done_reason': 'interrupted' instead of 'error', which allows operators to distinguish clean interruptions from actual test failures.\", \"citations\": [\"runner.py\"]}\n</arch_final>"
+  },
+  {
+    "model": "qwen3-coder:30b-a3b-fp16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "chat_timeout_dropped",
+    "title": "Chat timeout_s never reaches HTTP client",
+    "family": "repair",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "pytest 0/3 (fuzzy applied 2 hunks)",
+    "passed": 0,
+    "total": 3,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,7 +16,7 @@\n def chat_wrapped(\n     model: str,\n     messages: list[dict[str, str]],\n-    *,\n-    timeout_s: float | None = None,\n-    temperature: float = 0.1,\n-    max_tokens: int = 1024,\n-    retry: int = 1,\n+    *,\n+    timeout_s: float | None = None,\n+    temperature: float = 0.1,\n+    max_tokens: int = 1024,\n+    retry: int = 1,\n ) -> dict[str, Any]:\n     del timeout_s\n     last: dict[str, Any] | None = None\n@@ -20,7 +20,7 @@\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n-            messages,\n-            temperature=temperature,\n-            max_tokens=max_tokens,\n+            messages,\n+            timeout_s=timeout_s,\n+            temperature=temperature,\n+            max_tokens=max_tokens,\n         )\n         if last.get(\"content\"):\n             return last\n",
+      "reason": "The bug was in chat/wrap.py where the timeout_s parameter was being deleted instead of passed through to the HTTP layer. The fix passes timeout_s to api.post_chat() so that it reaches the actual HTTP client implementation.",
+      "citations": [
+        "chat/wrap.py:19",
+        "chat/wrap.py:22"
+      ],
+      "patch_bytes": 864,
+      "patch_preview": "--- a/chat/wrap.py\n+++ b/chat/wrap.py\n@@ -16,7 +16,7 @@\n def chat_wrapped(\n     model: str,\n     messages: list[dict[str, str]],\n-    *,\n-    timeout_s: float | None = None,\n-    temperature: float = 0.1,\n-    max_tokens: int = 1024,\n-    retry: int = 1,\n+    *,\n+    timeout_s: float | None = None,\n+    temperature: float = 0.1,\n+    max_tokens: int = 1024,\n+    retry: int = 1,\n ) -> dict[str, Any]:\n     del timeout_s\n     last: dict[str, Any] | None = None\n@@ -20,7 +20,7 @@\n     for _ in range(max(1, retry)):\n         last = api.post_chat(\n             model,\n-            messages,\n-            temperature=temperature,\n-            max_tokens=max_tokens,\n+            messages,\n+            timeout_s=timeout_s,\n+            temperature=temperature,\n+            max_tokens=max_tokens,\n         )\n         if last.get(\"content\"):\n             return last\n",
+      "apply_detail": "fuzzy applied 2 hunks"
+    },
+    "tool_calls": 11,
+    "files_read": [
+      "chat/__init__.py",
+      "chat/api.py",
+      "chat/facade.py",
+      "chat/wrap.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "chat"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/facade.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/wrap.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/api.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "pattern": "http",
+          "path": "."
+        },
+        "result_ok": false
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "http",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "requests|http|urllib",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "pattern": "post_chat",
+          "path": "."
+        },
+        "result_ok": false
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "post_chat",
+          "path": "."
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 21.24,
+    "prompt_tokens": 27653,
+    "eval_tokens": 1065,
+    "rounds": 12,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 1561,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/qwen3-coder_30b-a3b-fp16_audittrap_sysgen_fixes__chat_timeout_dropped.txt",
+    "system_prompt": true,
+    "raw_content": "Based on my analysis, I can see the issue clearly now. In `chat/wrap.py`, line 19 has `del timeout_s` which removes the parameter instead of passing it through to the HTTP layer. This is exactly what the bug report describes - the timeout_s parameter gets lost in the chain.\n\nLet me create a patch to fix this:\n\n<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/chat/wrap.py\\n+++ b/chat/wrap.py\\n@@ -16,7 +16,7 @@\\n def chat_wrapped(\\n     model: str,\\n     messages: list[dict[str, str]],\\n-    *,\\n-    timeout_s: float | None = None,\\n-    temperature: float = 0.1,\\n-    max_tokens: int = 1024,\\n-    retry: int = 1,\\n+    *,\\n+    timeout_s: float | None = None,\\n+    temperature: float = 0.1,\\n+    max_tokens: int = 1024,\\n+    retry: int = 1,\\n ) -> dict[str, Any]:\\n     del timeout_s\\n     last: dict[str, Any] | None = None\\n@@ -20,7 +20,7 @@\\n     for _ in range(max(1, retry)):\\n         last = api.post_chat(\\n             model,\\n-            messages,\\n-            temperature=temperature,\\n-            max_tokens=max_tokens,\\n+            messages,\\n+            timeout_s=timeout_s,\\n+            temperature=temperature,\\n+            max_tokens=max_tokens,\\n         )\\n         if last.get(\\\"content\\\"):\\n             return last\\n\", \"reason\": \"The bug was in chat/wrap.py where the timeout_s parameter was being deleted instead of passed through to the HTTP layer. The fix passes timeout_s to api.post_chat() so that it reaches the actual HTTP client implementation.\", \"citations\": [\"chat/wrap.py:19\", \"chat/wrap.py:22\"]}\n</arch_final>"
+  },
+  {
+    "model": "qwen3-coder:30b-a3b-fp16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "subprocess_stderr_dropped",
+    "title": "Timed-out child with stderr-only output loses diagnostics",
+    "family": "repair",
+    "ok": false,
+    "score": 7,
+    "max_score": 10,
+    "grade_detail": "pytest 2/3 (fuzzy applied 1 hunks)",
+    "passed": 2,
+    "total": 3,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/util/subprocess_timeout.py\n+++ b/util/subprocess_timeout.py\n@@ -56,12 +56,10 @@\n         proc.wait(timeout=10)\n         stdout = e.stdout if e.stdout else \"\"\n         stderr = e.stderr if e.stderr else \"\"\n-        if str(stdout).strip():\n-            return subprocess.CompletedProcess(\n-                args=cmd,\n-                returncode=-9,\n-                stdout=str(stdout)[-2000:],\n-                stderr=f\"[KILLED after {wall:.1f}s] {str(stderr)[-2000:]}\",\n-            )\n         raise ProcTimeout(f\"subprocess exceeded {timeout_s:.1f}s\") from e\n+\n+        return subprocess.CompletedProcess(\n+            args=cmd,\n+            returncode=-9,\n+            stdout=str(stdout)[-2000:],\n+            stderr=f\"[KILLED after {wall:.1f}s] {str(stderr)[-2000:]}\",\n+        )",
+      "reason": "The original code only returned a CompletedProcess when stdout had content, but ignored stderr diagnostics when stdout was empty. This change ensures that even when only stderr is written (no stdout), we still return a CompletedProcess with the stderr content so callers can see diagnostic information about what happened before timeout.",
+      "citations": [
+        "util/subprocess_timeout.py"
+      ],
+      "patch_bytes": 787,
+      "patch_preview": "--- a/util/subprocess_timeout.py\n+++ b/util/subprocess_timeout.py\n@@ -56,12 +56,10 @@\n         proc.wait(timeout=10)\n         stdout = e.stdout if e.stdout else \"\"\n         stderr = e.stderr if e.stderr else \"\"\n-        if str(stdout).strip():\n-            return subprocess.CompletedProcess(\n-                args=cmd,\n-                returncode=-9,\n-                stdout=str(stdout)[-2000:],\n-                stderr=f\"[KILLED after {wall:.1f}s] {str(stderr)[-2000:]}\",\n-            )\n         raise ProcTimeout(f\"subprocess exceeded {timeout_s:.1f}s\") from e\n+\n+        return subprocess.CompletedProcess(\n+            args=cmd,\n+            returncode=-9,\n+            stdout=str(stdout)[-2000:],\n+            stderr=f\"[KILLED after {wall:.1f}s] {str(stderr)[-2000:]}\",\n+        )\n",
+      "apply_detail": "fuzzy applied 1 hunks"
+    },
+    "tool_calls": 6,
+    "files_read": [
+      "util/__init__.py",
+      "util/subprocess_timeout.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "timeout",
+          "path": ".",
+          "recurse": true
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "util/subprocess_timeout.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "subprocess_with_hard_timeout",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "util/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "subprocess_with_hard_timeout",
+          "path": ".",
+          "recurse": true
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 18.3,
+    "prompt_tokens": 17189,
+    "eval_tokens": 940,
+    "rounds": 7,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 1964,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/qwen3-coder_30b-a3b-fp16_audittrap_sysgen_fixes__subprocess_stderr_dropped.txt",
+    "system_prompt": true,
+    "raw_content": "Based on my analysis of the code, I can see the exact issue described in the problem statement:\n\nIn `util/subprocess_timeout.py`, lines 57-66 show that when a subprocess times out:\n1. If stdout has content, it returns a CompletedProcess with both stdout and stderr (including a message about being killed)\n2. **But** if stdout is empty (only stderr was written), it raises a bare `ProcTimeout` exception instead of returning a CompletedProcess\n\nThis causes callers to lose diagnostic information when only stderr was written before timeout.\n\nThe fix should ensure that even when stdout is empty, we still return a CompletedProcess with the stderr content so that diagnostics are preserved.\n\n<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/util/subprocess_timeout.py\\n+++ b/util/subprocess_timeout.py\\n@@ -56,12 +56,10 @@\\n         proc.wait(timeout=10)\\n         stdout = e.stdout if e.stdout else \\\"\\\"\\n         stderr = e.stderr if e.stderr else \\\"\\\"\\n-        if str(stdout).strip():\\n-            return subprocess.CompletedProcess(\\n-                args=cmd,\\n-                returncode=-9,\\n-                stdout=str(stdout)[-2000:],\\n-                stderr=f\\\"[KILLED after {wall:.1f}s] {str(stderr)[-2000:]}\\\",\\n-            )\\n         raise ProcTimeout(f\\\"subprocess exceeded {timeout_s:.1f}s\\\") from e\\n+\\n+        return subprocess.CompletedProcess(\\n+            args=cmd,\\n+            returncode=-9,\\n+            stdout=str(stdout)[-2000:],\\n+            stderr=f\\\"[KILLED after {wall:.1f}s] {str(stderr)[-2000:]}\\\",\\n+        )\", \"reason\": \"The original code only returned a CompletedProcess when stdout had content, but ignored stderr diagnostics when stdout was empty. This change ensures that even when only stderr is written (no stdout), we still return a CompletedProcess with the stderr content so callers can see diagnostic information about what happened before timeout.\", \"citations\": [\"util/subprocess_timeout.py\"]}\n</arch_final>"
+  },
+  {
+    "model": "qwen3-coder:30b-a3b-fp16",
+    "provider": "ollama",
+    "bench": "audittrap",
+    "task": "warmup_no_deadline",
+    "title": "Warmup ignores short timeout",
+    "family": "repair",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: corrupt patch at line 17; fuzzy: no hunks applied (skipped=['warmup.py@1'])",
+    "passed": 0,
+    "total": 0,
+    "correct": null,
+    "wrong": null,
+    "missing": null,
+    "evidence_bonus": null,
+    "per_claim": null,
+    "answer": {
+      "status": "patched",
+      "patch": "--- a/warmup.py\n+++ b/warmup.py\n@@ -1,13 +1,13 @@\n \"\"\"Cold-start warmup before a suite.\"\"\"\n \n from __future__ import annotations\n+from typing import Any\n \n from miniharness.chat import chat\n from miniharness import config\n \n \n def warmup(model: str) -> dict[str, Any]:\n-    _ = config.FIRST_BYTE_S\n-    return chat(model, \"Reply with exactly: OK\")\n+    return chat(model, \"Reply with exactly: OK\", timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S)\n",
+      "reason": "The warmup function was not setting a timeout, causing it to inherit the suite's first-byte budget (600 seconds) instead of using the intended shorter warmup timeout (30 seconds). This caused cold-start warmup to sit for many minutes against a wedged backend. The fix adds the missing timeout parameter to the chat call.",
+      "citations": [
+        "warmup.py:12",
+        "warmup.py:13",
+        "config.py:9"
+      ],
+      "patch_bytes": 441,
+      "patch_preview": "--- a/warmup.py\n+++ b/warmup.py\n@@ -1,13 +1,13 @@\n \"\"\"Cold-start warmup before a suite.\"\"\"\n \n from __future__ import annotations\n+from typing import Any\n \n from miniharness.chat import chat\n from miniharness import config\n \n \n def warmup(model: str) -> dict[str, Any]:\n-    _ = config.FIRST_BYTE_S\n-    return chat(model, \"Reply with exactly: OK\")\n+    return chat(model, \"Reply with exactly: OK\", timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S)\n",
+      "apply_detail": "git apply failed: error: corrupt patch at line 17; fuzzy: no hunks applied (skipped=['warmup.py@1'])"
+    },
+    "tool_calls": 12,
+    "files_read": [
+      "chat/__init__.py",
+      "chat/api.py",
+      "chat/facade.py",
+      "chat/wrap.py",
+      "config.py",
+      "pipeline.py",
+      "runner.py",
+      "warmup.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "warmup.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "config.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat.py"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "chat"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/facade.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/wrap.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "chat/api.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "FIRST_BYTE_S",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pipeline.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "runner.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 19.24,
+    "prompt_tokens": 31517,
+    "eval_tokens": 887,
+    "rounds": 13,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 924,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/qwen3-coder_30b-a3b-fp16_audittrap_sysgen_fixes__warmup_no_deadline.txt",
+    "system_prompt": true,
+    "raw_content": "<arch_final>\n{\"status\": \"patched\", \"patch\": \"--- a/warmup.py\\n+++ b/warmup.py\\n@@ -1,13 +1,13 @@\\n \\\"\\\"\\\"Cold-start warmup before a suite.\\\"\\\"\\\"\\n \\n from __future__ import annotations\\n+from typing import Any\\n \\n from miniharness.chat import chat\\n from miniharness import config\\n \\n \\n def warmup(model: str) -> dict[str, Any]:\\n-    _ = config.FIRST_BYTE_S\\n-    return chat(model, \\\"Reply with exactly: OK\\\")\\n+    return chat(model, \\\"Reply with exactly: OK\\\", timeout_s=config.DEFAULT_WARMUP_TIMEOUT_S)\\n\", \"reason\": \"The warmup function was not setting a timeout, causing it to inherit the suite's first-byte budget (600 seconds) instead of using the intended shorter warmup timeout (30 seconds). This caused cold-start warmup to sit for many minutes against a wedged backend. The fix adds the missing timeout parameter to the chat call.\", \"citations\": [\"warmup.py:12\", \"warmup.py:13\", \"config.py:9\"]}\n</arch_final>"
+  }
+]

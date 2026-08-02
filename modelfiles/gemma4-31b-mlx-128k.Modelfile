@@ -1,0 +1,4 @@
+FROM gemma4-coding:31b-mlxbf16
+
+# For large repositories. Quality at this window is unmeasured on either backend.
+PARAMETER num_ctx 131072

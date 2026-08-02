@@ -1,0 +1,5 @@
+# 98304 tokens, between the benchmarked 65536 and the 131072 variant. Unlike the draft
+# checkpoints this one runs as GGUF under llama-server, which does enforce its window:
+# overflow is truncated loudly, keeping the first few tokens and the tail.
+FROM gemma4-coding:31b
+PARAMETER num_ctx 98304

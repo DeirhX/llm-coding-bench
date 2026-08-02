@@ -1,0 +1,3 @@
+# 98304 tokens. Same reasoning as the 31B variant, and the same llama-server enforcement.
+FROM gemma4-coding:26b-a4b
+PARAMETER num_ctx 98304

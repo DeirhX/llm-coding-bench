@@ -1,0 +1,18 @@
+# Context-sized variant, following the qwen36-coding-<ctx> convention.
+#
+# Note what this is NOT for. The first version of this file claimed Claude Code would
+# truncate without a pinned num_ctx, because the client never sends one. That was wrong
+# and worth recording: Ollama 0.32.5 sizes an unpinned session to the model's full
+# declared maximum. Measured directly -- a request carrying no options at all reports
+# CONTEXT 262144 in `ollama ps`, for about 1 GB over the raw weights, because gemma4
+# interleaves sliding-window layers and its KV cache stays small.
+#
+# So this variant exists for determinism, not rescue. 65536 is the size every score in
+# this repo was measured at, and pinning it means a session cannot silently differ from
+# the benchmarked configuration if Ollama's auto-sizing ever reacts to memory pressure
+# from another loaded model. It is a smaller window than the default, deliberately.
+#
+# Sampler, output bound and stop markers are inherited from gemma4-coding:31b, so a
+# change there propagates to every context variant.
+FROM gemma4-coding:31b
+PARAMETER num_ctx 65536

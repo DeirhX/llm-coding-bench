@@ -1,0 +1,9 @@
+{
+  "model": "qwopus3.6:35b-a3b-coder-q8_0",
+  "tag": "qwopus3.6_35b-a3b-coder-q8_0_repohard",
+  "score": 45,
+  "max_score": 80,
+  "pass": 4,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/qwopus3.6_35b-a3b-coder-q8_0_repohard_20260728_175151.json"
+}

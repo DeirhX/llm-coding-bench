@@ -2,7 +2,7 @@
 
 Add a new phase by:
   1. Creating ``benches/<id>/`` with ``bench.py`` exposing ``main() -> int | None``
-  2. Registering a ``BenchSpec`` below
+  2. Registering a ``BenchMetadata`` below
   3. (Optional) teaching ``bench_lib.report`` how to summarize its ``*_latest.json``
 """
 
@@ -23,7 +23,7 @@ BENCH_ALIASES: dict[str, str] = {
 
 
 @dataclass(frozen=True)
-class BenchSpec:
+class BenchMetadata:
     id: str
     title: str
     summary: str
@@ -45,45 +45,49 @@ class BenchSpec:
         return int(main() or 0)
 
 
-BENCHES: dict[str, BenchSpec] = {
-    "pyhard": BenchSpec(
+BENCHES: dict[str, BenchMetadata] = {
+    "pyhard": BenchMetadata(
         id="pyhard",
         title="Pyhard",
         summary="9 Python coding tasks / 99 pts (regex, LRU, alien dict, expr, VM, SAT, patch, unify, SQL)",
         module="benches.pyhard.bench",
-        latest_suffix="_pyhard_latest.json",
+        latest_suffix="_latest.json",
         expected_tasks=9,
     ),
-    "arch": BenchSpec(
+    "arch": BenchMetadata(
         id="arch",
         title="Archbench",
         summary="Tools-first exploration of planted buggy shopapi (9 tasks / 90 pts)",
         module="benches.arch.bench",
         results_subdir="archbench",
+        latest_suffix="_latest.json",
         expected_tasks=9,
     ),
-    "claim": BenchSpec(
+    "claim": BenchMetadata(
         id="claim",
         title="Claim probe",
         summary="20 true/false traps over shopapi (tie-break / discrimination)",
         module="benches.claim.bench",
         results_subdir="archbench",
+        latest_suffix="_latest.json",
         expected_tasks=20,
     ),
-    "repohard": BenchSpec(
+    "repohard": BenchMetadata(
         id="repohard",
         title="Repohard",
         summary="Large synthetic ledgerkit repo: explore + patch; graded by private pytest (8 tasks)",
         module="benches.repohard.bench",
         results_subdir="repohard",
+        latest_suffix="_latest.json",
         expected_tasks=8,
     ),
-    "audittrap": BenchSpec(
+    "audittrap": BenchMetadata(
         id="audittrap",
         title="Audittrap",
         summary="Synthetic miniharness: claim battery + fix/wontfix traps (7 tasks / ~81 pts)",
         module="benches.audittrap.bench",
         results_subdir="audittrap",
+        latest_suffix="_latest.json",
         expected_tasks=7,
     ),
 }
@@ -93,11 +97,11 @@ def normalize_bench_id(bench_id: str) -> str:
     return BENCH_ALIASES.get(bench_id.strip().lower(), bench_id.strip().lower())
 
 
-def list_benches() -> list[BenchSpec]:
+def list_benches() -> list[BenchMetadata]:
     return list(BENCHES.values())
 
 
-def get_bench(bench_id: str) -> BenchSpec:
+def get_bench(bench_id: str) -> BenchMetadata:
     key = normalize_bench_id(bench_id)
     if key not in BENCHES:
         known = ", ".join(BENCHES)

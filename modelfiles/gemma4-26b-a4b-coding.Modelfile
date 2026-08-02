@@ -1,0 +1,45 @@
+FROM gemma4:26b-a4b-it-bf16
+
+# gemma4:26b-a4b-it-bf16 ships no sampler parameters at all, so a client that sends
+# none inherits Ollama's defaults: temperature 0.8 and num_predict -1, unbounded.
+# Every score measured in this repo used temperature 0.1 sent explicitly by the
+# bench, which means the shipped configuration is the one nobody has tested. These
+# parameters make the tested configuration the default for clients that send nothing.
+PARAMETER temperature 0.1
+PARAMETER repeat_penalty 1.1
+
+# num_predict 24576, not a tight cap, and the evidence says so. Bounding it to 8192
+# scored 67/80; leaving it at 24576 scored 80/80, and the difference was one task:
+# race_webhook_idempotency needs a long single response and ended on done_reason
+# "length" at 8192 versus "stop" at 24576. The runaway that originally justified a
+# cap does not come back once the stop sequences below are in place -- that arm had
+# zero unclean endings. So the cap was treating the symptom of the fabrication bug.
+#
+# It is still a bound rather than a licence: Ollama's default is -1, unbounded, which
+# in an interactive client means a request that can never return.
+PARAMETER num_predict 24576
+
+# This model fabricates the harness half of the tool protocol: it emits a tool call,
+# then invents the result block it should have waited for, and repeats that up to 103
+# times in one turn while re-quoting whole files it was already shown. Four of eight
+# repohard tasks did this, two of them into a timeout. The fix costs nothing, because
+# a client parses the first tool call and discards everything after it regardless.
+#
+# The rule for extending this list: stop at whatever string opens a tool RESULT, never
+# at the closing tag of a tool CALL, because stripping the latter breaks the client's
+# own parser.
+#
+# The first entry is the one that matters outside this repo. Ollama renders gemma4 with
+# a compiled Go renderer rather than a Go template, so the markers the model actually
+# sees are invisible in `ollama show`. Dumping them via the API's _debug_render_only
+# gives: <|tool_call>call:Name{...}<tool_call|> for the call and
+# <|tool_response>response:Name{value:...}<tool_response|> for the result. So
+# <|tool_response> is what this model would fabricate under native tool calling, which
+# is what an agent CLI reaching Ollama through a proxy uses. The <arch_result> form
+# below is this bench's own text protocol and is what the fabrication was measured
+# against; whether the native path fabricates at all is a separate, untested question,
+# since it travels through a different renderer and parser.
+PARAMETER stop "<|tool_response>"
+PARAMETER stop "<arch_result>"
+PARAMETER stop "<tool_result>"
+PARAMETER stop "</tool_result>"

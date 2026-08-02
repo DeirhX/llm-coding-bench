@@ -1,0 +1,753 @@
+[
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "race_webhook_idempotency",
+    "title": "Payment webhook double-applies under concurrency",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "patch_apply: git apply failed: error: b/store/webhook_repo.py: No such file or directory\nerror: b/service/payment_service.py: No such file or directory\nerror: b/store/webhook_repo.py: No such file or directory\nerror: b/service/payment_service.py: No such file or directory; fuzzy: no hunks applied (skipped=['store/webhook_repo.py@7', 'service/payment_service.py@24', 'store/webhook_repo.py@7', 'service/payment_service.py@31'])",
+    "passed": 0,
+    "total": 0,
+    "answer": {
+      "patch": "--- a/store/webhook_repo.py\n+++ b/store/webhook_repo.py\n@@ -7,3 +7,6 @@\n \n def is_processed(webhook_id: str) -> bool:\n     return db.get(\"processed_webhooks\", webhook_id) is not None\n+\n+def get_metadata(webhook_id: str) -> dict[str, Any] | None:\n+    return db.get(\"processed_webhooks\", webhook_id)\n```\n\nSecond, `service/payment_service.py`:\n```python\n--- a/service/payment_service.py\n+++ b/service/payment_service.py\n@@ -24,24 +24,30 @@\n def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n     \"\"\"Process payment.succeeded webhook.\"\"\"\n     webhook_id = payload[\"webhook_id\"]\n     tenant_id = payload[\"tenant_id\"]\n     invoice_id = payload[\"invoice_id\"]\n     amount_cents = int(payload[\"amount_cents\"])\n \n     set_tenant(TenantContext(tenant_id=tenant_id))\n-    pay = {\n-        \"id\": str(uuid.uuid4()),\n-        \"tenant_id\": tenant_id,\n-        \"invoice_id\": invoice_id,\n-        \"amount_cents\": amount_cents,\n-        \"webhook_id\": webhook_id,\n-    }\n-    payment_repo.upsert(pay)\n-    invoice_service.mark_paid(invoice_id)\n-    inv = invoice_repo.get(invoice_id) or {}\n-    account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n-    if account_id:\n-        entitlement_service.activate_paid_plan(account_id, tenant_id)\n-    outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n-    webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n-    return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n+\n+    with _lock_for(webhook_id):\n+        if webhook_repo.is_processed(webhook_id):\n+            meta = webhook_repo.get_metadata(webhook_id) or {}\n+            return {\n+                \"status\": \"ok\",\n+                \"payment_id\": meta.get(\"payment_id\"),\n+                \"webhook_id\": webhook_id,\n+            }\n+\n+        pay = {\n+            \"id\": str(uuid.uuid4()),\n+            \"tenant_id\": tenant_id,\n+            \"invoice_id\": invoice_id,\n+            \"amount_cents\": amount_cents,\n+            \"webhook_id\": webhook_id,\n+        }\n+        payment_repo.upsert(pay)\n+        invoice_service.mark_paid(invoice_id)\n+        inv = invoice_repo.get(invoice_id) or {}\n+        account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n+        if account_id:\n+            entitlement_service.activate_paid_plan(account_id, tenant_id)\n+        outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n+        webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n+        return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n```\n\nWait, I should check if `meta.get(\"payment_id\")` is safe. If `is_processed` returned true but for some reason metadata is missing (though it shouldn't be), it returns `None`. \n\nActually, looking at `mark_processed`:\n`db.put(\"processed_webhooks\", webhook_id, meta or {\"id\": webhook_id})`\nIf `meta` was not provided, it stores `{\"id\": webhook_id}`. In that case `meta.get(\"payment_id\")` would be `None`. But in our code we always provide it.\n\nOne more thing: the indentation of the original code for `pay = { ... }` and following lines needs to be correct in my diff.\n\nOriginal `handle_payment_webhook`:\n```python\n24| def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n25|     \"\"\"Process payment.succeeded webhook.\"\"\"\n26|     webhook_id = payload[\"webhook_id\"]\n27|     tenant_id = payload[\"tenant_id\"]\n28|     invoice_id = payload[\"invoice_id\"]\n29|     amount_cents = int(payload[\"amount_cents\"])\n30| \n31|     set_tenant(TenantContext(tenant_id=tenant_id))\n32|     pay = {\n33|         \"id\": str(uuid.uuid4()),\n34|         \"tenant_id\": tenant_id,\n35|         \"invoice_id\": invoice_id,\n36|         \"amount_cents\": amount_cents,\n37|         \"webhook_id\": webhook_id,\n38|     }\n39|     payment_repo.upsert(pay)\n40|     invoice_service.mark_paid(invoice_id)\n41|     inv = invoice_repo.get(invoice_id) or {}\n42|     account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n43|     if account_id:\n44|         entitlement_service.activate_paid_plan(account_id, tenant_id)\n45|     outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n46|     webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n47|     return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n```\n\nMy proposed change:\n```python\ndef handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n    \"\"\"Process payment.succeeded webhook.\"\"\"\n    webhook_id = payload[\"webhook_id\"]\n    tenant_id = payload[\"tenant_id\"]\n    invoice_id = payload[\"invoice_id\"]\n    amount_cents = int(payload[\"amount_cents\"])\n\n    set_tenant(TenantContext(tenant_id=tenant_id))\n\n    with _lock_for(webhook_id):\n        if webhook_repo.is_processed(webhook_id):\n            meta = webhook_repo.get_metadata(webhook_id) or {}\n            return {\"status\": \"ok\", \"payment_id\": meta.get(\"payment_id\"), \"webhook_id\": webhook_id}\n\n        pay = {\n            \"id\": str(uuid.uuid4()),\n            \"tenant_id\": tenant_id,\n            \"invoice_id\": invoice_id,\n            \"amount_cents\": amount_cents,\n            \"webhook_id\": webhook_id,\n        }\n        payment_repo.upsert(pay)\n        invoice_service.mark_paid(invoice_id)\n        inv = invoice_repo.get(invoice_id) or {}\n        account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n        if account_id:\n            entitlement_service.activate_paid_plan(account_id, tenant_id)\n        outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n        webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n        return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n```\n\nWait, I should check if `amount_cents` is used in the return. No. \n\nIs there any risk of deadlocks? `_lock_for(webhook_id)` uses a global lock `_LOCKS_GUARD` to create/retrieve the per-webhook lock. This is fine as long as we don't hold one webhook lock and then try to acquire another (which we don't).\n\nOne detail: I should make sure `import uuid` and other imports are still there. Yes, they are at the top of the file.\n\nLet's double check the `webhook_repo.get_metadata` implementation.\n```python\ndef get_metadata(webhook_id: str) -> dict[str, Any] | None:\n    return db.get(\"processed_webhooks\", webhook_id)\n```\nThis is correct as it uses the same table and key.\n\nFinal check on `service/payment_service.py` diff. I'll make sure the hunk is clean.\n\n```python\n<<<<\n    set_tenant(TenantContext(tenant_id=tenant_id))\n    pay = {\n        \"id\": str(uuid.uuid4()),\n        \"tenant_id\": tenant_id,\n        \"invoice_id\": invoice_id,\n        \"amount_cents\": amount_cents,\n        \"webhook_id\": webhook_id,\n    }\n    payment_repo.upsert(pay)\n    invoice_service.mark_paid(invoice_id)\n    inv = invoice_repo.get(invoice_id) or {}\n    account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n    if account_id:\n        entitlement_service.activate_paid_plan(account_id, tenant_id)\n    outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n    webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n    return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n====\n    set_tenant(TenantContext(tenant_id=tenant_id))\n\n    with _lock_for(webhook_id):\n        if webhook_repo.is_processed(webhook_id):\n            meta = webhook_repo.get_metadata(webhook_id) or {}\n            return {\n                \"status\": \"ok\",\n                \"payment_id\": meta.get(\"payment_id\"),\n                \"webhook_id\": webhook_id,\n            }\n\n        pay = {\n            \"id\": str(uuid.uuid4()),\n            \"tenant_id\": tenant_id,\n            \"invoice_id\": invoice_id,\n            \"amount_cents\": amount_cents,\n            \"webhook_id\": webhook_id,\n        }\n        payment_repo.upsert(pay)\n        invoice_service.mark_paid(invoice_id)\n        inv = invoice_repo.get(invoice_id) or {}\n        account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n        if account_id:\n            entitlement_service.activate_paid_plan(account_id, tenant_id)\n        outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n        webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n        return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n>>>>\n```\n\nWait, I noticed that `pay` is defined inside the lock now. This is good because it's part of the atomic operation.\n\nOne small thing: in `handle_payment_webhook`, `amount_cents = int(payload[\"amount_cents\"])` is at line 29.\nThe original code had:\n```python\n26|     webhook_id = payload[\"webhook_id\"]\n27|     tenant_id = payload[\"tenant_id\"]\n28|     invoice_id = payload[\"invoice_id\"]\n29|     amount_cents = int(payload[\"amount_cents\"])\n30| \n31|     set_tenant(TenantContext(tenant_id=tenant_id))\n```\n\nI will keep the extraction of variables outside the lock to minimize the time spent inside the lock, although it doesn't matter much here.\n\nWait, I should check if `webhook_repo` is imported in `service/payment_service.py`. Yes:\n`7| from store import payment_repo, webhook_repo, outbox, invoice_repo`\n\nAnd `is_processed` and `mark_processed` are in `store/webhook_repo.py`.\n\nOne more thing: I'll make sure the diff is against the root.\n\n```python\n--- a/store/webhook_repo.py\n+++ b/store/webhook_repo.py\n@@ -7,3 +7,6 @@\n \n def is_processed(webhook_id: str) -> bool:\n     return db.get(\"processed_webhooks\", webhook_id) is not None\n+\n+def get_metadata(webhook_id: str) -> dict[str, Any] | None:\n+    return db.get(\"processed_webhooks\", webhook_id)\n```\n\nAnd for `service/payment_service.py`:\n\n```python\n--- a/service/payment_service.py\n+++ b/service/payment_service.py\n@@ -31,17 +31,26 @@\n     set_tenant(TenantContext(tenant_id=tenant_id))\n-    pay = {\n-        \"id\": str(uuid.uuid4()),\n-        \"tenant_id\": tenant_id,\n-        \"invoice_id\": invoice_id,\n-        \"amount_cents\": amount_cents,\n-        \"webhook_id\": webhook_id,\n-    }\n-    payment_repo.upsert(pay)\n-    invoice_service.mark_paid(invoice_id)\n-    inv = invoice_repo.get(invoice_id) or {}\n-    account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n-    if account_id:\n-        entitlement_service.activate_paid_plan(account_id, tenant_id)\n-    outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n-    webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n-    return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n+\n+    with _lock_for(webhook_id):\n+        if webhook_repo.is_processed(webhook_id):\n+            meta = webhook_repo.get_metadata(webhook_id) or {}\n+            return {\n+                \"status\": \"ok\",\n+                \"payment_id\": meta.get(\"payment_id\"),\n+                \"webhook_id\": webhook_id,\n+            }\n+\n+        pay = {\n+            \"id\": str(uuid.uuid4()),\n+            \"tenant_id\": tenant_id,\n+            \"invoice_id\": invoice_id,\n+            \"amount_cents\": amount_cents,\n+            \"webhook_id\": webhook_id,\n+        }\n+        payment_repo.upsert(pay)\n+        invoice_service.mark_paid(invoice_id)\n+        inv = invoice_repo.get(invoice_id) or {}\n+        account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n+        if account_id:\n+            entitlement_service.activate_paid_plan(account_id, tenant_id)\n+        outbox.insert(events.invoice_paid(tenant_id, invoice_id, pay[\"id\"]))\n+        webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n+        return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n```\n\nWait, I should check the line numbers in `service/payment_service.py` more carefully.\nLine 31 is `set_tenant(...)`.\nThe lines after it are:\n32: `pay = {`\n...\n47: `return {\"status\": \"ok\", ...}`\n\nSo my diff hunk should start around line 31.\n\nLet's re-verify the original file content for `service/payment_service.py`:\n```python\n31|     set_tenant(TenantContext(tenant_id=tenant_id))\n32|     pay = {\n33|         \"id\": str(uuid.uuid4()),\n34|         \"tenant_id\": tenant_id,\n35|         \"invoice_id\": invoice_id,\n36|         \"amount_cents\": amount_cents,\n37|         \"webhook_id\": webhook_id,\n38|     }\n39|     payment_repo.upsert(pay)\n40|     invoice_service.mark_paid(invoice_id)\n41|     inv = invoice_repo.get(invoice_id) or {}\n42|     account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n43|     if account_id:\n44|         entitlement_service.activate_paid_plan(account_id, tenant_id)\n45|     outbox.insert(events.invoice_paid(tenant\n",
+      "patch_bytes": 12462,
+      "patch_preview": "--- a/store/webhook_repo.py\n+++ b/store/webhook_repo.py\n@@ -7,3 +7,6 @@\n \n def is_processed(webhook_id: str) -> bool:\n     return db.get(\"processed_webhooks\", webhook_id) is not None\n+\n+def get_metadata(webhook_id: str) -> dict[str, Any] | None:\n+    return db.get(\"processed_webhooks\", webhook_id)\n```\n\nSecond, `service/payment_service.py`:\n```python\n--- a/service/payment_service.py\n+++ b/service/payment_service.py\n@@ -24,24 +24,30 @@\n def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n     \"\"\"Process payment.succeeded webhook.\"\"\"\n     webhook_id = payload[\"webhook_id\"]\n     tenant_id = payload[\"tenant_id\"]\n     invoice_id = payload[\"invoice_id\"]\n     amount_cents = int(payload[\"amount_cents\"])\n \n     set_tenant(TenantContext(tenant_id=tenant_id))\n-    pay = {\n-        \"id\": str(uuid.uuid4()),\n-        \"tenant_id\": tenant_id,\n-        \"invoice_id\": invoice_id,\n-        \"amount_cents\": amount_cents,\n-        \"webhook_id\": webhook_id,\n-    }\n-    payment_repo.upsert(pay)\n-    invoice_service.mark_paid(invoice_id)\n-    inv = invoice_repo.get(invoice_id) or {}\n-    account_id = inv.get(\"account_id\") or payload.get(\"account_id\")\n-    if account_id:\n-        entitlemen",
+      "apply_detail": "git apply failed: error: b/store/webhook_repo.py: No such file or directory\nerror: b/service/payment_service.py: No such file or directory\nerror: b/store/webhook_repo.py: No such file or directory\nerror: b/service/payment_service.py: No such file or directory; fuzzy: no hunks applied (skipped=['store/webhook_repo.py@7', 'service/payment_service.py@24', 'store/webhook_repo.py@7', 'service/payment_service.py@31'])"
+    },
+    "tool_calls": 10,
+    "files_read": [
+      "service/entitlement_service.py",
+      "service/invoice_service.py",
+      "service/payment_service.py",
+      "store/db.py",
+      "store/entitlement_repo.py",
+      "store/invoice_repo.py",
+      "store/payment_repo.py",
+      "store/webhook_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/webhook_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/entitlement_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/entitlement_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 158.07,
+    "prompt_tokens": 33132,
+    "eval_tokens": 8559,
+    "rounds": 12,
+    "done_reason": "length",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 26452,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4_26b-a4b-it-bf16_repohard_stop_fin12__race_webhook_idempotency.txt",
+    "raw_content": "<thought\n>The issue is that `handle_payment_webhook` in `service/payment_service.py` is not idempotent under concurrency. \n\nWhen two requests with the same `webhook_id` arrive simultaneously:\n1. Both might pass any check (though there isn't one currently).\n2. Both will call `payment_repo.upsert(pay)`. Since `pay[\"id\"]` is a new `uuid4()`, it creates two different payment records even if they have the same `webhook_id`.\n3. Both will call `invoice_service.mark_paid(invoice_id)`.\n4. Both will call `entitlement_service.activate_paid_plan(...)`.\n5. Both will call `outbox.insert(...)`.\n\nTo fix this, we should use the `webhook_id` to ensure idempotency. \n\nThe current implementation:\n```python\ndef handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n    \"\"\"Process payment.succeeded webhook.\"\"\"\n    webhook_id = payload[\"webhook_id\"]\n    # ...\n    pay = {\n        \"id\": str(uuid.uuid4()),\n        \"tenant_id\": tenant_id,\n        \"invoice_id\": invoice_id,\n        \"amount_cents\": amount_cents,\n        \"webhook_id\": webhook_id,\n    }\n    payment_repo.upsert(pay)\n    # ...\n    webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n```\n\nWe should check if the `webhook_id` has already been processed using `webhook_repo.is_processed(webhook_id)` at the beginning of the function. However, to handle concurrency, we need a way to \"claim\" the webhook processing atomically or use a lock.\n\nThe `service/payment_service.py` already has some unused locking infrastructure:\n```python\n13| _LOCKS: dict[str, threading.Lock] = {}\n14| _LOCKS_GUARD = threading.Lock()\n15| \n16| \n17| def _lock_for(key: str) -> threading.Lock:\n18|     with _LOCKS_GUARD:\n19|         if key not in _LOCKS:\n20|             _LOCKS[key] = threading.Lock()\n21|         return _LOCKS[key]\n```\n\nI can use `_lock_for(webhook_id)` to ensure that only one thread processes a specific `webhook_id` at a time. Inside the lock, I must check if it's already processed.\n\nWait, `webhook_repo.mark_processed` is called at the end. If I check `is_processed` at the beginning inside the lock, it should work.\n\nLet's verify `webhook_repo.is_processed`:\n```python\n8| def is_processed(webhook_id: str) -> bool:\n9|     return db.get(\"processed_webhooks\", webhook_id) is not None\n```\n\nAnd `mark_processed`:\n```python\n5| def mark_processed(webhook_id: str, meta: dict[str, Any] | None = None) -> None:\n6|     db.put(\"processed_webhooks\", webhook_id, meta or {\"id\": webhook_id})\n```\n\nIf I wrap the logic in `handle_payment_webhook` with a lock on `webhook_id`, and check `is_processed` inside that lock, it should prevent double processing.\n\nHowever, there's another issue: `payment_repo.upsert(pay)` uses a new UUID for every call. If we want idempotency, maybe the payment ID should be derived from something or we should check if a payment with this `webhook_id` already exists? \n\nActually, the requirement says \"exactly one payment row and one entitlement activation\". If I use the lock and check `is_processed`, then:\n1. Thread A acquires lock for `webhook_id`.\n2. Thread A checks `is_processed(webhook_id)` -> False.\n3. Thread A processes everything.\n4. Thread A calls `mark_processed(webhook_id, ...)`.\n5. Thread A releases lock.\n6. Thread B acquires lock for `webhook_id`.\n7. Thread B checks `is_processed(webhook_id)` -> True.\n8. Thread B returns early (or returns the previous result).\n\nWhat should Thread B return? The original implementation returns:\n`return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}`\n\nIf I want to be truly idempotent and return the same response, I might need to store the result of the first processing in `webhook_repo`. \n\nLet's see what `mark_processed` does:\n`db.put(\"processed_webhooks\", webhook_id, meta or {\"id\": webhook_id})`\nIt stores `meta`. In `handle_payment_webhook`, it calls `webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})`.\n\nSo if I change the code to:\n1. Acquire lock for `webhook_id`.\n2. Check `is_processed(webhook_id)`.\n3. If processed, get the metadata and return a success response with the existing `payment_id`.\n4. If not processed, proceed with processing.\n\nWait, I need to be able to retrieve the metadata from `is_processed` or a new `get_processed` function. Currently `is_processed` only returns a bool.\n\nLet's check `webhook_repo.py` again.\n```python\n5| def mark_processed(webhook_id: str, meta: dict[str, Any] | None = None) -> None:\n6|     db.put(\"processed_webhooks\", webhook_id, meta or {\"id\": webhook_id})\n7| \n8| def is_processed(webhook_id: str) -> bool:\n9|     return db.get(\"processed_webhooks\", webhook_id) is not None\n```\n\nI should probably add a `get_processed` to `webhook_repo.py` or just use `db.get` directly in the service, but it's better to use the repo. Or I can just check if `is_processed` is true and then call something else. \n\nActually, I can just use `db.get(\"processed_webhooks\", webhook_id)` inside `handle_payment_webhook`. But wait, `service/payment_service.py` imports `webhook_repo`.\n\nLet's see if I should modify `webhook_repo.py` to return the metadata.\n\nActually, a simpler way to fix the concurrency issue without changing too much is:\n1. Use the lock.\n2. Check if processed.\n3. If processed, return success (maybe we don't have the old payment_id easily unless we fetch it).\n\nIf I can't easily get the old `payment_id`, I might just return a \"already processed\" status or similar, but the requirement says \"exactly one payment row and one entitlement activation\". It doesn't strictly say the response must be identical, but it's good practice.\n\nWait, if I use the lock, even without checking `is_processed` at the start, it would prevent *concurrent* execution of the same `webhook_id`. But it wouldn't prevent *sequential* retries from creating duplicate payments if they happen one after another. The problem description says \"when the payment provider retries ... at the same time as the original delivery\". This implies concurrency.\n\nHowever, a robust idempotent implementation should handle both.\n\nLet's look at `handle_payment_webhook` again.\n```python\n24| def handle_payment_webhook(payload: dict[str, Any]) -> dict[str, Any]:\n25|     \"\"\"Process payment.succeeded webhook.\"\"\"\n26|     webhook_id = payload[\"webhook_id\"]\n...\n39|     payment_repo.upsert(pay)\n...\n46|     webhook_repo.mark_processed(webhook_id, {\"payment_id\": pay[\"id\"]})\n47|     return {\"status\": \"ok\", \"payment_id\": pay[\"id\"], \"webhook_id\": webhook_id}\n```\n\nIf I add:\n```python\n    lock = _lock_for(webhook_id)\n    with lock:\n        if webhook_repo.is_processed(webhook_id):\n            # How to get the payment_id? \n            # We can try to find it in processed_webhooks if we add a way to get it.\n```\n\nLet's see `webhook_repo.py` again. I'll add `get_processed`.\n\nActually, I can just use `db.get(\"processed_webhooks\", webhook_id)` in the service if I want, but let's be clean.\n\nWait, I should also check if `payment_repo.upsert(pay)` is actually idempotent. It uses `p[\"id\"]` which is a new UUID. So it's NOT idempotent by itself. The idempotency must come from the `webhook_id`.\n\nIf I change `pay[\"id\"]` to be derived from `webhook_id`, that would also work, but `payment_id` might be used elsewhere and expected to be a UUID.\n\nLet's try this plan:\n1. Modify `store/webhook_repo.py` to add `get_processed(webhook_id)`.\n2. Modify `service/payment_service.py` to use the lock and check `get_processed`.\n\nWait, I can just do it in `service/payment_service.py` by calling `webhook_repo.is_processed` and if it's true, we need the metadata. \n\nLet's see if I can just use `db.get` in `payment_service.py`. It imports `webhook_repo`, but not `db`. It does import `store.webhook_repo`.\n\nActually, I'll just add `get_processed` to `webhook_repo.py`.\n\nWait, I see `_LOCKS` and `_lock_for` in `service/payment_service.py`. They are already there! It seems they were intended for this but not used.\n\nLet's check if I can just use the lock and then check `is_processed`.\n\n```python\ndef handle_payment_webhook(payload: d"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "tenant_cache_key_collision",
+    "title": "Account cache leaks across tenants",
+    "family": "fix",
+    "ok": false,
+    "score": 0,
+    "max_score": 10,
+    "grade_detail": "pytest 0/2 (fuzzy applied 1 hunks)",
+    "passed": 0,
+    "total": 2,
+    "answer": {
+      "patch": "--- a/store/cache.py\n+++ b/store/cache.py\n@@ -10,8 +10,8 @@\n \n \n def cache_key_account(account_id: str) -> str:\n-    return f\"acct:{account_id}\"\n+    return f\"acct:{account_id}\"\n \n \n def cache_key_invoice(invoice_id: str) -> str:\n-    return f\"inv:{invoice_id}\"\n+    return f\"inv:{invoice_id}\"\n",
+      "patch_bytes": 294,
+      "patch_preview": "--- a/store/cache.py\n+++ b/store/cache.py\n@@ -10,8 +10,8 @@\n \n \n def cache_key_account(account_id: str) -> str:\n-    return f\"acct:{account_id}\"\n+    return f\"acct:{account_id}\"\n \n \n def cache_key_invoice(invoice_id: str) -> str:\n-    return f\"inv:{invoice_id}\"\n+    return f\"inv:{invoice_id}\"\n",
+      "apply_detail": "fuzzy applied 1 hunks"
+    },
+    "tool_calls": 9,
+    "files_read": [
+      "pkg/tenant.py",
+      "service/account_service.py",
+      "store/account_repo.py",
+      "store/cache.py",
+      "store/db.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/account_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/account_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/account_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 38.81,
+    "prompt_tokens": 24758,
+    "eval_tokens": 1954,
+    "rounds": 11,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 4588,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4_26b-a4b-it-bf16_repohard_stop_fin12__tenant_cache_key_collision.txt",
+    "raw_content": "The issue is that `cache.cache_key_account` only uses the `account_id` to generate a cache key, which means different tenants using the same `account_id` will collide in the global `_CACHE`.\n\nTo fix this, I need to:\n1. Update `store/cache.py` to include `tenant_id` in the cache keys for accounts and invoices.\n2. Update `service/account_service.py` to pass the `tenant_id` when generating these keys.\n\nLet's start by modifying `store/cache.py`.\n\n<arch_final>\n{\"patch\": \"--- a/store/cache.py\\n+++ b/store/cache.py\\n@@ -10,8 +10,8 @@\\n \\n \\n def cache_key_account(account_id: str) -> str:\\n-    return f\\\"acct:{account_id}\\\"\\n+    return f\\\"acct:{account_id}\\\"\\n \\n \\n def cache_key_invoice(invoice_id: str) -> str:\\n-    return f\\\"inv:{invoice_id}\\\"\\n+    return f\\\"inv:{invoice_id}\\\"\\n\"}\n</arch_final>\n\nWait, I made a mistake in my thought process for the patch. I didn't actually change anything in that last `patch` block (I just repeated the same strings). Let me redo it correctly.\n\nThe cache keys should be tenant-scoped.\n\n<arch_final>\n{\"patch\": \"--- a/store/cache.py\\n+++ b/store/cache.py\\n@@ -10,8 +10,8 @@\\n \\n \\n def cache_key_account(account_id: str) -> str:\\n-    return f\\\"acct:{account_id}\\\"\\n+    def cache_key_account(account_id: str, tenant_id: str) -> str:\\n+        return f\\\"acct:{tenant_id}:{account_id}\\\"\\n \\n \\n def cache_key_invoice(invoice_id: str) -> str:\\n-    return f\\\"inv:{invoice_id}\\\"\\n+def cache_key_invoice(invoice_id: str, tenant_id: str) -> str:\\n+    return f\\\"inv:{tenant_id}:{invoice_id}\\\"\\n\"}\n</arch_final>\n\nActually, I should just provide the correct unified diff.\n\n<arch_final>\n{\"patch\": \"--- a/store/cache.py\\n+++ b/store/cache.py\\n@@ -10,8 +10,8 @@\\n \\n \\n def cache_key_account(account_id: str) -> str:\\n-    return f\\\"acct:{account_id}\\\"\\n+def cache_key_account(account_id: str, tenant_id: str) -> str:\\n+    return f\\\"acct:{tenant_id}:{account_id}\\\"\\n \\n \\n def cache_key_invoice(invoice_id: str) -> str:\\n-    return f\\\"inv:{invoice_id}\\\"\\n+def cache_key_invoice(invoice_id: str, tenant_id: str) -> str:\\n+    return f\\\"inv:{tenant_id}:{invoice_id}\\\"\\n\"}\n</arch_final>\n\nWait, I see I am trying to do multiple things in one go but the diff format for `cache.py` was slightly wrong in my head. Let's try again.\n\nThe goal is:\n1. Change `cache_key_account(account_id)` -> `cache_key_account(tenant_id, account_id)`\n2. Change `cache_key_invoice(invoice_id)` -> `cache_key_invoice(tenant_id, invoice_id)`\n\nAnd update `service/account_service.py`.\n\n<arch_final>\n{\"patch\": \"--- a/store/cache.py\\n+++ b/store/cache.py\\n@@ -10,8 +10,8 @@\\n \\n \\n def cache_key_account(account_id: str) -> str:\\n-    return f\\\"acct:{account_id}\\\"\\n+def cache_key_account(tenant_id: str, account_id: str) -> str:\\n+    return f\\\"acct:{tenant_id}:{account_id}\\\"\\n \\n \\n def cache_key_invoice(invoice_id: str) -> str:\\n-    return f\\\"inv:{invoice_id}\\\"\\n+def cache_key_invoice(tenant_id: str, invoice_id: str) -> str:\\n+    return f\\\"inv:{tenant_id}:{invoice_id}\\\"\\n\"}\n</arch_final>\n\nWait, I cannot provide two separate patches. I must provide one patch that covers both files if possible, or just the most important one? No, a single patch can contain multiple files.\n\nLet's prepare the full patch.\n\nFile 1: `store/cache.py`\n```python\ndef cache_key_account(tenant_id: str, account_id: str) -> str:\n    return f\"acct:{tenant_id}:{account_id}\"\n\ndef cache_key_invoice(tenant_id: str, invoice_id: str) -> str:\n    return f\"inv:{tenant_id}:{invoice_id}\"\n```\n\nFile 2: `service/account_service.py`\n```python\ndef get_account(account_id: str) -> dict[str, Any] | None:\n    ctx = require_tenant()\n    key = cache.cache_key_account(ctx.tenant_id, account_id)\n    ...\n```\n\nLet's construct the final patch.\n\n<arch_final>\n{\"patch\": \"--- a/store/cache.py\\n+++ b/store/cache.py\\n@@ -10,8 +10,8 @@\\n \\n \\n def cache_key_account(account_id: str) -> str:\\n-    return f\\\"acct:{account_id}\\\"\\n+def cache_key_account(tenant_id: str, account_id: str) -> str:\\n+    return f\\\"acct:{tenant_id}:{account_id}\\\"\\n \\n \\n def cache_key_invoice(invoice_id: str) -> str:\\n-    return f\\\"inv:{invoice_id}\\\"\\n+def cache_key_invoice(tenant_id: str, invoice_id: str) -> str:\\n+    return f\\\"inv:{tenant_id}:{invoice_id}\\\"\\n--- a/service/account_service.py\\n+++ b/service/account_service.py\\n@@ -8,7 +8,7 @@\\n \\n \\n def get_account(account_id: str) -> dict[str, Any] | None:\\n     ctx = require_tenant()\\n-    key = cache.cache_key_account(account_id)\\n+    key = cache.cache_key_account(ctx.tenant_id, account_id)\\n     hit = cache.get(key)\\n     if hit is not None:\\n         return hit\\n\"}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "money_rounding_split",
+    "title": "Money.split loses cents",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 2/2 (applied via --whitespace=nowarn -p1)",
+    "passed": 2,
+    "total": 2,
+    "answer": {
+      "patch": "--- a/pkg/money.py\n+++ b/pkg/money.py\n@@ -24,7 +24,10 @@\n         \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n         if parts <= 0:\n             raise ValueError(\"parts must be positive\")\n-        share = self.cents / parts\n-        base = int(share)\n-        return [Money(base, self.currency) for _ in range(parts)]\n+        base, remainder = divmod(self.cents, parts)\n+        result = []\n+        for i in range(parts):\n+            amount = base + (1 if i < remainder else 0)\n+            result.append(Money(amount, self.currency))\n+        return result\n \n \n def _same(a: Money, b: Money) -> None:\n",
+      "patch_bytes": 620,
+      "patch_preview": "--- a/pkg/money.py\n+++ b/pkg/money.py\n@@ -24,7 +24,10 @@\n         \"\"\"Split into N parts that sum exactly to self.cents.\"\"\"\n         if parts <= 0:\n             raise ValueError(\"parts must be positive\")\n-        share = self.cents / parts\n-        base = int(share)\n-        return [Money(base, self.currency) for _ in range(parts)]\n+        base, remainder = divmod(self.cents, parts)\n+        result = []\n+        for i in range(parts):\n+            amount = base + (1 if i < remainder else 0)\n+            result.append(Money(amount, self.currency))\n+        return result\n \n \n def _same(a: Money, b: Money) -> None:\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 8,
+    "files_read": [
+      "pkg/money.py",
+      "tests/test_smoke.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "class Money",
+          "path": "pkg"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/money.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "tests/test_money.py"
+        },
+        "result_ok": false
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "Money",
+          "path": "tests"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "tests/test_smoke.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/money.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 14.92,
+    "prompt_tokens": 14922,
+    "eval_tokens": 640,
+    "rounds": 9,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1123,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4_26b-a4b-it-bf16_repohard_stop_fin12__money_rounding_split.txt",
+    "raw_content": "The `Money.split` method currently calculates a base amount using integer division of a float, which loses the remainder. For example, if `self.cents = 10` and `parts = 3`, `share = 10 / 3 = 3.333...`, `base = 3`, and it returns `[Money(3), Money(3), Money(3)]`, which sums to 9 instead of 10.\n\nTo fix this, I will distribute the remainder (the leftover cents) across the first few parts so that the sum is exactly equal to `self.cents`.\n\n<arch_final>\n{\"patch\": \"--- a/pkg/money.py\\n+++ b/pkg/money.py\\n@@ -24,7 +24,10 @@\\n         \\\"\\\"\\\"Split into N parts that sum exactly to self.cents.\\\"\\\"\\\"\\n         if parts <= 0:\\n             raise ValueError(\\\"parts must be positive\\\")\\n-        share = self.cents / parts\\n-        base = int(share)\\n-        return [Money(base, self.currency) for _ in range(parts)]\\n+        base, remainder = divmod(self.cents, parts)\\n+        result = []\\n+        for i in range(parts):\\n+            amount = base + (1 if i < remainder else 0)\\n+            result.append(Money(amount, self.currency))\\n+        return result\\n \\n \\n def _same(a: Money, b: Money) -> None:\"}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "migration_backfill_hole",
+    "title": "Ledger backfill leaves legacy rows",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 2/2 (applied via --whitespace=nowarn -p1)",
+    "passed": 2,
+    "total": 2,
+    "answer": {
+      "patch": "--- a/store/migrations/m002_backfill_ledger.py\n+++ b/store/migrations/m002_backfill_ledger.py\n@@ -7,15 +7,14 @@\n     for row in legacy:\n         if row.get(\"migrated\"):\n             continue\n-        if row.get(\"priority\") == \"high\":\n-            new = {\n-                \"id\": row[\"id\"],\n-                \"tenant_id\": row[\"tenant_id\"],\n-                \"cents\": row[\"cents\"],\n-                \"currency\": row.get(\"currency\", \"USD\"),\n-                \"source\": \"legacy\",\n-            }\n-            db.put(\"ledger\", new[\"id\"], new)\n-            row = {**row, \"migrated\": True}\n-            db.put(\"ledger_legacy\", row[\"id\"], row)\n+        new = {\n+            \"id\": row[\"id\"],\n+            \"tenant_id\": row[\"tenant_id\"],\n+            \"cents\": row[\"cents\"],\n+            \"currency\": row.get(\"currency\", \"USD\"),\n+            \"source\": \"legacy\",\n+        }\n+        db.put(\"ledger\", new[\"id\"], new)\n+        row = {**row, \"migrated\": True}\n+        db.put(\"ledger_legacy\", row[\"id\"], row)\n     db.put(\"schema_meta\", \"002_backfill_ledger\", {\"applied\": True})\n",
+      "patch_bytes": 1055,
+      "patch_preview": "--- a/store/migrations/m002_backfill_ledger.py\n+++ b/store/migrations/m002_backfill_ledger.py\n@@ -7,15 +7,14 @@\n     for row in legacy:\n         if row.get(\"migrated\"):\n             continue\n-        if row.get(\"priority\") == \"high\":\n-            new = {\n-                \"id\": row[\"id\"],\n-                \"tenant_id\": row[\"tenant_id\"],\n-                \"cents\": row[\"cents\"],\n-                \"currency\": row.get(\"currency\", \"USD\"),\n-                \"source\": \"legacy\",\n-            }\n-            db.put(\"ledger\", new[\"id\"], new)\n-            row = {**row, \"migrated\": True}\n-            db.put(\"ledger_legacy\", row[\"id\"], row)\n+        new = {\n+            \"id\": row[\"id\"],\n+            \"tenant_id\": row[\"tenant_id\"],\n+            \"cents\": row[\"cents\"],\n+            \"currency\": row.get(\"currency\", \"USD\"),\n+            \"source\": \"legacy\",\n+        }\n+        db.put(\"ledger\", new[\"id\"], new)\n+        row = {**row, \"migrated\": True}\n+        db.put(\"ledger_legacy\", row[\"id\"], row)\n     db.put(\"schema_meta\", \"002_backfill_ledger\", {\"applied\": True})\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 8,
+    "files_read": [
+      "store/__init__.py",
+      "store/db.py",
+      "store/migrations/m001_init.py",
+      "store/migrations/m002_backfill_ledger.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store/migrations"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/migrations/m002_backfill_ledger.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/__init__.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/migrations/m002_backfill_ledger.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/migrations/m001_init.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 17.12,
+    "prompt_tokens": 16109,
+    "eval_tokens": 769,
+    "rounds": 9,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1494,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4_26b-a4b-it-bf16_repohard_stop_fin12__migration_backfill_hole.txt",
+    "raw_content": "The issue is in `store/migrations/m002_backfill_ledger.py`. The migration only processes rows where `priority == \"high\"`, leaving all other rows unmigrated in the `ledger_legacy` table. To fix this, we should remove the priority check so that all unmigrated rows are moved to the `ledger` table.\n\n<arch_final>\n{\"patch\": \"--- a/store/migrations/m002_backfill_ledger.py\\n+++ b/store/migrations/m002_backfill_ledger.py\\n@@ -7,15 +7,14 @@\\n     for row in legacy:\\n         if row.get(\\\"migrated\\\"):\\n             continue\\n-        if row.get(\\\"priority\\\") == \\\"high\\\":\\n-            new = {\\n-                \\\"id\\\": row[\\\"id\\\"],\\n-                \\\"tenant_id\\\": row[\\\"tenant_id\\\"],\\n-                \\\"cents\\\": row[\\\"cents\\\"],\\n-                \\\"currency\\\": row.get(\\\"currency\\\", \\\"USD\\\"),\\n-                \\\"source\\\": \\\"legacy\\\",\\n-            }\\n-            db.put(\\\"ledger\\\", new[\\\"id\\\"], new)\\n-            row = {**row, \\\"migrated\\\": True}\\n-            db.put(\\\"ledger_legacy\\\", row[\\\"id\\\"], row)\\n+        new = {\\n+            \\\"id\\\": row[\\\"id\\\"],\\n+            \\\"tenant_id\\\": row[\\\"tenant_id\\\"],\\n+            \\\"cents\\\": row[\\\"cents\\\"],\\n+            \\\"currency\\\": row.get(\\\"currency\\\", \\\"USD\\\"),\\n+            \\\"source\\\": \\\"legacy\\\",\\n+        }\\n+        db.put(\\\"ledger\\\", new[\\\"id\\\"], new)\\n+        row = {**row, \\\"migrated\\\": True}\\n+        db.put(\\\"ledger_legacy\\\", row[\\\"id\\\"], row)\\n     db.put(\\\"schema_meta\\\", \\\"002_backfill_ledger\\\", {\\\"applied\\\": True})\"}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "nplus1_reconciliation",
+    "title": "Reconciliation N+1 payment lookups",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 2/2 (fuzzy applied 1 hunks)",
+    "passed": 2,
+    "total": 2,
+    "answer": {
+      "patch": "--- a/service/reconcile_service.py\n+++ b/service/reconcile_service.py\n@@ -9,13 +9,18 @@\n def reconcile_tenant() -> dict[str, Any]:\n     \"\"\"Match open invoices to payments.\"\"\"\n     ctx = require_tenant()\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n+    payments = payment_repo.list_by_tenant(ctx.tenant_id)\n+\n+    pays_by_invoice = {}\n+    for p in payments:\n+        inv_id = p.get(\"invoice_id\")\n+        if inv_id:\n+            pays_by_invoice.setdefault(inv_id, []).append(p)\n+\n     matched = 0\n     gaps = []\n     for inv in invoices:\n-        pays = payment_repo.list_by_invoice(inv[\"id\"])\n+        pays = pays_by_invoice.get(inv[\"id\"], [])\n         paid = sum(p.get(\"amount_cents\", 0) for p in pays)\n         if paid >= inv.get(\"amount_cents\", 0) and inv.get(\"status\") == \"paid\":\n             matched += 1\n",
+      "patch_bytes": 826,
+      "patch_preview": "--- a/service/reconcile_service.py\n+++ b/service/reconcile_service.py\n@@ -9,13 +9,18 @@\n def reconcile_tenant() -> dict[str, Any]:\n     \"\"\"Match open invoices to payments.\"\"\"\n     ctx = require_tenant()\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\n+    payments = payment_repo.list_by_tenant(ctx.tenant_id)\n+\n+    pays_by_invoice = {}\n+    for p in payments:\n+        inv_id = p.get(\"invoice_id\")\n+        if inv_id:\n+            pays_by_invoice.setdefault(inv_id, []).append(p)\n+\n     matched = 0\n     gaps = []\n     for inv in invoices:\n-        pays = payment_repo.list_by_invoice(inv[\"id\"])\n+        pays = pays_by_invoice.get(inv[\"id\"], [])\n         paid = sum(p.get(\"amount_cents\", 0) for p in pays)\n         if paid >= inv.get(\"amount_cents\", 0) and inv.get(\"status\") == \"paid\":\n             matched += 1\n",
+      "apply_detail": "fuzzy applied 1 hunks"
+    },
+    "tool_calls": 12,
+    "files_read": [
+      "service/reconcile_service.py",
+      "store/db.py",
+      "store/invoice_repo.py",
+      "store/payment_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "service"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/reconcile_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/db.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/invoice_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/reconcile_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/payment_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {},
+        "result_ok": false
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "list_by_invoice",
+          "path": "."
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 55.13,
+    "prompt_tokens": 48675,
+    "eval_tokens": 2747,
+    "rounds": 13,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 1227,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4_26b-a4b-it-bf16_repohard_stop_fin12__nplus1_reconciliation.txt",
+    "raw_content": "I will optimize `reconcile_tenant` in `service/reconcile_service.py` by fetching all payments for the tenant in a single call using `payment_repo.list_by_tenant`, and then grouping them by `invoice_id` in memory. This eliminates the N+1 query problem where `payment_repo.list_by_invoice` was called once per invoice.\n\n<arch_final>\n{\"patch\": \"--- a/service/reconcile_service.py\\n+++ b/service/reconcile_service.py\\n@@ -9,13 +9,18 @@\\n def reconcile_tenant() -> dict[str, Any]:\\n     \\\"\\\"\\\"Match open invoices to payments.\\\"\\\"\\\"\\n     ctx = require_tenant()\\n     invoices = invoice_repo.list_by_tenant(ctx.tenant_id)\\n+    payments = payment_repo.list_by_tenant(ctx.tenant_id)\\n+\\n+    pays_by_invoice = {}\\n+    for p in payments:\\n+        inv_id = p.get(\\\"invoice_id\\\")\\n+        if inv_id:\\n+            pays_by_invoice.setdefault(inv_id, []).append(p)\\n+\\n     matched = 0\\n     gaps = []\\n     for inv in invoices:\\n-        pays = payment_repo.list_by_invoice(inv[\\\"id\\\"])\\n+        pays = pays_by_invoice.get(inv[\\\"id\\\"], [])\\n         paid = sum(p.get(\\\"amount_cents\\\", 0) for p in pays)\\n         if paid >= inv.get(\\\"amount_cents\\\", 0) and inv.get(\\\"status\\\") == \\\"paid\\\":\\n             matched += 1\\n\"}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "confused_deputy_admin",
+    "title": "Internal export ignores tenant boundary",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 4/4 (applied via --whitespace=nowarn -p1)",
+    "passed": 4,
+    "total": 4,
+    "answer": {
+      "patch": "--- a/service/admin_service.py\n+++ b/service/admin_service.py\n@@ -9,6 +9,8 @@\n def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n     \"\"\"Internal export used by ops dashboards.\"\"\"\n     ctx = require_tenant()\n     tid = target_tenant_id or ctx.tenant_id\n+    if tid != ctx.tenant_id and not ctx.is_admin:\n+        raise PermissionError(\"cannot export foreign tenant\")\n     rows = invoice_repo.list_by_tenant(tid)\n     audit_repo.write(ctx.tenant_id, \"export_invoices\", {\"target\": tid, \"n\": len(rows)})\n     return rows\n",
+      "patch_bytes": 550,
+      "patch_preview": "--- a/service/admin_service.py\n+++ b/service/admin_service.py\n@@ -9,6 +9,8 @@\n def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n     \"\"\"Internal export used by ops dashboards.\"\"\"\n     ctx = require_tenant()\n     tid = target_tenant_id or ctx.tenant_id\n+    if tid != ctx.tenant_id and not ctx.is_admin:\n+        raise PermissionError(\"cannot export foreign tenant\")\n     rows = invoice_repo.list_by_tenant(tid)\n     audit_repo.write(ctx.tenant_id, \"export_invoices\", {\"target\": tid, \"n\": len(rows)})\n     return rows\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 8,
+    "files_read": [
+      "api/internal.py",
+      "pkg/tenant.py",
+      "service/admin_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/internal.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/admin_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/admin_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/internal.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/admin_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 24.72,
+    "prompt_tokens": 17316,
+    "eval_tokens": 1199,
+    "rounds": 9,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2845,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4_26b-a4b-it-bf16_repohard_stop_fin12__confused_deputy_admin.txt",
+    "raw_content": "I will fix the authorization bug in `service/admin_service.py`. \n\nThe current implementation of `export_invoices` allows any caller to export invoices for any `tenant_id` if they provide it in the request, as long as they have a valid tenant context. I need to ensure that if a `target_tenant_id` is provided and it differs from the caller's own `tenant_id`, the caller must have `is_admin` set to `True`.\n\nLooking at `service/admin_service.py`:\n```python\n   9| def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n  10|     \"\"\"Internal export used by ops dashboards.\"\"\"\n  11|     ctx = require_tenant()\n  12|     tid = target_tenant_id or ctx.tenant_id\n  13|     rows = invoice_repo.list_by_tenant(tid)\n  14|     audit_repo.write(ctx.tenant_id, \"export_invoices\", {\"target\": tid, \"n\": len(rows)})\n  15|     return rows\n```\n\nI will modify it to:\n```python\n   9| def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\n  10|     \"\"\"Internal export used by ops dashboards.\"\"\"\n  11|     ctx = require_tenant()\n  12|     tid = target_tenant_id or ctx.tenant_id\n  13|     if tid != ctx.tenant_id and not ctx.is_admin:\n  14|         raise PermissionError(\"cannot export foreign tenant\")\n  15|     rows = invoice_repo.list_by_tenant(tid)\n  16|     audit_repo.write(ctx.tenant_id, \"export_invoices\", {\"target\": tid, \"n\": len(rows)})\n  17|     return rows\n```\n\nWait, I should check if `api/internal.py` needs any changes. It calls `admin_service.export_invoices(body.get(\"tenant_id\"))`. This seems fine as the service layer will now handle the authorization.\n\nLet's verify the logic in `service/admin_service.py` again.\nIf `target_tenant_id` is provided (e.g., \"other_tenant\") and `ctx.tenant_id` is \"my_tenant\":\n`tid = \"other_tenant\"`\n`if \"other_tenant\" != \"my_tenant\" and not ctx.is_admin:` -> if not admin, raise PermissionError. Correct.\n\nIf `target_tenant_id` is None:\n`tid = ctx.tenant_id`\n`if ctx.tenant_id != ctx.tenant_id ...` -> False. Correct.\n\nIf `target_tenant_id` is \"my_tenant\":\n`tid = \"my_tenant\"`\n`if \"my_tenant\" != \"my_tenant\" ...` -> False. Correct.\n\nThe fix in the service layer is robust because it protects the data regardless of which API entry point calls it.\n\n<arch_final>\n{\"patch\": \"--- a/service/admin_service.py\\n+++ b/service/admin_service.py\\n@@ -9,6 +9,8 @@\\n def export_invoices(target_tenant_id: str | None = None) -> list[dict[str, Any]]:\\n     \\\"\\\"\\\"Internal export used by ops dashboards.\\\"\\\"\\\"\\n     ctx = require_tenant()\\n     tid = target_tenant_id or ctx.tenant_id\\n+    if tid != ctx.tenant_id and not ctx.is_admin:\\n+        raise PermissionError(\\\"cannot export foreign tenant\\\")\\n     rows = invoice_repo.list_by_tenant(tid)\\n     audit_repo.write(ctx.tenant_id, \\\"export_invoices\\\", {\\\"target\\\": tid, \\\"n\\\": len(rows)})\\n     return rows\"}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "client_contract_drift",
+    "title": "Client misreads invoice amounts",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 2/2 (applied via --whitespace=nowarn -p1)",
+    "passed": 2,
+    "total": 2,
+    "answer": {
+      "patch": "--- a/client/models.py\n+++ b/client/models.py\n@@ -15,10 +15,10 @@\n \n     @classmethod\n     def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n-        if \"amount\" in data:\n-            amount = float(data[\"amount\"])\n-        elif \"amount_cents\" in data:\n-            amount = float(data[\"amount_cents\"])\n+        if \"amount_cents\" in data:\n+            amount = float(data[\"amount_cents\"]) / 100.0\n+        elif \"amount\" in data:\n+            amount = float(data[\"amount\"])\n         else:\n             amount = 0.0\n         return cls(\n",
+      "patch_bytes": 542,
+      "patch_preview": "--- a/client/models.py\n+++ b/client/models.py\n@@ -15,10 +15,10 @@\n \n     @classmethod\n     def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n-        if \"amount\" in data:\n-            amount = float(data[\"amount\"])\n-        elif \"amount_cents\" in data:\n-            amount = float(data[\"amount_cents\"])\n+        if \"amount_cents\" in data:\n+            amount = float(data[\"amount_cents\"]) / 100.0\n+        elif \"amount\" in data:\n+            amount = float(data[\"amount\"])\n         else:\n             amount = 0.0\n         return cls(\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "client/models.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "client"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "client/models.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "client/models.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 16.32,
+    "prompt_tokens": 5510,
+    "eval_tokens": 826,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 2241,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4_26b-a4b-it-bf16_repohard_stop_fin12__client_contract_drift.txt",
+    "raw_content": "The issue is in `client/models.py`. The `from_api` method currently treats `amount_cents` as if it were already in major units (dollars), whereas the requirement states that `amount_cents` should be divided by 100 to get the major unit amount. Additionally, the requirements specify that if both `amount` and `amount_cents` are present, we should prefer `amount_cents`.\n\nCurrent implementation:\n```python\n  17|     def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n  18|         if \"amount\" in data:\n  19|             amount = float(data[\"amount\"])\n  20|         elif \"amount_cents\" in data:\n  21|             amount = float(data[\"amount_cents\"])\n  22|         else:\n  23|             amount = 0.0\n```\n\nCorrected implementation should be:\n```python\n  17|     def from_api(cls, data: dict[str, Any]) -> \"InvoiceDTO\":\n  18|         if \"amount_cents\" in data:\n  19|             amount = float(data[\"amount_cents\"]) / 100.0\n  20|         elif \"amount\" in data:\n  21|             amount = float(data[\"amount\"])\n  22|         else:\n  23|             amount = 0.0\n```\n\nWait, let me double check the requirement: \"If both `amount` and `amount_cents` are present, prefer the cents field for consistency with the API.\" And \"`InvoiceDTO.from_api` must interpret `amount_cents` as integer cents and expose `amount` as major units (`cents / 100.0`)\".\n\nThe current code:\n1. Checks `amount` first. If both are present, it uses `amount`. This violates \"prefer the cents field\".\n2. If only `amount_cents` is present, it uses `float(data[\"amount_cents\"])` directly without dividing by 100. This causes the 100x error.\n\nI will fix both.\n\n<arch_final>\n{\"patch\": \"--- a/client/models.py\\n+++ b/client/models.py\\n@@ -15,10 +15,10 @@\\n \\n     @classmethod\\n     def from_api(cls, data: dict[str, Any]) -> \\\"InvoiceDTO\\\":\\n-        if \\\"amount\\\" in data:\\n-            amount = float(data[\\\"amount\\\"])\\n-        elif \\\"amount_cents\\\" in data:\\n-            amount = float(data[\\\"amount_cents\\\"])\\n+        if \\\"amount_cents\\\" in data:\\n+            amount = float(data[\\\"amount_cents\\\"]) / 100.0\\n+        elif \\\"amount\\\" in data:\\n+            amount = float(data[\\\"amount\\\"])\\n         else:\\n             amount = 0.0\\n         return cls(\"}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "outbox_poison_retry",
+    "title": "Outbox acks poison events",
+    "family": "fix",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "pytest 3/3 (applied via --whitespace=nowarn -p1)",
+    "passed": 3,
+    "total": 3,
+    "answer": {
+      "patch": "--- a/worker/outbox_worker.py\n+++ b/worker/outbox_worker.py\n@@ -26,8 +26,8 @@\n         try:\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n+            outbox.ack(row[\"id\"])\n             ok += 1\n         except Exception:\n             failed += 1\n-        outbox.ack(row[\"id\"])\n     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n",
+      "patch_bytes": 365,
+      "patch_preview": "--- a/worker/outbox_worker.py\n+++ b/worker/outbox_worker.py\n@@ -26,8 +26,8 @@\n         try:\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n+            outbox.ack(row[\"id\"])\n             ok += 1\n         except Exception:\n             failed += 1\n-        outbox.ack(row[\"id\"])\n     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n",
+      "apply_detail": "applied via --whitespace=nowarn -p1"
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "store/outbox.py",
+      "worker/outbox_worker.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "worker"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 151.34,
+    "prompt_tokens": 5593,
+    "eval_tokens": 8331,
+    "rounds": 5,
+    "done_reason": "length",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 25510,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4_26b-a4b-it-bf16_repohard_stop_fin12__outbox_poison_retry.txt",
+    "raw_content": "<thought\n>The issue is in `worker/outbox_worker.py`. \n\n```python\n  25|     for row in batch:\n  26|         try:\n  27|             publish(row)\n  28|             outbox.mark_published(row[\"id\"])\n  29|             ok += 1\n  30|         except Exception:\n  31|             failed += 1\n  32|         outbox.ack(row[\"id\"])\n```\n\nThe `outbox.ack(row[\"id\"])` is called outside the `try...except` block, meaning it runs regardless of whether `publish` succeeded or failed. If `publish` fails, the row is still acknowledged and thus disappears from the queue (since `claim_batch` only looks for unacked rows).\n\nThe fix should be to move `outbox.ack(row[\"id\"])` inside the `try` block, so it only happens if `publish` succeeds.\n\nWait, let's look at the requirements:\n- \"Only ack (and mark published) after a successful publish.\"\n- \"Failed publishes must leave the row unacked for a later retry.\"\n- \"Keep batch claiming behavior.\"\n\nIf I move `outbox.ack(row[\"id\"])` inside the `try` block, it will look like this:\n\n```python\n  25|     for row in batch:\n  26|         try:\n  27|             publish(row)\n  28|             outbox.mark_published(row[\"id\"])\n  29|             outbox.ack(row[\"id\"])\n  30|             ok += 1\n  31|         except Exception:\n  32|             failed += 1\n```\n\nThis seems correct. If `publish` raises, we increment `failed`, and the row remains unacked in the DB. The next time `claim_batch` is called, it will pick up this row again (unless there's some other mechanism for marking it as \"in progress\" or something, but based on `store/outbox.py`, `claim_batch` just looks at `not r.get(\"acked\")`).\n\nWait, if I don't ack it, and `claim_batch` is called again immediately, will it pick up the same row?\n`claim_batch` implementation:\n```python\n  16| def claim_batch(limit: int = 32) -> list[dict[str, Any]]:\n  17|     rows = [r for r in db.list_all(\"outbox\") if not r.get(\"acked\")]\n  18|     return rows[:limit]\n```\nYes, it will pick up the same row. This is standard outbox pattern behavior (at-least-once delivery).\n\nLet's verify if there are any other side effects. \n`mark_published` sets `published: True`.\n`ack` sets `acked: True`.\n\nIf I move `outbox.ack(row[\"id\"])` into the try block, it ensures that a failed publish doesn't result in an ack.\n\nOne detail: if `publish` succeeds but `mark_published` fails (unlikely but possible), should we still ack? The requirement says \"Only ack (and mark published) after a successful publish.\" \n\nIf I do:\n```python\n         try:\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n             outbox.ack(row[\"id\"])\n             ok += 1\n         except Exception:\n             failed += 1\n```\nThis satisfies the requirement.\n\nLet's double check `worker/outbox_worker.py` again.\n\n```python\n  25|     for row in batch:\n  26|         try:\n  27|             publish(row)\n  28|             outbox.mark_published(row[\"id\"])\n  29|             ok += 1\n  30|         except Exception:\n  31|             failed += 1\n  32|         outbox.ack(row[\"id\"])\n```\n\nYes, line 32 is the culprit.\n\nI'll prepare the patch.\n\n```python\n--- a/worker/outbox_worker.py\n+++ b/worker/outbox_worker.py\n@@ -27,6 +27,6 @@\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n+            outbox.ack(row[\"id\"])\n             ok += 1\n         except Exception:\n             failed += 1\n-        outbox.ack(row[\"id\"])\n     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n```\n\nWait, I should check the line numbers carefully.\n\n```python\n  25|     for row in batch:\n  26|         try:\n  27|             publish(row)\n  28|             outbox.mark_published(row[\"id\"])\n  29|             ok += 1\n  30|         except Exception:\n  31|             failed += 1\n  32|         outbox.ack(row[\"id\"])\n  33|     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n```\n\nIf I move line 32 into the try block after line 28:\n\n```python\n  25|     for row in batch:\n  26|         try:\n  27|             publish(row)\n  28|             outbox.mark_published(row[\"id\"])\n  29|             outbox.ack(row[\"id\"])\n  30|             ok += 1\n  31|         except Exception:\n  32|             failed += 1\n  33|     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n```\n\nThis looks right.\n\nOne more thing: `PoisonError` is defined in the file but not used in a way that prevents retries if it's raised by `publish`. If `publish` raises `PoisonError`, it will be caught by `except Exception`, `failed` will increment, and the row won't be acked. This means poison events WILL be retried indefinitely.\n\nThe prompt says: \"Poison payloads disappear and are never retried.\"\nAnd \"Failed publishes must leave the row unacked for a later retry.\"\n\nWait, if it's a *poison* event, do we want to retry it forever? Usually, you'd want to move it to a DLQ or something. But the prompt says: \"Failed publishes must leave the row unacked for a later retry.\" and \"Poison payloads disappear and are never retried\" is what happens CURRENTLY (the bug).\n\nSo the fix I proposed makes poison events retryable. This matches \"Failed publishes must leave the row unacked for a later retry\".\n\nHowever, if `publish` raises `PoisonError`, it's a permanent failure. But the instruction says: \"Failed publishes must leave the row unacked for a later retry.\" It doesn't distinguish between transient and permanent failures in that sentence. \n\nActually, looking at `default_publish`:\n```python\n  12| def default_publish(event: dict[str, Any]) -> None:\n  13|     if event.get(\"payload\", {}).get(\"poison\"):\n  14|         raise PoisonError(\"poison pill\")\n```\n\nIf I fix the bug as described, `PoisonError` will cause the row to not be acked, so it will be retried. This is what was requested (\"Failed publishes must leave the row unacked for a later retry\").\n\nWait, if I want to avoid infinite loops of poison events, I might need more logic, but I should stick to the instructions. The instruction says: \"Only ack (and mark published) after a successful publish. Failed publishes must leave the row unacked for a later retry.\"\n\nIt doesn't say \"except for poison events\". It says \"Poison payloads disappear and are never retried\" is the problem.\n\nSo my fix is correct according to the prompt.\n\n```python\n<<<<\n         try:\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n             ok += 1\n         except Exception:\n             failed += 1\n         outbox.ack(row[\"id\"])\n====\n         try:\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n             outbox.ack(row[\"id\"])\n             ok += 1\n         except Exception:\n             failed += 1\n>>>>\n```\n\nLet's check the diff format.\n\n```python\n--- a/worker/outbox_worker.py\n+++ b/worker/outbox_worker.py\n@@ -26,8 +26,8 @@\n         try:\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n+            outbox.ack(row[\"id\"])\n             ok += 1\n         except Exception:\n             failed += 1\n-        outbox.ack(row[\"id\"])\n     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n```\n\nWait, I need to make sure the indentation is correct in my head.\n\nOriginal:\n```python\n25|     for row in batch:\n26|         try:\n27|             publish(row)\n28|             outbox.mark_published(row[\"id\"])\n29|             ok += 1\n30|         except Exception:\n31|             failed += 1\n32|         outbox.ack(row[\"id\"])\n33|     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n```\n\nNew:\n```python\n25|     for row in batch:\n26|         try:\n27|             publish(row)\n28|             outbox.mark_published(row[\"id\"])\n29|             outbox.ack(row[\"id\"])\n30|             ok += 1\n31|         except Exception:\n32|             failed += 1\n33|     return {\"ok\": ok, \"failed\": failed, \"batch\": len(batch)}\n```\n\nThe diff:\n```diff\n--- a/worker/outbox_worker.py\n+++ b/worker/outbox_worker.py\n@@ -26,8 +26,8 @@\n         try:\n             publish(row)\n             outbox.mark_published(row[\"id\"])\n+            outbox.ack(row[\"id\"])\n             ok += 1\n        "
+  }
+]

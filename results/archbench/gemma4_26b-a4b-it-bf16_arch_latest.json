@@ -1,0 +1,761 @@
+[
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "chain_delete_order",
+    "title": "Call chain: DELETE /orders/{id}",
+    "family": "call_chain",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; effects 3/3; evidence(reads) 2/2",
+    "answer": {
+      "chain": [
+        "api/orders.handle_delete_order",
+        "service/order_service.cancel_order",
+        "store/order_repo.soft_delete",
+        "store/outbox.insert",
+        "store/cache.invalidate_order"
+      ],
+      "side_effects": [
+        "soft-delete order in repo",
+        "insert OrderCancelled event to outbox",
+        "invalidate order cache"
+      ],
+      "citations": [
+        "api/orders.py:handle_delete_order",
+        "service/order_service.py:cancel_order",
+        "store/order_repo.py:soft_delete",
+        "store/outbox.py:insert",
+        "store/cache.py:invalidate_order"
+      ]
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "api/orders.py",
+      "service/order_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "store"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 10.58,
+    "prompt_tokens": 7441,
+    "eval_tokens": 362,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 572,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4_26b-a4b-it-bf16_arch__chain_delete_order.txt",
+    "raw_content": "<arch_final>\n{\n  \"chain\": [\n    \"api/orders.handle_delete_order\",\n    \"service/order_service.cancel_order\",\n    \"store/order_repo.soft_delete\",\n    \"store/outbox.insert\",\n    \"store/cache.invalidate_order\"\n  ],\n  \"side_effects\": [\n    \"soft-delete order in repo\",\n    \"insert OrderCancelled event to outbox\",\n    \"invalidate order cache\"\n  ],\n  \"citations\": [\n    \"api/orders.py:handle_delete_order\",\n    \"service/order_service.py:cancel_order\",\n    \"store/order_repo.py:soft_delete\",\n    \"store/outbox.py:insert\",\n    \"store/cache.py:invalidate_order\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "chain_payment_webhook",
+    "title": "Call chain: POST /webhooks/payment",
+    "family": "call_chain",
+    "ok": false,
+    "score": 6,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 2/5; payment_effect=1; evidence(reads) 2/2",
+    "answer": {
+      "chain": [
+        "api.webhooks.handle_payment_webhook",
+        "service.payment_service.handle_payment_webhook",
+        "service.payment_service._already_processed",
+        "service.payment_service._mark_processed",
+        "service.order_service.mark_paid"
+      ],
+      "side_effects": [
+        "db.put (payments)",
+        "outbox.insert",
+        "db.put (processed_webhooks)"
+      ],
+      "citations": [
+        "api/webhooks.py:handle_payment_webhook",
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_already_processed",
+        "service/payment_service.py:_mark_processed"
+      ]
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "api/webhooks.py",
+      "service/payment_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "/webhooks/payment",
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "handle_payment_webhook"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 9.92,
+    "prompt_tokens": 5861,
+    "eval_tokens": 376,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 611,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4_26b-a4b-it-bf16_arch__chain_payment_webhook.txt",
+    "raw_content": "<arch_final>\n{\n  \"chain\": [\n    \"api.webhooks.handle_payment_webhook\",\n    \"service.payment_service.handle_payment_webhook\",\n    \"service.payment_service._already_processed\",\n    \"service.payment_service._mark_processed\",\n    \"service.order_service.mark_paid\"\n  ],\n  \"side_effects\": [\n    \"db.put (payments)\",\n    \"outbox.insert\",\n    \"db.put (processed_webhooks)\"\n  ],\n  \"citations\": [\n    \"api/webhooks.py:handle_payment_webhook\",\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/payment_service.py:_already_processed\",\n    \"service/payment_service.py:_mark_processed\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "tenant_invoice_isolation",
+    "title": "Tenant isolation for invoices",
+    "family": "invariant",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "enforced/bypass scoring; evidence(reads) 1/2; unread=['store/invoice_repo.py']; enf='service.invoice_service.list_invoices | store.invoice_repo.list_by_tenant' by='service.invoice_service.get_invoice | service.invoice_service.admin_export_invoices'",
+    "answer": {
+      "enforced_at": [
+        "service.invoice_service.list_invoices",
+        "store.invoice_repo.list_by_tenant"
+      ],
+      "bypasses": [
+        "service.invoice_service.get_invoice",
+        "service.invoice_service.admin_export_invoices"
+      ],
+      "citations": [
+        "service/invoice_service.py:list_invoices",
+        "store/invoice_repo.py:list_by_tenant",
+        "service/invoice_service.py:get_invoice",
+        "service/invoice_service.py:admin_export_invoices"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "api/invoices.py",
+      "service/invoice_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "invoice",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 8.98,
+    "prompt_tokens": 7978,
+    "eval_tokens": 305,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 469,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4_26b-a4b-it-bf16_arch__tenant_invoice_isolation.txt",
+    "raw_content": "<arch_final>\n{\n  \"enforced_at\": [\n    \"service.invoice_service.list_invoices\",\n    \"store.invoice_repo.list_by_tenant\"\n  ],\n  \"bypasses\": [\n    \"service.invoice_service.get_invoice\",\n    \"service.invoice_service.admin_export_invoices\"\n  ],\n  \"citations\": [\n    \"service/invoice_service.py:list_invoices\",\n    \"store/invoice_repo.py:list_by_tenant\",\n    \"service/invoice_service.py:get_invoice\",\n    \"service/invoice_service.py:admin_export_invoices\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "invariant_doc_vs_code",
+    "title": "Which README invariants fail?",
+    "family": "invariant",
+    "ok": true,
+    "score": 8,
+    "max_score": 10,
+    "grade_detail": "violated=['I2', 'I4']; evidence(reads) 3/3",
+    "answer": {
+      "violated_invariants": [
+        "I2",
+        "I4"
+      ],
+      "evidence": {
+        "I2": "get_invoice in service/invoice_service.py calls require_tenant() but does not verify that the retrieved invoice belongs to the tenant (it only checks if the row exists).",
+        "I4": "mark_paid in service/order_service.py updates the order status via order_repo.update_status but fails to call cache.invalidate_order(order_id), leaving stale data in the cache."
+      },
+      "citations": [
+        "service/invoice_service.py:get_invoice",
+        "service/order_service.py:mark_paid"
+      ]
+    },
+    "tool_calls": 11,
+    "files_read": [
+      "README.md",
+      "api/orders.py",
+      "service/invoice_service.py",
+      "service/order_service.py",
+      "service/payment_service.py",
+      "store/cache.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "order",
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "invoice",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "webhook",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 42.24,
+    "prompt_tokens": 42507,
+    "eval_tokens": 1587,
+    "rounds": 12,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 582,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4_26b-a4b-it-bf16_arch__invariant_doc_vs_code.txt",
+    "raw_content": "<arch_final>\n{\n  \"violated_invariants\": [\n    \"I2\",\n    \"I4\"\n  ],\n  \"evidence\": {\n    \"I2\": \"get_invoice in service/invoice_service.py calls require_tenant() but does not verify that the retrieved invoice belongs to the tenant (it only checks if the row exists).\",\n    \"I4\": \"mark_paid in service/order_service.py updates the order status via order_repo.update_status but fails to call cache.invalidate_order(order_id), leaving stale data in the cache.\"\n  },\n  \"citations\": [\n    \"service/invoice_service.py:get_invoice\",\n    \"service/order_service.py:mark_paid\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "review_list_orders_n1",
+    "title": "Review: list_orders performance smell",
+    "family": "review",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1; false_auth=False",
+    "answer": {
+      "findings": [
+        {
+          "id": "n_plus_1",
+          "severity": "medium",
+          "summary": "The `list_orders` function performs an N+1 query pattern. It first fetches all orders for a tenant via `order_repo.list_by_tenant`, and then iterates through each order to call `get_order(row['id'])`. Since `get_order` performs its own cache lookup and database fetch (`order_repo.get`), this results in O(N) additional calls (cache/DB) for a single list operation."
+        }
+      ],
+      "max_severity": "medium",
+      "auth_ok": true,
+      "citations": [
+        "service/order_service.py:list_orders",
+        "service/order_service.py:get_order",
+        "store/order_repo.py:list_by_tenant",
+        "store/order_repo.py:get",
+        "pkg/tenant.py:require_tenant"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "pkg/tenant.py",
+      "service/order_service.py",
+      "store/order_repo.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/order_repo.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "pkg/tenant.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 10.06,
+    "prompt_tokens": 7269,
+    "eval_tokens": 387,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 762,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4_26b-a4b-it-bf16_arch__review_list_orders_n1.txt",
+    "raw_content": "<arch_final>\n{\n  \"findings\": [\n    {\n      \"id\": \"n_plus_1\",\n      \"severity\": \"medium\",\n      \"summary\": \"The `list_orders` function performs an N+1 query pattern. It first fetches all orders for a tenant via `order_repo.list_by_tenant`, and then iterates through each order to call `get_order(row['id'])`. Since `get_order` performs its own cache lookup and database fetch (`order_repo.get`), this results in O(N) additional calls (cache/DB) for a single list operation.\"\n    }\n  ],\n  \"max_severity\": \"medium\",\n  \"auth_ok\": true,\n  \"citations\": [\n    \"service/order_service.py:list_orders\",\n    \"service/order_service.py:get_order\",\n    \"store/order_repo.py:list_by_tenant\",\n    \"store/order_repo.py:get\",\n    \"pkg/tenant.py:require_tenant\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "review_cache_on_paid",
+    "title": "Review: cache vs status change (I4)",
+    "family": "review",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1",
+    "answer": {
+      "i4_holds": false,
+      "findings": [
+        {
+          "summary": "The `mark_paid` function updates the order status in the repository and inserts an outbox event, but it fails to call `cache.invalidate_order(order_id)` or any other cache invalidation mechanism. This leaves stale order data in the cache after a status change.",
+          "severity": "high"
+        }
+      ],
+      "citations": [
+        "service/order_service.py:mark_paid",
+        "store/cache.py:invalidate_order"
+      ]
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "README.md",
+      "service/order_service.py",
+      "store/cache.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "mark_paid",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/cache.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 8.72,
+    "prompt_tokens": 6912,
+    "eval_tokens": 316,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 491,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4_26b-a4b-it-bf16_arch__review_cache_on_paid.txt",
+    "raw_content": "<arch_final>\n{\n  \"i4_holds\": false,\n  \"findings\": [\n    {\n      \"summary\": \"The `mark_paid` function updates the order status in the repository and inserts an outbox event, but it fails to call `cache.invalidate_order(order_id)` or any other cache invalidation mechanism. This leaves stale order data in the cache after a status change.\",\n      \"severity\": \"high\"\n    }\n  ],\n  \"citations\": [\n    \"service/order_service.py:mark_paid\",\n    \"store/cache.py:invalidate_order\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "incident_duplicate_order_paid",
+    "title": "Incident: duplicate OrderPaid",
+    "family": "incident",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1",
+    "answer": {
+      "root_cause": "The `handle_payment_webhook` function performs side effects (inserting into the outbox and updating orders) before marking the webhook as processed via `_mark_processed(webhook_id)`. If a retry occurs after these side effects but before the webhook is marked as processed, the idempotency check at line 26 fails to catch it, leading to duplicate outbox events.",
+      "fix_function": "service.payment_service.handle_payment_webhook",
+      "fix_functions": [
+        "service.payment_service.handle_payment_webhook"
+      ],
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_already_processed",
+        "service/payment_service.py:_mark_processed",
+        "store/outbox.py:insert"
+      ]
+    },
+    "tool_calls": 7,
+    "files_read": [
+      "service/payment_service.py",
+      "store/outbox.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "OrderPaid",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "webhook_id",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "find_refs",
+        "arguments": {
+          "symbol": "order_paid"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 30.63,
+    "prompt_tokens": 14553,
+    "eval_tokens": 1316,
+    "rounds": 8,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 767,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4_26b-a4b-it-bf16_arch__incident_duplicate_order_paid.txt",
+    "raw_content": "<arch_final>\n{\n  \"root_cause\": \"The `handle_payment_webhook` function performs side effects (inserting into the outbox and updating orders) before marking the webhook as processed via `_mark_processed(webhook_id)`. If a retry occurs after these side effects but before the webhook is marked as processed, the idempotency check at line 26 fails to catch it, leading to duplicate outbox events.\",\n  \"fix_function\": \"service.payment_service.handle_payment_webhook\",\n  \"fix_functions\": [\n    \"service.payment_service.handle_payment_webhook\"\n  ],\n  \"citations\": [\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/payment_service.py:_already_processed\",\n    \"service/payment_service.py:_mark_processed\",\n    \"store/outbox.py:insert\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "incident_outbox_ack_order",
+    "title": "Incident: lost outbox events",
+    "family": "incident",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1",
+    "answer": {
+      "root_cause": "The worker calls `outbox.ack(row['id'])` before calling `publish(row)`. If the process crashes after `ack` but before `publish`, the event is marked as 'acked' and will be skipped by `claim_batch` in subsequent runs, causing it to disappear without being published.",
+      "fix_function": "worker.outbox_worker.process_once",
+      "citations": [
+        "worker/outbox_worker.py:process_once",
+        "store/outbox.py:claim_batch",
+        "store/outbox.py:ack"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "store/outbox.py",
+      "worker/outbox_worker.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "worker"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 8.42,
+    "prompt_tokens": 4313,
+    "eval_tokens": 290,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 496,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4_26b-a4b-it-bf16_arch__incident_outbox_ack_order.txt",
+    "raw_content": "<arch_final>\n{\n  \"root_cause\": \"The worker calls `outbox.ack(row['id'])` before calling `publish(row)`. If the process crashes after `ack` but before `publish`, the event is marked as 'acked' and will be skipped by `claim_batch` in subsequent runs, causing it to disappear without being published.\",\n  \"fix_function\": \"worker.outbox_worker.process_once\",\n  \"citations\": [\n    \"worker/outbox_worker.py:process_once\",\n    \"store/outbox.py:claim_batch\",\n    \"store/outbox.py:ack\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4:26b-a4b-it-bf16",
+    "provider": "ollama",
+    "task": "redesign_webhook_idempotency",
+    "title": "Constrained fix: webhook idempotency",
+    "family": "redesign",
+    "ok": false,
+    "score": 6,
+    "max_score": 10,
+    "grade_detail": "files=['service/payment_service.py']; evidence(reads) 1/1",
+    "answer": {
+      "touch_files": [
+        "service/payment_service.py"
+      ],
+      "plan_steps": [
+        "Move the call to _mark_processed(webhook_id) from the end of handle_payment_webhook to immediately after the check for _already_processed(webhook_id).",
+        "Wrap the payment creation and order marking logic in a try-except block or ensure that the webhook is marked as processed before side effects occur, but specifically to prevent double-insertion of OrderPaid, we must ensure that if the process fails halfway, we don't re-run the event emission. However, the current issue is that _mark_processed happens AFTER outbox.insert and order_service.mark_paid. If a crash occurs between line 40 and 43, the webhook is not marked as processed, leading to a retry that inserts another OrderPaid.",
+        "The most robust minimal fix for idempotency in this pattern is to mark the webhook as processed BEFORE performing the side effects (outbox/order_service), or better yet, use a transaction if available. Since we are constrained to minimal changes and no new broker, moving _mark_processed before the side effects ensures that even if the service crashes during order marking, the retry will see it as 'already processed'."
+      ],
+      "idempotency_change": "Move '_mark_processed(webhook_id)' from line 43 to before line 29 (the payment insertion) or immediately after the check at line 26.",
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_mark_processed",
+        "service/payment_service.py:_already_processed"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "service/payment_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "OrderPaid",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "webhook",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 13.33,
+    "prompt_tokens": 5923,
+    "eval_tokens": 526,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 24576,
+    "last_content_chars": 1569,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/archbench/gemma4_26b-a4b-it-bf16_arch__redesign_webhook_idempotency.txt",
+    "raw_content": "<arch_final>\n{\n  \"touch_files\": [\"service/payment_service.py\"],\n  \"plan_steps\": [\n    \"Move the call to _mark_processed(webhook_id) from the end of handle_payment_webhook to immediately after the check for _already_processed(webhook_id).\",\n    \"Wrap the payment creation and order marking logic in a try-except block or ensure that the webhook is marked as processed before side effects occur, but specifically to prevent double-insertion of OrderPaid, we must ensure that if the process fails halfway, we don't re-run the event emission. However, the current issue is that _mark_processed happens AFTER outbox.insert and order_service.mark_paid. If a crash occurs between line 40 and 43, the webhook is not marked as processed, leading to a retry that inserts another OrderPaid.\",\n    \"The most robust minimal fix for idempotency in this pattern is to mark the webhook as processed BEFORE performing the side effects (outbox/order_service), or better yet, use a transaction if available. Since we are constrained to minimal changes and no new broker, moving _mark_processed before the side effects ensures that even if the service crashes during order marking, the retry will see it as 'already processed'.\"\n  ],\n  \"idempotency_change\": \"Move '_mark_processed(webhook_id)' from line 43 to before line 29 (the payment insertion) or immediately after the check at line 26.\",\n  \"citations\": [\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/payment_service.py:_mark_processed\",\n    \"service/payment_service.py:_already_processed\"\n  ]\n}\n</arch_final>"
+  }
+]

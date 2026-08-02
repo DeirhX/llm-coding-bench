@@ -19,9 +19,19 @@ import os
 import re
 import sys
 import time
+import tempfile
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+from dataclasses import dataclass
+
+@dataclass
+class Task:
+    id: str
+    title: str
+    max_score: int
+    prompt: str
+    grade: Callable[[Any], dict[str, Any]]
 
 _REPO = Path(__file__).resolve().parents[2]
 if str(_REPO) not in sys.path:
@@ -39,12 +49,16 @@ from bench_lib.ollama_think import (  # noqa: E402
     think_loop_nudge,
 )
 from bench_lib.paths import results_dir  # noqa: E402
+from bench_lib.bench_runner import BenchSpec, TaskFields, run_main
 from benches.shopapi.tools import FIXTURE_ROOT, ToolSession  # noqa: E402
 
 OUT_DIR = results_dir("archbench")
 _CLAIMS_PATH = Path(__file__).resolve().parent / "claims.yaml"
 
 SELFTEST = os.environ.get("BENCH_SELFTEST") == "1"
+if SELFTEST:
+    OUT_DIR = Path(tempfile.gettempdir()) / "llm-coding-bench" / "claim"
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
 PROVIDER = os.environ.get("BENCH_PROVIDER", "ollama").strip().lower()
 MODEL = "selftest" if SELFTEST else os.environ.get("BENCH_MODEL", "")
 _TAG_BASE = re.sub(r"[^a-zA-Z0-9._-]", "_", MODEL or "model")
@@ -431,33 +445,76 @@ def run_model() -> dict[str, Any]:
     return run_model_ollama()
 
 
-def main() -> int:
-    if SELFTEST:
-        return run_selftest()
-    if not MODEL:
-        raise SystemExit("Set BENCH_MODEL or BENCH_SELFTEST=1")
-    stamp = time.strftime("%Y%m%d_%H%M%S")
+def do_warmup() -> None:
+    """Warmup check to ensure model is available."""
+    if MODEL == "selftest":
+        return
     try:
         if PROVIDER in ("cursor", "cursor-cli", "agent"):
             from bench_lib import cursor_cli
-
-            cursor_cli.chat(
-                MODEL,
-                "Reply with the single word: pong",
-                mode="ask",
-                workspace=FIXTURE,
-            )
+            cursor_cli.chat(MODEL, "Reply with the single word: pong", mode="ask", workspace=FIXTURE)
         else:
             chat(MODEL, [{"role": "user", "content": "pong"}])
-    except Exception as e:  # noqa: BLE001
-        print(f"warmup failed: {e}", file=sys.stderr)
-        return 2
+    except Exception as e:
+        raise SystemExit(f"warmup failed: {e}")
+
+
+def load_tasks() -> list[Task]:
+    return [
+        Task(
+            id="all_claims",
+            title="All Claims Probe",
+            max_score=len(CLAIMS) + 3,
+            prompt=PROMPT,
+            grade=lambda res: grade_answers(res, ToolSession()),
+        )
+    ]
+
+
+def run_agent(task: Task) -> dict[str, Any]:
+    if MODEL == "selftest":
+        return {
+            "model": MODEL,
+            "provider": PROVIDER,
+            "task": task.id,
+            "title": task.title,
+            "ok": False,
+            "score": 0,
+            "max_score": task.max_score,
+            "grade_detail": "selftest dummy",
+            "done_reason": "selftest",
+        }
+    # The claim benchmark runs all claims in one go.
     result = run_model()
-    path = OUT_DIR / f"{TAG}_{stamp}.json"
-    path.write_text(json.dumps(result, indent=2), encoding="utf-8")
-    (OUT_DIR / f"{TAG}_latest.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
-    print(json.dumps({k: result[k] for k in result if k not in ("per_claim", "answer", "raw_content")}, indent=2))
-    print("WROTE", path)
+    # Shared runner resumes on row_id_key "task"; run_model rows omit it.
+    if "task" not in result:
+        result["task"] = task.id
+    return result
+
+
+spec = BenchSpec(
+    bench_name="claim",
+    tag_suffix="claim",
+    model=MODEL,
+    tag=TAG,
+    provider=PROVIDER,
+    out_dir=OUT_DIR,
+    merge_latest=os.environ.get("BENCH_MERGE_LATEST", "0") == "1",
+    warmup=do_warmup,
+    load_tasks=load_tasks,
+    run_agent=run_agent,
+    task_fields=TaskFields(id_attr="id", row_id_key="task"),
+    latest_suffix="_latest.json",
+)
+
+
+def main() -> int:
+    if SELFTEST:
+        res = run_selftest()
+        # Also exercise the shared runner loop with a minimal task set.
+        run_main(spec)
+        return res
+    run_main(spec)
     return 0
 
 

@@ -1,0 +1,9 @@
+{
+  "model": "gemma4:26b-a4b-it-bf16",
+  "tag": "gemma4_26b-a4b-it-bf16_repohard_stop_np24576",
+  "score": 80,
+  "max_score": 80,
+  "pass": 8,
+  "tasks": 8,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/repohard/gemma4_26b-a4b-it-bf16_repohard_stop_np24576_20260728_231814.json"
+}

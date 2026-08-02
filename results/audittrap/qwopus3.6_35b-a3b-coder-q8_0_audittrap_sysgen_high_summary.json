@@ -1,0 +1,9 @@
+{
+  "model": "qwopus3.6:35b-a3b-coder-q8_0",
+  "tag": "qwopus3.6_35b-a3b-coder-q8_0_audittrap_sysgen_high",
+  "score": 30,
+  "max_score": 40,
+  "pass": 3,
+  "tasks": 4,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/audittrap/qwopus3.6_35b-a3b-coder-q8_0_audittrap_sysgen_high_20260728_140639.json"
+}

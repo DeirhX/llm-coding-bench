@@ -1,0 +1,5 @@
+# See gemma4-31b-coding-64k.Modelfile: pinning is for determinism, not to avoid
+# truncation. An unpinned session already gets the full 262144. 65536 is the benchmarked
+# size and therefore the only one with evidence behind it.
+FROM gemma4-coding:26b-a4b
+PARAMETER num_ctx 65536
