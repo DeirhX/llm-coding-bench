@@ -67,6 +67,10 @@ class Stage:
     consumes: tuple[str, ...] = ()
     verify: bool = True
     writes: bool = False
+    # A stage may be judged on a different contract from the run's. The plan of a change cannot be
+    # held to red/green -- nothing has run yet -- but it can be held to naming the failure it
+    # expects, which is where the first implement run actually went wrong.
+    adapter: str | None = None
 
     @property
     def tools(self) -> str:
@@ -117,11 +121,12 @@ IMPLEMENT_STAGES = [
     Stage(
         name="plan",
         produces="plan.md",
-        verify=False,     # nothing is claimed yet, and nothing has been run
+        adapter="change-plan",
         stance=("Find the code the task names and stop. Report the file and line range you opened, "
                 "the behaviour as it stands, and the single smallest test that would fail because "
                 "of it -- where that test goes, what it asserts, and the exact command that would "
-                "run it. Write no code and change nothing. If the task's premise does not survive "
+                "run it, and the string that command will print while the defect is there. Write "
+                "no code and change nothing. If the task's premise does not survive "
                 "reading the code, say so and stop; that is a complete and useful answer."),
     ),
     Stage(
@@ -310,7 +315,8 @@ def load_gate():
     return module
 
 
-def check(answer: str, contract: cc_ledger.Contract, session: str, cwd: Path):
+def check(answer: str, contract: cc_ledger.Contract, session: str, cwd: Path,
+          predicted: tuple = ()):
     """The interactive gate's arithmetic, reused verbatim so both paths agree."""
     gate = load_gate()
     claims, unknowns = cc_ledger.claims_from_text(answer)
@@ -320,7 +326,8 @@ def check(answer: str, contract: cc_ledger.Contract, session: str, cwd: Path):
         print("   note: no transcript at %s -- citations checked against the files, but not "
               "against what this stage read" % transcript, file=sys.stderr)
     gaps, report = gate.evaluate(contract, claims, unknowns, calls, str(cwd),
-                                 check_coverage=transcript.is_file())
+                                 check_coverage=transcript.is_file(), answer=answer,
+                                 predicted=predicted)
     report["coverage_checked"] = transcript.is_file()
     return claims, unknowns, gaps, report, gate
 
@@ -330,6 +337,14 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
     session = str(uuid.uuid4())
     scratch = out_dir / "scratch"
     scratch.mkdir(exist_ok=True)
+    contract = cc_ledger.contract_for(stage.adapter) if stage.adapter else contract
+    # What the plan committed to, read off disk rather than carried in memory, so a stage rerun on
+    # its own reaches the same verdict as one inside a full run.
+    predicted = ()
+    if contract.needs_red_green:
+        plan = out_dir / "plan.md"
+        if plan.is_file():
+            predicted = tuple(cc_verify.predictions(plan.read_text(errors="replace")))
     prompt = compose(head, contract, stage, task, out_dir, scratch)
     (out_dir / ("%s.prompt.txt" % stage.name)).write_text(prompt)
     result = StageResult(stage=stage.name, session=session)
@@ -349,7 +364,7 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
         return result
 
     if stage.verify:
-        claims, unknowns, gaps, report, gate = check(answer, contract, session, cwd)
+        claims, unknowns, gaps, report, gate = check(answer, contract, session, cwd, predicted)
         if gaps:
             # One refusal, same wording the Stop hook uses, so the two paths train the same habit.
             refusal = gate.refusal(gaps, out_dir / "claims.jsonl")
@@ -358,7 +373,8 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
             result.rounds = 2
             if second:
                 answer = second
-                claims, unknowns, gaps, report, _ = check(answer, contract, session, cwd)
+                claims, unknowns, gaps, report, _ = check(answer, contract, session, cwd,
+                                                          predicted)
         result.claims, result.unknowns, result.gaps = len(claims), unknowns, gaps
         report.update({"gaps": gaps, "rounds": result.rounds, "stage": stage.name})
         (out_dir / ("%s.gate.json" % stage.name)).write_text(json.dumps(report, indent=2) + "\n")

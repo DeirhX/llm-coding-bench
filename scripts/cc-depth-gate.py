@@ -43,6 +43,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import cc_diff  # noqa: E402
 import cc_evidence  # noqa: E402
 import cc_ledger  # noqa: E402
 import cc_verify  # noqa: E402
@@ -137,7 +138,8 @@ def _session_asserted_something(calls: list, text: str) -> bool:
 
 
 def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
-             calls: list, root: str, check_coverage: bool = True) -> tuple[list[str], dict]:
+             calls: list, root: str, check_coverage: bool = True,
+             answer: str = "", predicted: tuple = ()) -> tuple[list[str], dict]:
     """Return (gaps, report). Gaps are what the refusal will say; report goes to gate.json.
 
     `check_coverage` exists for one caller: the scripted driver, which locates a transcript by
@@ -240,12 +242,42 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
                         "problem before the change, then run that same command again afterwards -- "
                         "same words, so the two runs can be compared. A command that only ever "
                         "passed does not distinguish a fix from a no-op.")
+        elif predicted and not _as_predicted(red, predicted):
+            # The prediction was made before the code existed, which is the only moment at which
+            # the model cannot choose the failure to suit the diff it has already written.
+            gaps.append("The failing run of `%s` did not print what the plan said it would (%s). "
+                        "Either the change is not aimed at the behaviour the plan named, or the "
+                        "test is failing for some other reason. Show the predicted failure, or say "
+                        "plainly that the prediction was wrong and why."
+                        % (pair[:60], ", ".join(repr(p.get("expect")) for p in predicted)[:120]))
         elif not _behavioural(red):
             gaps.append("The failing run of `%s` failed because the code it calls did not exist "
                         "yet -- a missing argument, a missing name, an import. That is the test "
                         "agreeing with the diff's shape, not with its effect: written before the "
                         "change and run after it, it would pass either way. Make it fail on a "
                         "value that is wrong, and say which value." % pair[:60])
+
+    if contract.needs_red_green:
+        # Two things only the diff can answer, both taken from the first real implement run: whether
+        # the tests it added assert anything about behaviour, and whether the change it made can
+        # reach a production path at all.
+        changed = cc_diff.diff(root)
+        for hollow in cc_diff.hollow_tests(changed):
+            gaps.append("%s. A test that only checks the wiring passes for any diff of that shape. "
+                        "Assert the value the change is supposed to alter." % hollow)
+        for inert in cc_diff.inert_parameters(changed, root):
+            gaps.append("%s, so every production path still takes the default and behaves exactly "
+                        "as before. Either pass it where the behaviour is wrong, or say plainly "
+                        "that this change is preparation and the defect is still there." % inert)
+
+    if contract.needs_prediction:
+        made = cc_verify.predictions(answer)
+        report["predictions"] = [p.get("expect") for p in made]
+        if not made:
+            gaps.append("This plan commits to nothing. Add a PREDICT line naming the exact command "
+                        "and a string its output will contain while the defect is present, so the "
+                        "stage that acts on this plan can be held to it. A plan whose failing run "
+                        "is chosen afterwards can always be satisfied.")
 
     if contract.min_measurements:
         measured = sum(1 for v in report["verdicts"]
@@ -375,6 +407,18 @@ _INTERFACE = re.compile(r"(?i)unexpected keyword argument|takes \d+ positional a
 # An assertion that failed is the shape of a test that ran and disagreed with what it found.
 _BEHAVIOURAL = re.compile(r"(?i)AssertionError|^E\s+assert|assert\w* .* (?:!=|==|not in)|"
                           r"Expected .* but got|\bmismatch\b", re.M)
+
+
+def _as_predicted(red, predicted: tuple) -> bool:
+    """Does the failure the session produced match the one its plan committed to?
+
+    Substring, on the output only: the command is already matched by the red/green pair, and asking
+    for two matches of the same thing would only add a way to be wrong about whitespace.
+    """
+    text = str(getattr(red, "text", "") or "")
+    if not text.strip():
+        return True          # unreadable output is not evidence of a mismatch, as above
+    return any(str(p.get("expect") or "").strip() in text for p in predicted if p.get("expect"))
 
 
 def _behavioural(red) -> bool:

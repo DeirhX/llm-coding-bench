@@ -563,3 +563,58 @@ def test_an_unreadable_failure_is_given_the_benefit_of_the_doubt() -> None:
         (_SUITE, "1449 passed", False),
     ])
     assert reason == "", reason
+
+
+def _judge(commands, answer: str, predicted=(), adapter: str = "implement"):
+    """evaluate() directly: a prediction reaches the gate as an argument, not through the payload."""
+    gate = _load_gate()
+    with tempfile.TemporaryDirectory() as tmp:
+        session = Session(tmp, answer=answer, adapter=adapter, commands=commands)
+        import cc_evidence
+        calls = cc_evidence.collect(str(session.transcript))
+        claims, unknowns = cc_ledger.claims_from_text(answer)
+        gaps, _ = gate.evaluate(cc_ledger.contract_for(adapter), claims, unknowns, calls,
+                                str(session.root), check_coverage=False, answer=answer,
+                                predicted=tuple(predicted))
+        return " ".join(gaps)
+
+
+_PREDICTED = ({"kind": "command_result", "command": _ONE, "expect": "available_cash_czk 1000000"},)
+
+
+def test_the_failure_must_be_the_one_the_plan_predicted() -> None:
+    """A red that is real, behavioural, and about something else entirely."""
+    gaps = _judge([
+        (_ONE, "E       AssertionError: quantity 3 != 2\n1 failed", True),
+        (_ONE, "1 passed", False),
+        (_SUITE, "1449 passed", False),
+    ], DONE, predicted=_PREDICTED)
+    assert "did not print what the plan said" in gaps, gaps
+
+
+def test_the_predicted_failure_is_accepted() -> None:
+    gaps = _judge([
+        (_ONE, "E       AssertionError: available_cash_czk 1000000 != 0\n1 failed", True),
+        (_ONE, "1 passed", False),
+        (_SUITE, "1449 passed", False),
+    ], DONE, predicted=_PREDICTED)
+    assert gaps == "", gaps
+
+
+def test_without_a_prediction_the_older_rule_still_applies() -> None:
+    """Nothing predicted -- an interactive session, or a plan stage that was skipped."""
+    gaps = _judge([
+        (_ONE, "TypeError: f() got an unexpected keyword argument 'holdings'", True),
+        (_ONE, "1 passed", False),
+        (_SUITE, "1449 passed", False),
+    ], DONE)
+    assert "did not exist yet" in gaps, gaps
+
+
+def test_a_plan_must_name_the_failure_it_expects() -> None:
+    plan = ("CLAIM: the capacity is read from disk here.\n"
+            "EVIDENCE: src/widen.py:1-2\n"
+            "QUOTE:\ndef widen(rows):\n    width = 0\n")
+    gaps = _judge([], plan, adapter="change-plan")
+    assert "commits to nothing" in gaps, gaps
+    assert "predicted" in gaps or "PREDICT" in gaps, gaps

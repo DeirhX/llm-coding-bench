@@ -171,10 +171,18 @@ if __name__ == "__main__":
     sys.exit(main())
 
 
+# A plan the change-plan contract accepts: it cites what it read and names the failure it expects
+# before any code exists. Without the PREDICT line the stage is refused, which is the point of it.
+PLAN = ("CLAIM: add returns the sum, and the caller wants the product.\n"
+        "EVIDENCE: src/m.py:1-2\n"
+        "QUOTE:\ndef add(a, b):\n    return a + b\n"
+        "PREDICT: command: pytest -q -> AssertionError: 5 != 6\n")
+
+
 def test_only_the_implement_stage_is_handed_the_editing_tools() -> None:
     """The plan reads and the verify stage judges; a stage that could edit either would be judging
     a tree it had moved."""
-    _, fake, _, _ = _run(["where the bug is", "changed it", "stashed it and it failed"],
+    _, fake, _, _ = _run([PLAN, "changed it", "stashed it and it failed"],
                          stages="plan,implement,verify", adapter="implement")
     handed = dict(zip(["plan", "implement", "verify"], fake.tools))
     assert "Edit" not in handed["plan"] and "Write" not in handed["plan"], handed
@@ -184,9 +192,35 @@ def test_only_the_implement_stage_is_handed_the_editing_tools() -> None:
 
 def test_the_writing_stage_is_told_to_change_the_repository_not_scratch() -> None:
     """The read-only stages are told the opposite, and that instruction would send a fix to /tmp."""
-    _, fake, out, _ = _run(["where the bug is", "changed it", "stashed it and it failed"],
+    _, fake, out, _ = _run([PLAN, "changed it", "stashed it and it failed"],
                            stages="plan,implement,verify", adapter="implement")
     plan, implement = fake.prompts[0], fake.prompts[1]
     assert "Do not create files in the repository" in plan, plan[-300:]
     assert "Change the files the task requires" in implement, implement[-300:]
     assert str(out / "scratch") in implement, implement[-300:]
+
+
+
+def test_the_plan_stage_is_judged_on_its_own_contract() -> None:
+    """The run's adapter is implement, which the plan cannot satisfy and is not asked to.
+
+    It is asked for something else: the failing run it expects, named before the code exists. The
+    first real implement run went wrong precisely here, in the one stage nothing was checking.
+    """
+    results, _, _, _ = _run(["a plan with no commitment in it"], stages="plan", adapter="implement")
+    gaps = " ".join(results[0].gaps)
+    assert "commits to nothing" in gaps, gaps
+    assert "failed and then passed" not in gaps, "the plan must not be held to the run's contract"
+
+
+def test_a_plan_that_names_its_failure_passes() -> None:
+    results, _, _, _ = _run([PLAN], stages="plan", adapter="implement")
+    assert results[0].gaps == [], results[0].gaps
+
+
+def test_the_prediction_reaches_the_stage_that_must_honour_it() -> None:
+    """Read off plan.md rather than carried in memory, so a stage rerun alone judges the same."""
+    _, _, out, _ = _run([PLAN], stages="plan", adapter="implement")
+    import cc_verify
+    assert [p["expect"] for p in cc_verify.predictions((out / "plan.md").read_text())] \
+        == ["AssertionError: 5 != 6"]

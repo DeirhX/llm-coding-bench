@@ -68,6 +68,10 @@ class Contract:
     # task is to change behaviour can ask for this, and for those it is the whole point: a claim that
     # a change works is the one claim the code it changed cannot support.
     needs_red_green: bool = False
+    # Whether the answer must name, in advance, a command that will fail and the output it will
+    # print when it does. Only a planning adapter asks for this; the stage that acts on the plan is
+    # then held to the prediction rather than to whatever failure it happens to produce.
+    needs_prediction: bool = False
     notes: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
@@ -120,6 +124,24 @@ ADAPTERS: dict[str, Contract] = {
         notes=("Cite real log lines, not recalled ones.",
                "A performance claim needs a before and an after.",
                "Do not cite decode speed for a cost that prefill dominates."),
+    ),
+    "change-plan": Contract(
+        adapter="change-plan",
+        summary="Where a change goes, and the failing run it commits to in advance.",
+        required_evidence=(FILE_QUOTE,),
+        min_probes=0,
+        defects_only=False,
+        high_severity_needs_falsification=False,
+        needs_prediction=True,
+        # The first implement run went wrong here and nowhere else. The plan proposed a test that
+        # asserted the behaviour as it already was, the stages below it executed that faithfully,
+        # and the result was a red/green pair that could not have come out any other way. A plan
+        # that has to name the number it expects to see cannot propose that test.
+        notes=("Name the file and lines the behaviour lives in, and quote them.",
+               "Predict the failing run: the exact command, and a distinctive string its output "
+               "will contain while the defect is present -- a wrong value, not a stack trace.",
+               "A test that would pass both before and after the change is not a test of it.",
+               "Write no code and change nothing; the next stage does that."),
     ),
     "implement": Contract(
         adapter="implement",
@@ -332,6 +354,12 @@ def contract_markdown(contract: Contract) -> str:
     if contract.min_measurements:
         lines.append("At least %d measurements are required, so that a before and an after exist."
                      % contract.min_measurements)
+    if contract.needs_prediction:
+        lines += ["", "Commit to the failing run before you write anything, on its own line:",
+                  "PREDICT: command: <the exact command> -> <a string its output will contain "
+                  "while the defect is there>",
+                  "The string must be one the run cannot print once the defect is gone. A value "
+                  "that is wrong qualifies; 'FAILED' or a stack trace does not."]
     if contract.high_severity_needs_falsification:
         lines += ["", "For a claim you would call high severity, add both lines:",
                   "SEVERITY: high",

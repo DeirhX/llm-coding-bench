@@ -201,7 +201,8 @@ def absence(root: str, pattern: str, globs: str = "") -> Verdict:
 
 CLAIM_RE = re.compile(r"^CLAIM:\s*(?P<claim>.+?)\s*$", re.M)
 UNKNOWN_RE = re.compile(r"^UNKNOWN:\s*(?P<unknown>.+?)\s*$", re.M)
-HEADERS = ("CLAIM:", "EVIDENCE:", "QUOTE:", "UNKNOWN:", "SEVERITY:", "FALSIFICATION:")
+HEADERS = ("CLAIM:", "EVIDENCE:", "QUOTE:", "UNKNOWN:", "SEVERITY:", "FALSIFICATION:",
+           "PREDICT:")
 
 # The four shapes an EVIDENCE line may take. Only the first was accepted originally, which quietly
 # made two adapters impossible to satisfy: refactor-proposal requires an `absence` search and
@@ -324,6 +325,25 @@ def parse_ledger(text: str) -> tuple[list[dict], list[str]]:
         claim.update({"path": first.get("path"), "start": first.get("start"),
                       "end": first.get("end"), "quote": first.get("quote")})
     return claims, [m.group("unknown") for m in UNKNOWN_RE.finditer(text)]
+
+
+PREDICT_RE = re.compile(r"^PREDICT:\s*(?P<body>.+?)\s*$", re.M)
+
+
+def predictions(text: str) -> list[dict]:
+    """The failing runs a plan commits to before a line of the change is written.
+
+    Same grammar as command evidence, and deliberately so: a prediction is a claim about a run that
+    has not happened, and it is checked later by exactly the machinery that checks one that has.
+    Anything that does not parse as a command with an expected output is dropped rather than kept
+    as prose, because prose is what this exists to replace.
+    """
+    out = []
+    for m in PREDICT_RE.finditer(text):
+        found = _classify(m.group("body"))
+        if found and found.get("kind") == "command_result" and found.get("expect"):
+            out.append(found)
+    return out
 
 
 def verify_ledger(root: str, text: str) -> list[tuple[dict, Verdict]]:
