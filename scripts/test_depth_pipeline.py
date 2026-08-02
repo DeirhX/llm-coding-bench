@@ -80,6 +80,10 @@ def test_every_turn_names_its_own_model_to_the_client() -> None:
         assert written["model"] == "fake-model"
         assert written["enforceAvailableModels"] is False
         assert written["availableModels"] == ["fake-model"]
+        guard = written["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        assert "cc-context-guard.py" in guard, "an unattended stage with no guard reads until it "\
+                                               "overruns the window"
+        assert "--stop-advice answer" in guard, "a read-only stage cannot write NOTES.md"
 
 
 def test_stage_output_reaches_the_next_stage() -> None:

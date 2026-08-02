@@ -34,7 +34,8 @@ class Session:
     """A synthetic session: a repo with one file, some reads, and a final answer."""
 
     def __init__(self, tmp: str, reads=((1, 5),), answer: str = "", adapter: str = "review",
-                 bash: int = 0):
+                 bash: int = 0, bash_command: str = "pytest -q", bash_output: str = "2 passed",
+                 bash_failed: bool = False):
         self.root = Path(tmp)
         self.session = "test-session"
         (self.root / "src").mkdir(parents=True, exist_ok=True)
@@ -59,11 +60,11 @@ class Session:
             tid = "b%d" % i
             events.append({"type": "assistant", "message": {"role": "assistant", "content": [
                 {"type": "tool_use", "id": tid, "name": "Bash",
-                 "input": {"command": "pytest -q"}}]}})
-            events.append({"type": "user", "toolUseResult": "2 passed",
+                 "input": {"command": bash_command}}]}})
+            events.append({"type": "user", "toolUseResult": bash_output,
                            "message": {"role": "user", "content": [
-                               {"type": "tool_result", "tool_use_id": tid, "is_error": False,
-                                "content": "2 passed"}]}})
+                               {"type": "tool_result", "tool_use_id": tid,
+                                "is_error": bool(bash_failed), "content": bash_output}]}})
         events.append({"type": "assistant", "message": {"role": "assistant",
                                                         "content": [{"type": "text",
                                                                      "text": answer}]}})
@@ -81,6 +82,11 @@ class Session:
         proc = subprocess.run([sys.executable, _GATE], input=json.dumps(body),
                               capture_output=True, text=True, env=environ)
         assert proc.returncode == 0, "the gate must always exit 0: %s" % proc.stderr[-400:]
+        # Failing open on an exception is deliberate, and it means a broken check allows everything
+        # while every test still passes. One did: a helper read a dict as a string, the gate caught
+        # it, and the only symptom was a test expecting a refusal getting silence.
+        assert "Traceback" not in proc.stderr, \
+            "the gate failed open on an exception:\n%s" % proc.stderr[-800:]
         return json.loads(proc.stdout) if proc.stdout.strip() else {}
 
 
@@ -135,6 +141,63 @@ def test_adapter_probe_floor_is_enforced() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         ran = Session(tmp, answer=GOOD, adapter="debug", bash=2).run().get("reason", "")
     assert "command(s) actually run" not in ran, ran
+
+
+HIGH = ("CLAIM: widen returns a wrong width on empty input.\n"
+        "EVIDENCE: src/widen.py:2-5\n"
+        "QUOTE:\n"
+        "    width = 0\n"
+        "    for row in rows:\n"
+        "        width = max(width, len(row))\n"
+        "    return width\n"
+        "SEVERITY: high\n")
+
+
+def test_a_falsification_nobody_ran_is_refused() -> None:
+    """The gate found this in itself: the field was checked for existence, never for truth.
+
+    Two high-severity claims passed carrying `Ran a test script calling evaluate ...` in a session
+    whose own report said probes_run: 0.
+    """
+    reason = _blocks(HIGH + "FALSIFICATION: Ran a test script calling evaluate; no gap appeared.\n")
+    assert "did not run" in reason, reason
+    assert "no command was run at all" in reason, reason
+
+
+def test_a_falsification_that_names_a_command_that_ran_is_accepted() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        answer = HIGH + "FALSIFICATION: ran pytest -q against it and it printed 2 passed.\n"
+        reason = Session(tmp, answer=answer, bash=1).run().get("reason", "")
+    assert "did not run" not in reason, reason
+
+
+def test_a_falsification_unrelated_to_anything_run_is_refused() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        answer = HIGH + "FALSIFICATION: I ran hypothesis against it and it found nothing.\n"
+        reason = Session(tmp, answer=answer, bash=1).run().get("reason", "")
+    assert "did not run" in reason, reason
+    assert "no command was run at all" not in reason, "a command did run, just not that one"
+
+
+def test_a_probe_that_failed_still_counts_as_a_probe() -> None:
+    """The refusal text has always said a failing probe is fine; the counter demanded success.
+
+    It is the wrong way round: the command that demonstrates a defect is usually the one that exits
+    non-zero.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        reason = Session(tmp, answer=GOOD, adapter="debug", bash=2,
+                         bash_output="1 failed", bash_failed=True).run().get("reason", "")
+    assert "command(s) actually run" not in reason, reason
+
+
+def test_a_probe_the_client_refused_does_not_count() -> None:
+    """A blocked call never reached a shell, so it is not a probe that failed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        reason = Session(tmp, answer=GOOD, adapter="debug", bash=2,
+                         bash_output="Context guard: refused, the window is at 82%",
+                         bash_failed=True).run().get("reason", "")
+    assert "command(s) actually run" in reason, reason
 
 
 def test_second_pass_never_blocks() -> None:

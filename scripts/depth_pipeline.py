@@ -163,11 +163,18 @@ def settings_file(model: str, out_dir: Path) -> Path:
     gets a 404, and exits 1 with nothing on stderr, which reads exactly like a crashed stage.
     A session that supplies its own model cannot be overruled by a stale global list.
     """
+    guard = "%s --stop-advice answer" % (REPO / "scripts/cc-context-guard.py")
     path = out_dir / "settings.json"
     path.write_text(json.dumps({
         "model": model,
         "availableModels": [model],
         "enforceAvailableModels": False,
+        # Nothing compacts here. An unattended stage let loose on an unfamiliar repository reads
+        # until it stops: one survey of a mid-sized web app reached 137k tokens against a 98k
+        # window, at which point the runner is growing KV into swap and every turn costs minutes.
+        # The same guard the interactive launcher uses caps a single read and stops the gathering
+        # at 80% of the window, which turns that run into an answer with UNKNOWNs instead.
+        "hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": guard}]}]},
     }, indent=2) + "\n")
     return path
 

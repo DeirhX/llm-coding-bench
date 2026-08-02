@@ -190,11 +190,22 @@ def _relative(path: str, root: str) -> str:
 
 def covers(ranges: dict[str, list[tuple[int, int]]], path: str, start: int, end: int,
            root: str = ".") -> bool:
-    """Did any single recorded read span [start, end] of `path`?"""
-    for first, last in ranges.get(_relative(path, root), []):
-        if first <= start and last >= end:
+    """Do the recorded reads, taken together, span [start, end] of `path`?
+
+    Together, not one of them. Requiring a single read to span the citation was defensible while
+    files were read whole; it stopped being so the moment the context guard started capping a read
+    at 500 lines, because a citation that straddles two of those chunks was read in full and refused
+    anyway. What matters is whether the lines were in front of the model, not how many calls put
+    them there.
+    """
+    reach = start - 1
+    for first, last in sorted(ranges.get(_relative(path, root), [])):
+        if first > reach + 1:
+            break          # a hole no read filled, and the rest start later still
+        reach = max(reach, last)
+        if reach >= end:
             return True
-    return False
+    return reach >= end
 
 
 def failures(calls: list[ToolCall]) -> list[ToolCall]:

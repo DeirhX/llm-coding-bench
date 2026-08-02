@@ -147,7 +147,7 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
     """
     gaps: list[str] = []
     ranges = cc_evidence.covered_ranges(calls, root)
-    probes = [c for c in calls if c.tool == "Bash" and c.ok and _is_probe(c.args.get("command"))]
+    probes = [c for c in calls if c.tool == "Bash" and _ran(c) and _is_probe(c.args.get("command"))]
     report: dict = {
         "adapter": contract.adapter,
         "claims": len(claims),
@@ -188,10 +188,20 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
                             "then quote what you see." % (label, ev.path, ev.start, ev.end))
                 report["verdicts"][-1]["verdict"] = "uncovered"
 
-        if claim.high and contract.high_severity_needs_falsification and not claim.falsification:
-            gaps.append("%s is high severity and carries no falsification. Run the cheapest "
-                        "command that would disprove it and report what it printed, or lower the "
-                        "severity." % label)
+        if claim.high and contract.high_severity_needs_falsification:
+            if not claim.falsification:
+                gaps.append("%s is high severity and carries no falsification. Run the cheapest "
+                            "command that would disprove it and report what it printed, or lower "
+                            "the severity." % label)
+            elif not _was_run(claim.falsification, probes):
+                # Found by the gate reviewing itself: two high-severity claims passed with
+                # falsifications that read "Ran a test script calling evaluate ...", in a session
+                # whose own report said probes_run: 0. A field that is checked for existence and
+                # not for truth is an invitation to write the sentence and skip the work.
+                gaps.append("%s is high severity and its falsification describes a command this "
+                            "session did not run%s. Run it and report what it printed, or lower "
+                            "the severity."
+                            % (label, "" if probes else " -- no command was run at all"))
 
     if not claims:
         gaps.append("No claims were stated. Write each finding as a CLAIM/EVIDENCE/QUOTE block, or "
@@ -229,6 +239,39 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
 # its own terms.
 _LOOKING = ("ls", "find", "grep", "rg", "cat", "head", "tail", "wc", "pwd", "echo", "which",
             "tree", "file", "stat", "du", "df", "date")
+
+
+# A call the client refused never reached a shell, so it is not a probe that failed -- it is a probe
+# that did not happen. Everything else counts, including a non-zero exit: the command that proves a
+# defect usually exits non-zero, and the refusal text has always said so.
+_BLOCKED = re.compile(r"(?i)^\s*(context guard:|permission denied|.*blocked by hook)")
+
+
+def _ran(call) -> bool:
+    return call.ok or not _BLOCKED.match(str(call.text or ""))
+
+
+def _was_run(falsification: str, probes: list) -> bool:
+    """Does the falsification narrative correspond to a command this session actually ran?
+
+    Deliberately generous: the model writes prose around the command, so this asks only whether some
+    probe's program appears in that prose. The case worth catching is the narrative with no probe
+    behind it at all, not a paraphrase of a real one.
+    """
+    if not probes:
+        return False
+    # The ledger hands this over as {"command": ...}, sometimes with the output beside it, and a
+    # hand-written one arrives as a plain string. Reading it as a string when it is a dict raises,
+    # and this gate fails open, so the check would have silently passed everything.
+    if isinstance(falsification, dict):
+        falsification = " ".join(str(v) for v in falsification.values())
+    said = str(falsification).lower()
+    for call in probes:
+        for piece in re.split(r"\|\||&&|;|\|", str(call.args.get("command") or "")):
+            first = piece.strip().split()
+            if first and os.path.basename(first[0]).lower() in said:
+                return True
+    return False
 
 
 def _is_probe(command: str | None) -> bool:
