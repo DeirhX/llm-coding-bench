@@ -618,3 +618,20 @@ def test_a_plan_must_name_the_failure_it_expects() -> None:
     gaps = _judge([], plan, adapter="change-plan")
     assert "commits to nothing" in gaps, gaps
     assert "predicted" in gaps or "PREDICT" in gaps, gaps
+
+
+def test_the_implement_rules_do_not_reach_other_adapters() -> None:
+    """Scope, asserted rather than assumed.
+
+    Replaying eight recorded review runs showed these rules contributing nothing, which is the
+    intended answer and also exactly what a silently mis-scoped rule looks like until the day a
+    review of a repository with an uncommitted diff starts being refused for its test style.
+    """
+    for adapter in ("review", "debug", "refactor-proposal", "ops-perf", "bench-audit"):
+        contract = cc_ledger.contract_for(adapter)
+        assert not contract.needs_red_green, adapter
+        assert not contract.needs_prediction, adapter
+    gaps = _judge([("pytest -q", "1 passed", False)] * 3, GOOD, adapter="review")
+    for phrase in ("failed and then passed", "asserts only that a mock was called",
+                   "is never passed by any caller", "commits to nothing"):
+        assert phrase not in gaps, gaps

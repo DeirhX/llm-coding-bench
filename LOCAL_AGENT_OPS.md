@@ -1095,6 +1095,38 @@ from reading the code. The loop that matters is the one that ran here: point it 
 what it accepted, and turn the specific way it was fooled into arithmetic.
 
 
+### What the accumulated rules cost, measured against the answers they were not written for
+
+Six rules were added to this gate from single observed failures, and a rule added that way is
+measured against the answer that motivated it and nothing else. The cost that stays invisible is the
+other direction: an answer that was fine and is now refused looks identical in the artifacts to one
+that needed correcting, because both end in a refusal round the model then satisfies.
+`scripts/measure_gate_drift.py` replays every recorded stage against the current gate, using its
+original transcript, and buckets the gaps by cause.
+
+**Sixteen stages on disk, ten replayable, five of which were accepted at the time. The current gate
+refuses all five** -- and the interesting part is why. Two are refused only because the files they
+cite have been edited since; this repository reviews itself, so its own commits move the line numbers
+of every citation. The remaining three are refused by the tightened falsification check and the
+opinion filter, and in all three cases the refused claim is exactly the shape that motivated the
+rule: two high-severity claims whose falsification narrative described a command the session never
+ran, and the "structurally coupled" non-finding that recurred in four runs out of four. So the rules
+still catch what they were built to catch, retroactively, and nothing else was disturbed.
+
+The first version of this measurement said something quite different -- five rule-caused refusals,
+none from drift -- because it did not count `wrong-lines` as drift. That verdict means the quoted
+text is still in the file and has moved, which is what inserting a function above it does. A
+measurement built to keep the rules honest was, for its first run, an argument for reverting rules
+that were working.
+
+**What this does not measure.** Ten stages, one adapter, and the rules were derived from these very
+runs, so this establishes that they still fire where intended -- not that they leave unfamiliar good
+work alone. A real false-positive rate needs answers the rules were not built from, which this
+project does not yet have. The scoping is at least asserted rather than assumed: the implement-only
+rules contributed zero gaps across every review stage replayed, and a test now fails if any of them
+becomes reachable from another adapter.
+
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
