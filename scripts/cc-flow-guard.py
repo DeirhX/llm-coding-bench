@@ -102,6 +102,16 @@ def main() -> int:
     except (json.JSONDecodeError, ValueError):
         allow()
 
+    if os.environ.get("CC_FLOW_TRACE"):
+        # Whether a hook can tell the orchestrator's tool call from a stage's own is not documented
+        # and matters a great deal, so it is measured rather than assumed.
+        try:
+            with open(os.environ["CC_FLOW_TRACE"], "a") as fh:
+                fh.write(json.dumps({k: (v if not isinstance(v, (dict, list)) else "...")
+                                     for k, v in payload.items()}) + "\n")
+        except OSError:
+            pass
+
     tool = payload.get("tool_name") or ""
     root = payload.get("cwd") or os.getcwd()
     session = cc_flowstate.session_of(payload)

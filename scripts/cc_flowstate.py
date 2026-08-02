@@ -130,6 +130,19 @@ def admits(state: dict, stage: str) -> tuple[bool, str]:
     return True, ""
 
 
+def forget_running(state: dict) -> list[str]:
+    """Drop stages recorded as in flight, returning their names.
+
+    A parent cannot be finishing its turn while one of its own Task calls is outstanding, so a
+    stage still marked running when the session stops is one whose subagent went away without the
+    gate hearing about it. Leaving the entry there would have the launch hook refuse the relaunch
+    as a duplicate, and the session would have nowhere to go.
+    """
+    stale = [e["stage"] for e in state.get("stages", []) if e.get("verdict") is None]
+    state["stages"] = [e for e in state.get("stages", []) if e.get("verdict") is not None]
+    return stale
+
+
 def summary(state: dict) -> str:
     """One line per stage, for a human watching."""
     if not state.get("flow"):

@@ -291,10 +291,19 @@ def test_a_finished_flow_may_end() -> None:
     assert decision == "allow", decision
 
 
-def test_the_session_is_not_blocked_while_a_stage_is_working() -> None:
+def test_a_stage_still_running_when_the_session_stops_went_away() -> None:
+    """A parent cannot finish a turn while its own Task call is outstanding.
+
+    Measured on the second flow: the orchestrator said it would wait for the survey, then answered
+    from a file it had read itself while the survey was still going. Leaving the entry in flight
+    would have the launch hook refuse the relaunch as a duplicate.
+    """
     with tempfile.TemporaryDirectory() as root:
         state = cc_flowstate.begin("review", "t", "s1", root)
         cc_flowstate.record_launch(state, "survey")
         cc_flowstate.save(state, "s1", root)
-        decision, _ = _stop("waiting on the survey", root)
-    assert decision == "allow", decision
+        decision, why = _stop("here is what I think", root)
+        after = cc_flowstate.load("s1", root)
+    assert decision == "block", decision
+    assert "STAGE: survey" in why, why
+    assert cc_flowstate.running(after) == [], after

@@ -569,8 +569,15 @@ def main() -> int:
     # one to run did exactly that: the survey reported, the orchestrator relayed it, and the flow
     # stopped two stances short of an answer anybody should act on.
     if not agent and state.get("flow") and not resumed:
+        # A stage still marked in flight when the parent stops is one whose subagent went away:
+        # a parent cannot finish a turn while its own Task call is outstanding. Measured on the
+        # second flow: the orchestrator said it would wait for the survey, then answered from a
+        # file it had read itself while the survey was still going.
+        abandoned = cc_flowstate.forget_running(state)
+        if abandoned:
+            cc_flowstate.save(state, session, root)
         left = cc_flowstate.next_stage(state)
-        if left and not cc_flowstate.running(state):
+        if left:
             done = cc_flowstate.done(state)
             return block(
                 "The %s flow is not finished. %s %s run; %s has not. Launch a subagent whose "
