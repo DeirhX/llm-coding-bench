@@ -967,6 +967,64 @@ answer that looks like a dead model. And Claude Code sends **`claude-opus-4-8`**
 have but is not the resident variant unloads 62 GB of weights. Hence `--force-model`: the port
 decides which model answers, not the client.
 
+### Pointing the gate at two real repositories, and the six defects that fell out
+
+Four unattended runs of `scripts/depth_pipeline.py --adapter review`, two against this repository and
+two against a mid-sized TypeScript/Python trading workbench that is larger than the window. Cost is
+stable and unremarkable: **24 to 34 minutes** for three stages, of which the claims stage is
+two-thirds. Prefix reuse per stage runs 70–96 %, and the claims stage is refused once almost every
+time, by design.
+
+What the machinery got wrong mattered more than what the model got wrong.
+
+**A scripted `claude -p` is not the launcher, and the difference is silent.** Every stage of the
+first run died in 80 ms with `claude exited 1` and an empty stderr. The client had rejected `--model`
+against `enforceAvailableModels` in `~/.claude/settings.json` — a hand-maintained list that a locally
+built model is never on, and which in this case still named three models that had been deleted — then
+fell back to its cloud default and asked Ollama for `claude-opus-4-8`. The sentence explaining all of
+that was on **stdout**, inside the JSON, while the error path read stderr. Any scripted invocation
+must supply its own settings file naming its own model; the launcher already did, which is why this
+had never been seen.
+
+**An unattended stage on an unfamiliar repository reads until it overruns.** The first assay survey
+reached **137,726 tokens against a 98,304 window**, at which point the runner is growing KV into swap
+(the model's resident size went 62 → 90 GB and swap passed 5 GB) and every turn costs minutes. It was
+reading `package-lock.json`. Wiring the existing `cc-context-guard.py` into the pipeline's own
+settings turned that into a 398 s survey at 91 % reuse. The guard's advice had to be forked first:
+telling a read-only stage to "write NOTES.md and stop" names a tool it does not have.
+
+**Capping the read moved the failure rather than removing it.** With reads capped at 500 lines, the
+claims stage cited line 2619 of a file it had seen to line 500, and invented the code there. The
+adversary stage killed it — correctly, and that is the mechanism working — but the run produced
+nothing. Two changes followed: the stage stances now say to find a line with `rg` and read around the
+hit, and the review of a repository larger than the window is scoped to one subsystem, because a
+review of everything is a review of nothing.
+
+**A citation in backticks was refused as a citation of nothing.** The whole first assay review came
+back empty because every `EVIDENCE:` line read `` `tools/trade_service.py:1925-1926` `` — as anyone
+writing about a path would — and the anchored pattern matched none of them. From the outside a
+refusal for punctuation is indistinguishable from a refusal for fabrication, which is the one
+confusion this mechanism cannot afford.
+
+**The gate then found three holes in itself, and one of them was serious.** Asked to review its own
+source, it reported that `FALSIFICATION:` was checked for existence and never for truth — and proved
+it in the same breath, passing two high-severity claims whose falsifications read "Ran a test script
+calling evaluate ...", in a run whose own report said `probes_run: 0`. It also caught the probe
+counter demanding `c.ok` while the refusal text said "one that fails is fine", which is backwards:
+the command that demonstrates a defect usually exits non-zero. After the fix, the next run recorded
+**five probes actually run against zero**, and then attacked the fix itself: matching on the program
+name alone passes "I ran python3" in any session that ever runs python3. It was right, and it
+demonstrated it with a command it really executed.
+
+**What the model is worth on this task, honestly.** Across the runs: on this repository, three real
+defects and one non-finding repeated in all three runs — that the proxy is "structurally coupled and
+will need duplication to add a backend", quoted from a function signature, which names nothing the
+code does wrong and is now ruled out in the review stance. On the trading repository, one accurate
+finding (a cash-collateral check defaulting to the on-disk holdings snapshot while a sibling module
+passes live holdings) and two honest UNKNOWNs pointing at the two risks worth chasing next. No
+surviving fabrication in either, after the parser fix. Thin, true, and cheap enough to run nightly —
+which is a different thing from a good reviewer, and should not be described as one.
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
@@ -994,6 +1052,10 @@ Kept deliberately, because the wrong turns cost more than the right ones.
 | N-gram speculation might not survive real work | 3.9× on a real edit at 35B, 4.7× stacked with the model's own draft head, and free on prose | Five settings, byte-identical output in all of them |
 | `--model` and `ANTHROPIC_MODEL` decide what the client asks for | Claude Code asks for `claude-opus-4-8` anyway, and on Ollama a wrong-but-existing name evicts 62 GB | The proxy's arrival log, three 404s deep |
 | A fresh session must re-prefill its framing | It matched 16,387 tokens from an unrelated earlier session, because the head was byte-identical | The same probe's first request |
+| `--model` and a settings file are interchangeable | A scripted `claude -p` is vetoed by the *user's* `enforceAvailableModels` and falls back to a cloud model, exiting 1 with an empty stderr | The explanation sitting on stdout, in the JSON, all along |
+| Capping reads prevents an overrun | It prevents the overrun and causes a fabrication: the model cites the lines it was not allowed to see | Line 2619 quoted from a file read to line 500 |
+| A field the contract demands is a field the gate checks | `FALSIFICATION:` was checked for existence, never for truth; two high claims passed in a run reporting `probes_run: 0` | The gate reviewing its own source |
+| Matching a falsification on the program name is enough | Every session runs `python3` or `rg`, so "I ran python3" passes unconditionally | The gate reviewing the fix to the line above |
 
 **Tooling traps that silently corrupted work**, all of which produced *plausible* wrong results:
 

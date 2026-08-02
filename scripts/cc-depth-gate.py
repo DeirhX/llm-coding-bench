@@ -188,6 +188,11 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
                             "then quote what you see." % (label, ev.path, ev.start, ev.end))
                 report["verdicts"][-1]["verdict"] = "uncovered"
 
+        if contract.defects_only and _is_opinion(claim):
+            gaps.append("%s says a design will be inconvenient and names nothing it does wrong. "
+                        "Say what breaks, and when -- or write it as an UNKNOWN, which is a legal "
+                        "answer." % label)
+
         if claim.high and contract.high_severity_needs_falsification:
             if not claim.falsification:
                 gaps.append("%s is high severity and carries no falsification. Run the cheapest "
@@ -284,6 +289,35 @@ def _was_run(falsification: str, probes: list) -> bool:
             if not rest or any(w in said for w in rest):
                 return True
     return False
+
+
+# Four runs out of four produced the same shape of non-finding: "X is structurally coupled to Y,
+# which will require duplication when adding Z", quoted from a signature or an env block. Telling
+# the model not to in the adapter's stance did not stop it -- run four simply moved it from the
+# proxy to the pipeline driver -- so it is a rule now.
+#
+# Lexical, and therefore narrow on purpose, like the severity hint above it. A real defect phrased
+# this way ("coupled to Y, so a change in Y silently breaks Z") names the breakage, and the second
+# half of the check looks for exactly that. What is left is the claim that asserts only future
+# inconvenience, which is an opinion about a design and not a defect in it. The cost of being wrong
+# here is one refusal round, in which the model states the consequence and moves on.
+_OPINION = re.compile(r"(?i)\b(tightly |structurally )?coupled\b|\bnot (?:easily )?extensible\b|"
+                      r"\b(?:difficult|hard|awkward|painful) to (?:add|extend|maintain|support|"
+                      r"change|modify|test)\b|\bwill (?:require|need) (?:significant )?"
+                      r"(?:duplication|rewriting|refactoring)\b|\bviolates? (?:the )?"
+                      r"(?:single responsibility|separation of concerns)\b")
+# A consequence is something that happens, to something, at runtime. If the sentence has one of
+# these, it is claiming behaviour and not taste.
+_CONSEQUENCE = re.compile(r"(?i)\b(silently|crash\w*|raise\w*|throw\w*|wrong|incorrect|stale|"
+                          r"lost|loses|dropp?\w*|leak\w*|hang\w*|deadlock\w*|race|corrupt\w*|"
+                          r"never (?:runs|fires|matches)|always (?:passes|fails)|off by|"
+                          r"double[- ]count\w*|out of date|mismatch\w*|overflow\w*)\b")
+
+
+def _is_opinion(claim) -> bool:
+    if not _OPINION.search(claim.claim):
+        return False
+    return not _CONSEQUENCE.search(claim.claim) and not claim.falsification
 
 
 def _is_probe(command: str | None) -> bool:

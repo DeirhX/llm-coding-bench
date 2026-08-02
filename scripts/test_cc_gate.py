@@ -179,6 +179,36 @@ def test_a_falsification_unrelated_to_anything_run_is_refused() -> None:
     assert "no command was run at all" not in reason, "a command did run, just not that one"
 
 
+OPINION = ("CLAIM: The pipeline driver is structurally coupled to the proxy, making it difficult "
+           "to add alternative backends without modifying the core invocation logic.\n"
+           "EVIDENCE: src/widen.py:2-5\n"
+           "QUOTE:\n"
+           "    width = 0\n"
+           "    for row in rows:\n"
+           "        width = max(width, len(row))\n"
+           "    return width\n")
+
+
+def test_a_claim_that_names_nothing_wrong_is_refused() -> None:
+    """Four review runs out of four produced this claim, and the adapter's stance did not stop it."""
+    reason = _blocks(OPINION)
+    assert "names nothing it does wrong" in reason, reason
+
+
+def test_coupling_with_a_consequence_is_a_defect() -> None:
+    """The narrowness that makes the rule tolerable: name the breakage and it is a claim again."""
+    answer = OPINION.replace(
+        "making it difficult to add alternative backends without modifying the core invocation "
+        "logic.", "so a base URL change silently sends the run to the wrong model.")
+    assert "names nothing it does wrong" not in _blocks(answer), _blocks(answer)
+
+
+def test_an_opinion_is_legal_where_the_adapter_asks_for_one() -> None:
+    """refactor-proposal exists to argue about design; the rule is review's alone."""
+    reason = _blocks(OPINION, adapter="refactor-proposal")
+    assert "names nothing it does wrong" not in reason, reason
+
+
 def test_naming_only_the_program_is_not_a_falsification() -> None:
     """The gate's own review found this, and proved it by running python3 and writing "I ran
     python3". Every session runs python3 or rg at some point."""

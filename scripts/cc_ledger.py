@@ -52,6 +52,9 @@ class Contract:
     # Commands the session must actually have run -- not described, run. 0 means the task type is
     # legitimately read-only (a review of code that does not execute).
     min_probes: int = 0
+    # Whether a claim naming no wrong behaviour is refused. True for review, where the task is
+    # defects in code that exists; false where an opinion about a design is the point of the task.
+    defects_only: bool = False
     # A high-severity claim asserts something expensive to be wrong about, so it must carry the
     # cheapest disproof that was actually attempted. In this project's history the only things that
     # ever caught real bugs were probes, never prose.
@@ -74,6 +77,7 @@ ADAPTERS: dict[str, Contract] = {
         summary="Claims about defects in code that already exists.",
         required_evidence=(FILE_QUOTE,),
         min_probes=0,
+        defects_only=True,
         high_severity_needs_falsification=True,
         # The third note is here because three consecutive runs produced the same non-finding: that
         # the proxy is "structurally coupled to Anthropic and OpenAI and will need duplication to
