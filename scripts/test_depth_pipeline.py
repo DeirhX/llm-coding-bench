@@ -40,10 +40,12 @@ class Fake:
         self.resumed: list[bool] = []
         self.settings: list = []
         self.tools: list[str] = []
+        self.disallowed: list[str] = []
 
     def __call__(self, prompt, model, head, session, cwd, settings, resume=False, yolo=False,
-                 timeout=3600, tools=dp.STAGE_TOOLS):
+                 timeout=3600, tools=dp.STAGE_TOOLS, disallowed=""):
         self.prompts.append(prompt)
+        self.disallowed.append(disallowed)
         self.resumed.append(resume)
         self.settings.append(settings)
         self.tools.append(tools)
@@ -268,3 +270,52 @@ def test_no_cache_lines_is_not_a_measurement_of_zero() -> None:
     """
     assert dp.StageResult(stage="s", session="x").reuse is None
     assert dp.StageResult(stage="s", session="x", cache=[(100, 80)]).reuse == 80.0
+
+def test_a_judging_stage_is_forbidden_the_writing_tools_not_merely_unoffered() -> None:
+    """--allowed-tools pre-approves; it does not forbid, and --dangerously-skip-permissions
+    forbids nothing at all. A verify stage carrying a read-only tool list made nine successful
+    edits to the files it was judging, which is not a report on a change but a second author.
+    """
+    _, fake, out, _ = _run([PLAN, "changed it", "verified it"],
+                           stages="plan,implement,verify", adapter="implement")
+    kinds = dict(zip(["plan", "implement", "verify"], fake.disallowed))
+    assert kinds["implement"] == "", kinds
+    assert "Write" in kinds["verify"] and "Edit" in kinds["verify"], kinds
+    assert "Write" in kinds["plan"], kinds
+    settings = json.loads((out / "settings.json").read_text())
+    command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert "--deny" in command, command
+
+def test_a_judging_stage_that_edits_the_tree_is_caught_however_it_did_it() -> None:
+    """Denying Write does not stop `printf > file`, and a verify stage needs Bash.
+
+    Measured on a live probe: with Write, Edit, MultiEdit and NotebookEdit all denied by flag
+    and by hook, the model never attempted any of them and used a shell redirection instead.
+    """
+    import subprocess
+    tmp = tempfile.mkdtemp()
+    root = Path(tmp)
+    (root / "src").mkdir()
+    (root / "src/m.py").write_text(SAMPLE)
+    out = root / "out"
+    out.mkdir()
+    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"],
+                 ["add", "-A"], ["commit", "-qm", "before"]):
+        subprocess.run(["git"] + args, cwd=tmp, capture_output=True)
+
+    class Meddler(Fake):
+        def __call__(self, *a, **kw):
+            (root / "src/m.py").write_text(SAMPLE + "\n# judged and edited\n")
+            return super().__call__(*a, **kw)
+
+    fake = Meddler([SOLID])
+    original, dp.invoke = dp.invoke, fake
+    dp.LOCK = root / "lock"
+    try:
+        head = dp.head_file(out)
+        stage = {s.name: s for s in dp.DEFAULT_STAGES}["claims"]
+        result = dp.run_stage(stage, cc_ledger.contract_for("review"), "t", "m", head, out,
+                              root, False, False)
+    finally:
+        dp.invoke = original
+    assert any("changed the working tree" in g for g in result.gaps), result.gaps

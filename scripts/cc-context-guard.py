@@ -181,6 +181,7 @@ def main():
     # read-only tools and one reply, so telling it to write NOTES.md names a tool it does not have,
     # and a model that cannot obey an instruction tends to ignore the sentence around it too.
     ap.add_argument("--stop-advice", choices=("notes", "answer"), default="notes")
+    ap.add_argument("--deny", default="", help="comma-separated tools to refuse outright")
     args = ap.parse_args()
 
     if OFF_SWITCH.exists():
@@ -194,6 +195,16 @@ def main():
     tool = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
     transcript = Path(payload.get("transcript_path") or "")
+
+    # --allowed-tools pre-approves; it does not forbid, and under
+    # --dangerously-skip-permissions nothing does. A stage told to judge a change made nine
+    # successful edits to the very files it was judging, on a tool list that named only Read, Grep,
+    # Glob and Bash. A PreToolUse denial is the one mechanism measured to hold here.
+    denied = {t.strip() for t in args.deny.split(",") if t.strip()}
+    if tool in denied:
+        deny("This stage may not use %s. It is judging a change it did not make, and a judge that "
+             "can edit the code is not reporting on it. Read, run and measure instead; if the "
+             "change is wrong, say so and say why." % tool)
 
     records = segment_records(transcript) if transcript.is_file() else []
     used = conversation_tokens(records) + args.framing

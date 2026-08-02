@@ -41,6 +41,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import cc_evidence  # noqa: E402
+import cc_diff  # noqa: E402
 import cc_ledger  # noqa: E402
 import cc_verify  # noqa: E402
 
@@ -239,7 +240,13 @@ def compose(head: Path, contract: cc_ledger.Contract, stage: Stage, task: str,
     return "\n".join(parts)
 
 
-def settings_file(model: str, out_dir: Path) -> Path:
+# Tools that change the tree. A stage that is not there to change it must be unable to, not merely
+# unlisted: --allowed-tools pre-approves rather than forbids, and under --dangerously-skip-
+# permissions nothing forbids at all.
+WRITING_TOOLS = "Edit,Write,MultiEdit,NotebookEdit"
+
+
+def settings_file(model: str, out_dir: Path, deny: str = "") -> Path:
     """A settings file for this run, because the user's global one can veto the model.
 
     ~/.claude/settings.json may carry `enforceAvailableModels` with a list this model is not on --
@@ -249,6 +256,8 @@ def settings_file(model: str, out_dir: Path) -> Path:
     A session that supplies its own model cannot be overruled by a stale global list.
     """
     guard = "%s --stop-advice answer" % (REPO / "scripts/cc-context-guard.py")
+    if deny:
+        guard += " --deny %s" % deny
     path = out_dir / "settings.json"
     path.write_text(json.dumps({
         "model": model,
@@ -266,13 +275,15 @@ def settings_file(model: str, out_dir: Path) -> Path:
 
 def invoke(prompt: str, model: str, head: Path, session: str, cwd: Path, settings: Path,
            resume: bool = False, yolo: bool = False, timeout: int = 3600,
-           tools: str = STAGE_TOOLS) -> tuple[str, str]:
+           tools: str = STAGE_TOOLS, disallowed: str = "") -> tuple[str, str]:
     """One `claude -p` turn. Returns (text, error)."""
     cmd = ["claude", "-p", prompt, "--model", model,
            "--append-system-prompt-file", str(head),
            "--settings", str(settings),
            "--allowed-tools", tools,
            "--output-format", "json"]
+    if disallowed:
+        cmd += ["--disallowed-tools", disallowed]
     cmd += ["--resume", session] if resume else ["--session-id", session]
     if yolo:
         cmd.append("--dangerously-skip-permissions")
@@ -352,6 +363,36 @@ def check(answer: str, contract: cc_ledger.Contract, session: str, cwd: Path,
     return claims, unknowns, gaps, report, gate
 
 
+def tree_fingerprint(cwd: Path) -> str:
+    """A hash of every uncommitted change, scratch excluded.
+
+    Denying the writing tools does not stop a stage writing: asked to change a file with Write
+    forbidden, the model never attempted it and ran `printf ... > target.txt` instead, because a
+    stage that must run tests must have Bash. Enumerating the ways to write a file through a shell
+    is a losing game -- sed, tee, patch, python -c -- so this measures the outcome instead. A judge
+    that leaves the tree different from how it found it is not reporting on a change, it is making
+    one.
+    """
+    text = cc_diff.diff(str(cwd))
+    kept = [chunk for path, chunk in _chunks(text) if not cc_diff._SCRATCH.search(path)]
+    return hashlib.sha256("\n".join(kept).encode()).hexdigest()[:16]
+
+
+def _chunks(text: str):
+    """(path, its whole section of the diff) for each file, headers included."""
+    path, lines = None, []
+    for line in text.splitlines():
+        found = cc_diff._ADDED_FILE.match(line)
+        if found:
+            if path:
+                yield path, "\n".join(lines)
+            path, lines = found.group("path"), [line]
+        elif path:
+            lines.append(line)
+    if path:
+        yield path, "\n".join(lines)
+
+
 def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str, head: Path,
               out_dir: Path, cwd: Path, yolo: bool, dry_run: bool) -> StageResult:
     session = str(uuid.uuid4())
@@ -374,9 +415,11 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
 
     started = time.time()
     offset = log_offset()
-    settings = settings_file(model, out_dir)
+    watched = None if stage.writes or dry_run else tree_fingerprint(cwd)
+    settings = settings_file(model, out_dir, "" if stage.writes else WRITING_TOOLS)
+    forbidden = "" if stage.writes else WRITING_TOOLS
     answer, error = invoke(prompt, model, head, session, cwd, settings, yolo=yolo,
-                           tools=stage.tools)
+                           tools=stage.tools, disallowed=forbidden)
     if error and not answer:
         result.error = error
         result.seconds = time.time() - started
@@ -385,11 +428,17 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
 
     if stage.verify:
         claims, unknowns, gaps, report, gate = check(answer, contract, session, cwd, predicted)
+        if watched is not None and tree_fingerprint(cwd) != watched:
+            gaps.append("This stage changed the working tree, which it is not here to do: it is "
+                        "reporting on a change it did not make, and a judge that edits the code is "
+                        "a second author of it. Undo what you changed, then say what you found by "
+                        "reading and running alone.")
         if gaps:
             # One refusal, same wording the Stop hook uses, so the two paths train the same habit.
             refusal = gate.refusal(gaps, out_dir / "claims.jsonl")
             second, error = invoke(refusal, model, head, session, cwd, settings,
-                                   resume=True, yolo=yolo, tools=stage.tools)
+                                   resume=True, yolo=yolo, tools=stage.tools,
+                                   disallowed=forbidden)
             result.rounds = 2
             if second:
                 answer = second
