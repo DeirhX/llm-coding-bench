@@ -171,6 +171,9 @@ def line_count(path: Path) -> int:
         return sum(1 for _ in fh)
 
 
+_SLEEP = re.compile(r"\bsleep\s+(\d+)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--window", type=int, default=98304, help="the runner's real context window")
@@ -182,6 +185,8 @@ def main():
     # and a model that cannot obey an instruction tends to ignore the sentence around it too.
     ap.add_argument("--stop-advice", choices=("notes", "answer"), default="notes")
     ap.add_argument("--deny", default="", help="comma-separated tools to refuse outright")
+    ap.add_argument("--max-sleep", type=int, default=30,
+                    help="longest sleep a Bash command may contain, in seconds")
     args = ap.parse_args()
 
     if OFF_SWITCH.exists():
@@ -200,6 +205,17 @@ def main():
     # --dangerously-skip-permissions nothing does. A stage told to judge a change made nine
     # successful edits to the very files it was judging, on a tool list that named only Read, Grep,
     # Glob and Bash. A PreToolUse denial is the one mechanism measured to hold here.
+    # A stage put a test run in the background and then polled it with `sleep 180 && tail`, twice,
+    # and spent twenty minutes of a fifty-minute budget waiting for itself. The suite it was waiting
+    # on takes under three seconds in the foreground. Nothing here needs to wait minutes for
+    # anything, so a long sleep is always the wrong answer rather than sometimes.
+    naps = [int(m.group(1)) for m in _SLEEP.finditer(tool_input.get("command") or "")]
+    if tool == "Bash" and any(n > args.max_sleep for n in naps):
+        deny("Do not sleep for %ds. Run the command in the foreground and wait for it there: "
+             "polling a background job costs the whole wait and tells you nothing the exit status "
+             "would not. If something really does take minutes, say so and answer without it."
+             % max(naps))
+
     denied = {t.strip() for t in args.deny.split(",") if t.strip()}
     if tool in denied:
         deny("This stage may not use %s. It is judging a change it did not make, and a judge that "

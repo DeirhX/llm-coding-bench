@@ -160,6 +160,24 @@ def main():
     print(f"  {'ok  ' if ok else 'FAIL'}  {'and its wording names no missing tool':<42} "
           f"expected answer-advice got {'it' if ok else said[:80]}")
 
+    # A stage backgrounded a test run and polled it with `sleep 180 && tail`, spending twenty
+    # minutes of a fifty-minute budget waiting for a suite that takes under three seconds.
+    for command, expected, label in (
+            ("sleep 180 && tail -20 /tmp/task.log", "deny", "a long sleep is refused"),
+            ("sleep 2 && pytest -q", "allow", "a short sleep is fine"),
+            ("pytest -q --timeout 300", "allow", "a big number that is not a sleep"),
+    ):
+        got, said = run("Bash", {"command": command}, empty)
+        ok = got == expected
+        failures += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'}  {label:<42} expected {expected:<5} got {got}")
+
+    got, said = run("Write", {"file_path": str(small)}, empty, ("--deny", "Write,Edit"))
+    ok = got == "deny" and "judging" in said
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'a judging stage may not write':<42} "
+          f"expected deny  got {got}")
+
     OFF.touch()
     got, _ = run("Read", {"file_path": str(big)}, empty)
     ok = got == "allow"
@@ -169,7 +187,7 @@ def main():
 
     failures += failures_in_wording
     print(f"\n{'SELFTEST OK' if not failures else f'{failures} FAILURES'} "
-          f"({len(cases) + 2} cases)")
+          f"({len(cases) + 6} cases)")
     return 1 if failures else 0
 
 
