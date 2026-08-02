@@ -135,3 +135,23 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_a_fenced_quote_is_not_a_fabrication(tmp_path):
+    """The 31B wraps quotes in ```python. Verbatim content inside a fence must still pass.
+
+    Regression from the false-premise arm: the fence lines were compared as content, the quote
+    "was not present", and a correct citation was reported as the thing the gate exists to catch.
+    """
+    src = tmp_path / "report.py"
+    src.write_text("import os\n\n\ndef write_report():\n    return 1\n")
+    fenced = "```python\ndef write_report():\n    return 1\n```"
+    assert vf.file_quote(str(tmp_path), "report.py", 4, 5, fenced).kind == vf.PASS
+
+
+def test_an_interior_fence_is_still_content(tmp_path):
+    """Only a fence wrapping the whole quote is dropped; markdown being quoted stays intact."""
+    src = tmp_path / "doc.md"
+    src.write_text("intro\n```sh\nls -l\n```\ntail\n")
+    assert vf.file_quote(str(tmp_path), "doc.md", 1, 5,
+                                "intro\n```sh\nls -l\n```\ntail").kind == vf.PASS

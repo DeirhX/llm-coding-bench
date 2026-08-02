@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""Offline checks for the depth gate: synthetic sessions, no model, no network.
+
+Each case builds a transcript in the shape Claude Code writes -- tool_use paired with tool_result,
+a final assistant message carrying the claim blocks -- runs the hook as a subprocess exactly as the
+client would, and asserts on what it decides. The point of driving it as a subprocess rather than
+importing it is that fail-open is a property of the process, not of a function.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+_REPO = Path(__file__).resolve().parent.parent
+_GATE = str(_REPO / "scripts" / "cc-depth-gate.py")
+sys.path.insert(0, str(_REPO / "scripts"))
+
+import cc_ledger  # noqa: E402
+
+SAMPLE = """def widen(rows):
+    width = 0
+    for row in rows:
+        width = max(width, len(row))
+    return width
+"""
+
+
+class Session:
+    """A synthetic session: a repo with one file, some reads, and a final answer."""
+
+    def __init__(self, tmp: str, reads=((1, 5),), answer: str = "", adapter: str = "review",
+                 bash: int = 0):
+        self.root = Path(tmp)
+        self.session = "test-session"
+        (self.root / "src").mkdir(parents=True, exist_ok=True)
+        self.file = "src/widen.py"
+        (self.root / self.file).write_text(SAMPLE)
+        self.transcript = self.root / "transcript.jsonl"
+        events = []
+        n = 0
+        for start, end in reads:
+            n += 1
+            tid = "t%d" % n
+            events.append({"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": tid, "name": "Read",
+                 "input": {"file_path": str(self.root / self.file)}}]}})
+            events.append({"type": "user", "toolUseResult": {"type": "text", "file": {
+                "filePath": str(self.root / self.file), "content": SAMPLE,
+                "startLine": start, "numLines": end - start + 1, "totalLines": 5}},
+                "message": {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": tid, "is_error": False,
+                     "content": SAMPLE}]}})
+        for i in range(bash):
+            tid = "b%d" % i
+            events.append({"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": tid, "name": "Bash",
+                 "input": {"command": "pytest -q"}}]}})
+            events.append({"type": "user", "toolUseResult": "2 passed",
+                           "message": {"role": "user", "content": [
+                               {"type": "tool_result", "tool_use_id": tid, "is_error": False,
+                                "content": "2 passed"}]}})
+        events.append({"type": "assistant", "message": {"role": "assistant",
+                                                        "content": [{"type": "text",
+                                                                     "text": answer}]}})
+        self.transcript.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+        cc_ledger.write_contract(cc_ledger.contract_for(adapter), self.session, str(self.root))
+
+    def run(self, stop_hook_active: bool = False, payload: dict | None = None,
+            env: dict | None = None) -> dict:
+        body = payload if payload is not None else {
+            "session_id": self.session, "transcript_path": str(self.transcript),
+            "cwd": str(self.root), "stop_hook_active": stop_hook_active,
+        }
+        environ = dict(os.environ)
+        environ.update(env or {})
+        proc = subprocess.run([sys.executable, _GATE], input=json.dumps(body),
+                              capture_output=True, text=True, env=environ)
+        assert proc.returncode == 0, "the gate must always exit 0: %s" % proc.stderr[-400:]
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+
+def _blocks(answer: str, **kw) -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Session(tmp, answer=answer, **kw).run()
+        return out.get("reason", "")
+
+
+GOOD = ("CLAIM: widen returns the longest row length.\n"
+        "EVIDENCE: src/widen.py:2-5\n"
+        "QUOTE:\n"
+        "    width = 0\n"
+        "    for row in rows:\n"
+        "        width = max(width, len(row))\n"
+        "    return width\n")
+
+
+def test_verified_answer_is_allowed() -> None:
+    assert _blocks(GOOD) == "", "a checkable answer must pass"
+
+
+def test_invented_quote_is_blocked() -> None:
+    bad = GOOD.replace("        width = max(width, len(row))", "        width = row.length()")
+    reason = _blocks(bad)
+    assert reason, "a fabricated quote must be refused"
+    assert "fail" in reason or "retouched" in reason, reason
+
+
+def test_citation_no_read_covered_is_named() -> None:
+    """The quote is real, but this session never read those lines."""
+    with tempfile.TemporaryDirectory() as tmp:
+        s = Session(tmp, reads=((1, 1),), answer=GOOD)
+        reason = s.run().get("reason", "")
+    assert "no read in this session covered" in reason, reason
+
+
+def test_claim_without_evidence_is_blocked() -> None:
+    reason = _blocks("CLAIM: this code is fine.\n")
+    assert "cites nothing" in reason, reason
+
+
+def test_unknown_is_a_legal_answer() -> None:
+    answer = GOOD + "\nUNKNOWN: whether callers depend on the empty-input case.\n"
+    assert _blocks(answer) == "", "declaring an unknown must not be penalised"
+
+
+def test_adapter_probe_floor_is_enforced() -> None:
+    """debug demands two commands actually run; describing them does not count."""
+    reason = _blocks(GOOD, adapter="debug")
+    assert "command(s) actually run" in reason, reason
+    with tempfile.TemporaryDirectory() as tmp:
+        ran = Session(tmp, answer=GOOD, adapter="debug", bash=2).run().get("reason", "")
+    assert "command(s) actually run" not in ran, ran
+
+
+def test_second_pass_never_blocks() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        s = Session(tmp, answer="CLAIM: unsupported\n")
+        assert s.run().get("reason"), "first pass should block"
+        assert s.run(stop_hook_active=True) == {}, "stop_hook_active must short-circuit"
+        report = json.loads((Path(tmp) / "artifacts/depth" / s.session / "gate.json").read_text())
+        assert report["final_pass"] is True and report["gaps"], report
+
+
+def test_kill_switch_and_missing_contract_allow() -> None:
+    off = Path("/tmp/cc-depth-off")
+    created = not off.exists()
+    off.touch()
+    try:
+        assert _blocks("CLAIM: unsupported\n") == "", "kill switch must disable the gate"
+    finally:
+        if created:
+            off.unlink()
+    with tempfile.TemporaryDirectory() as tmp:
+        s = Session(tmp, answer="CLAIM: unsupported\n")
+        (Path(tmp) / "artifacts/depth" / s.session / "contract.json").unlink()
+        assert s.run() == {}, "an ungated session was never promised anything"
+
+
+def test_fails_open_on_garbage() -> None:
+    proc = subprocess.run([sys.executable, _GATE], input="not json at all",
+                          capture_output=True, text=True)
+    assert proc.returncode == 0 and proc.stdout.strip() == ""
+    with tempfile.TemporaryDirectory() as tmp:
+        s = Session(tmp, answer=GOOD)
+        assert s.run(payload={"session_id": s.session, "transcript_path": "/nope.jsonl",
+                              "cwd": str(tmp)}) == {}
+
+
+def test_short_factual_answer_is_not_forced_into_a_ledger() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Session(tmp, answer="It returns the longest row length.").run()
+    assert out == {}, "a one-line factual answer should not demand a ledger"
+
+
+def test_planted_fabrications_are_caught() -> None:
+    """The plan's criterion: fabricated citations caught at 95 % or better."""
+    planted = []
+    body = SAMPLE.split("\n")
+    planted.append(GOOD.replace("width = max(width, len(row))", "width = min(width, len(row))"))
+    planted.append(GOOD.replace("src/widen.py:2-5", "src/widen.py:200-205"))
+    planted.append(GOOD.replace("src/widen.py:2-5", "src/nonexistent.py:2-5"))
+    planted.append(GOOD.replace("    return width", "    return width * 2"))
+    planted.append(GOOD.replace("src/widen.py:2-5", "src/widen.py:1-2"))
+    planted.append("CLAIM: rows are sorted first.\nEVIDENCE: src/widen.py:2-5\nQUOTE:\n"
+                   "    rows = sorted(rows)\n")
+    planted.append("CLAIM: there is a cache.\nEVIDENCE: src/widen.py:1-1\nQUOTE:\n"
+                   "@lru_cache\n")
+    planted.append(GOOD.replace("QUOTE:\n", "QUOTE:\n    # tidy up\n"))
+    for i, line in enumerate(body[:2]):
+        planted.append("CLAIM: fabricated %d.\nEVIDENCE: src/widen.py:3-4\nQUOTE:\n%s\n"
+                       % (i, line + "  # invented"))
+    caught = sum(1 for p in planted if _blocks(p))
+    rate = caught / len(planted)
+    assert rate >= 0.95, "caught %d/%d = %.0f%%" % (caught, len(planted), rate * 100)
+    print("  planted fabrications caught: %d/%d" % (caught, len(planted)))
+
+
+def main() -> int:
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    for t in tests:
+        t()
+        print("ok  %s" % t.__name__)
+    print("\n%d checks passed" % len(tests))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+def _load_gate():
+    """Import the hook as a module despite the hyphen, so its internals can be unit-tested."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("depth_gate_under_test", _GATE)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _assistant_line(text: str) -> str:
+    return json.dumps({"type": "assistant", "message": {"role": "assistant",
+                                                        "content": [{"type": "text", "text": text}]}})
+
+
+def test_the_gate_waits_for_a_transcript_still_being_written() -> None:
+    """The Stop hook can outrun the transcript write by tens of milliseconds.
+
+    Measured in the false-premise arm: the answer's event was stamped 51 ms before the gate wrote
+    its verdict about that same answer, and the verdict was "no claims were stated" about an answer
+    that carried one. Here the file grows from a second thread while the gate reads it.
+    """
+    import threading
+    import time
+    gate = _load_gate()
+    with tempfile.TemporaryDirectory() as tmp:
+        transcript = Path(tmp) / "session.jsonl"
+        transcript.write_text(_assistant_line("working on it") + "\n")
+
+        def append_late() -> None:
+            time.sleep(0.25)
+            with open(transcript, "a") as fh:
+                fh.write(_assistant_line("CLAIM: a thing\nEVIDENCE: f.py:1-1\nQUOTE:\nx = 1") + "\n")
+
+        writer = threading.Thread(target=append_late)
+        writer.start()
+        text = gate._settled_text(str(transcript))
+        writer.join()
+        assert "CLAIM: a thing" in text, text
+
+
+def test_settling_gives_up_rather_than_hanging() -> None:
+    """A transcript that never stops growing must not wedge the stop; the budget is the ceiling."""
+    import threading
+    import time
+    gate = _load_gate()
+    with tempfile.TemporaryDirectory() as tmp:
+        transcript = Path(tmp) / "busy.jsonl"
+        transcript.write_text(_assistant_line("one") + "\n")
+        stop = threading.Event()
+
+        def keep_writing() -> None:
+            while not stop.is_set():
+                with open(transcript, "a") as fh:
+                    fh.write(_assistant_line("more") + "\n")
+                time.sleep(0.02)
+
+        writer = threading.Thread(target=keep_writing)
+        writer.start()
+        started = time.time()
+        gate._settled_text(str(transcript), budget=0.4)
+        elapsed = time.time() - started
+        stop.set()
+        writer.join()
+        assert elapsed < 1.5, "settling took %.2fs" % elapsed
+
+
+def test_subagent_is_judged_on_its_own_transcript() -> None:
+    """SubagentStop names two transcripts and the parent's is the wrong one.
+
+    Measured against Claude Code 2.1.218: at SubagentStop the parent is still inside its Agent call,
+    so `transcript_path` holds no answer. Reading it refused a delegate that had in fact produced a
+    clean ledger, for "no claims were stated". The delegate's file is `agent_transcript_path`.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        sub = Session(tmp, answer=GOOD)
+        parent = Path(tmp) / "parent.jsonl"
+        parent.write_text(json.dumps({"type": "user", "message": {"role": "user",
+                                                                  "content": "go"}}) + "\n")
+        out = sub.run(payload={
+            "session_id": sub.session, "transcript_path": str(parent),
+            "agent_transcript_path": str(sub.transcript), "agent_id": "a1",
+            "agent_type": "general-purpose", "cwd": str(sub.root),
+            "hook_event_name": "SubagentStop", "stop_hook_active": False,
+        })
+        assert out == {}, "a delegate with a verified ledger must pass: %s" % out.get("reason", "")
+        verdict = json.loads((Path(tmp) / "artifacts" / "depth" / sub.session / "a1" /
+                              "gate.json").read_text())
+        assert verdict["agent"] == "a1" and verdict["claims"] == 1
+
+
+def test_the_payload_answer_beats_a_lagging_transcript() -> None:
+    """`last_assistant_message` is authoritative: the client hands over what it is about to accept.
+
+    Without it the gate races the transcript write and can judge the previous turn -- observed at
+    51 ms of lag in the false-premise arm.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        session = Session(tmp, answer="still thinking out loud, no ledger here")
+        out = session.run(payload={
+            "session_id": session.session, "transcript_path": str(session.transcript),
+            "cwd": str(session.root), "stop_hook_active": False,
+            "last_assistant_message": GOOD,
+        })
+        assert out == {}, "the payload's answer should have been judged, not the stale one"

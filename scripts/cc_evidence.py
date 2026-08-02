@@ -29,6 +29,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field, asdict
 from typing import Any, Iterator
@@ -131,6 +132,69 @@ def collect(transcript_path: str) -> list[ToolCall]:
                     call.text = _result_text(block)
                     call.detail = event.get("toolUseResult")
     return calls
+
+
+def covered_ranges(calls: list[ToolCall], root: str = ".") -> dict[str, list[tuple[int, int]]]:
+    """Line ranges the session actually looked at, per repo-relative path.
+
+    Needed because a citation the model never read is a fabrication, and that is checkable: a Read
+    result carries ``startLine`` and ``numLines``, and a Grep result carries ``path:line:`` per hit.
+    Nothing else is counted -- a `cat` through Bash could be parsed, but guessing at coverage would
+    make the check unfalsifiable, and an uncounted read costs only a demand to re-read.
+    """
+    out: dict[str, list[tuple[int, int]]] = {}
+
+    def add(path: str, start: int, end: int) -> None:
+        key = _relative(path, root)
+        if start > 0 and end >= start:
+            out.setdefault(key, []).append((start, end))
+
+    for call in calls:
+        if call.tool == "Read":
+            info = call.detail.get("file") if isinstance(call.detail, dict) else None
+            if isinstance(info, dict) and info.get("startLine"):
+                first = int(info["startLine"])
+                count = int(info.get("numLines") or 0)
+                add(str(info.get("filePath") or call.args.get("file_path", "")),
+                    first, first + max(count, 1) - 1)
+            elif call.args.get("file_path") and call.ok:
+                # No structured result: fall back to what was asked for, whole file if unbounded.
+                offset = int(call.args.get("offset") or 1)
+                limit = int(call.args.get("limit") or 0)
+                add(str(call.args["file_path"]), offset,
+                    offset + limit - 1 if limit else 10 ** 9)
+        elif call.tool == "Grep" and call.ok and call.text:
+            for line in call.text.splitlines():
+                m = re.match(r"^(.+?):(\d+):", line)
+                if m:
+                    add(m.group(1), int(m.group(2)), int(m.group(2)))
+    return out
+
+
+def _relative(path: str, root: str) -> str:
+    """Normalise to a key comparable between what a tool recorded and what a claim cites.
+
+    A citation is written relative to the session's root, while a tool records whatever it was
+    handed -- usually absolute. Resolving the relative one with `abspath` would resolve it against
+    the *hook's* working directory, which is not the session's: every citation then missed its own
+    coverage. `realpath` on the absolute side because macOS hands out /var paths that are symlinks
+    to /private/var, and the two spellings must not look like different files.
+    """
+    if not os.path.isabs(path):
+        return os.path.normpath(path)
+    try:
+        return os.path.relpath(os.path.realpath(path), os.path.realpath(root))
+    except ValueError:
+        return path
+
+
+def covers(ranges: dict[str, list[tuple[int, int]]], path: str, start: int, end: int,
+           root: str = ".") -> bool:
+    """Did any single recorded read span [start, end] of `path`?"""
+    for first, last in ranges.get(_relative(path, root), []):
+        if first <= start and last >= end:
+            return True
+    return False
 
 
 def failures(calls: list[ToolCall]) -> list[ToolCall]:

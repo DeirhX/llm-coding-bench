@@ -70,8 +70,27 @@ class Verdict:
 
 
 def _significant(text: str) -> list[str]:
-    """Lines that carry content, with trailing whitespace and blank lines discarded."""
-    return [line.rstrip() for line in text.strip("\n").split("\n") if line.strip()]
+    """Lines that carry content, with trailing whitespace, blank lines and code fences discarded."""
+    return [line.rstrip() for line in _unfenced(text).strip("\n").split("\n") if line.strip()]
+
+
+def _unfenced(text: str) -> str:
+    """Drop a markdown code fence wrapped around a quote.
+
+    Measured, not anticipated: in the false-premise arm the 31B wrapped a byte-perfect quote in
+    ```python ... ```, and the fence lines made the comparison fail with "quote not present" -- the
+    verifier's fabrication verdict, on a citation that was entirely correct. A gate that reports a
+    fabrication whenever the model reaches for markdown is a gate that gets switched off. Only a
+    fence enclosing the whole quote is stripped; an interior one stays, since it is then content.
+    """
+    lines = text.strip("\n").split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if len(lines) >= 2 and lines[0].lstrip().startswith("```") and lines[-1].strip() == "```":
+        lines = lines[1:-1]
+    return "\n".join(lines)
 
 
 def _dedented(lines: Iterable[str]) -> list[str]:
@@ -181,25 +200,90 @@ def absence(root: str, pattern: str, globs: str = "") -> Verdict:
 # defines a well-formed claim: anything this cannot parse is a claim the gate must refuse.
 
 CLAIM_RE = re.compile(r"^CLAIM:\s*(?P<claim>.+?)\s*$", re.M)
-EVIDENCE_RE = re.compile(r"^EVIDENCE:\s*(?P<path>\S+?):(?P<start>\d+)-(?P<end>\d+)\s*$", re.M)
-QUOTE_RE = re.compile(r"^QUOTE:\s*\n(?P<quote>.*?)(?=\n\s*\n(?:CLAIM:|UNKNOWN:)|\Z)", re.M | re.S)
 UNKNOWN_RE = re.compile(r"^UNKNOWN:\s*(?P<unknown>.+?)\s*$", re.M)
+HEADERS = ("CLAIM:", "EVIDENCE:", "QUOTE:", "UNKNOWN:", "SEVERITY:", "FALSIFICATION:")
+
+# The four shapes an EVIDENCE line may take. Only the first was accepted originally, which quietly
+# made two adapters impossible to satisfy: refactor-proposal requires an `absence` search and
+# ops-perf a `log_match`, and a model writing blocks had nowhere to put either. The gate would then
+# have demanded, every time, something the answer format could not express.
+FILE_EV = re.compile(r"^(?P<path>\S+?):(?P<start>\d+)-(?P<end>\d+)$")
+COMMAND_EV = re.compile(r"^command:\s*(?P<command>.+?)(?:\s*->\s*(?P<expect>.+?))?$", re.I)
+ABSENCE_EV = re.compile(r"^absence:\s*(?P<pattern>.+?)(?:\s+in\s+(?P<globs>\S+))?$", re.I)
+LOG_EV = re.compile(r"^log:\s*(?P<path>\S+)\s*~\s*(?P<pattern>.+)$", re.I)
+
+
+def _classify(body: str) -> dict | None:
+    m = FILE_EV.match(body)
+    if m:
+        return {"kind": "file_quote", "path": m.group("path"),
+                "start": int(m.group("start")), "end": int(m.group("end"))}
+    m = COMMAND_EV.match(body)
+    if m:
+        return {"kind": "command_result", "command": m.group("command").strip(),
+                "expect": (m.group("expect") or "").strip()}
+    m = ABSENCE_EV.match(body)
+    if m:
+        return {"kind": "absence", "pattern": m.group("pattern").strip(),
+                "globs": (m.group("globs") or "").strip()}
+    m = LOG_EV.match(body)
+    if m:
+        return {"kind": "log_match", "path": m.group("path"), "pattern": m.group("pattern").strip()}
+    return None
 
 
 def parse_ledger(text: str) -> tuple[list[dict], list[str]]:
-    """Split an answer into claims and declared unknowns."""
-    claims = []
-    for chunk in re.split(r"^CLAIM:", text, flags=re.M)[1:]:
-        claim = chunk.strip().split("\n")[0].strip()
-        ev = EVIDENCE_RE.search(chunk)
-        q = QUOTE_RE.search(chunk)
-        claims.append({
-            "claim": claim,
-            "path": ev.group("path") if ev else None,
-            "start": int(ev.group("start")) if ev else None,
-            "end": int(ev.group("end")) if ev else None,
-            "quote": q.group("quote") if q else None,
-        })
+    """Split an answer into claims and declared unknowns.
+
+    Scanned line by line rather than matched with one regex, because a QUOTE runs until the next
+    header and quoted code contains blank lines, colons and anything else a regex would trip on.
+    The rule is simply: a quote ends at the next line beginning with a known header, or at the end.
+    """
+    claims: list[dict] = []
+    current: dict | None = None
+    evidence: dict | None = None
+    quote: list[str] | None = None
+
+    def close_quote() -> None:
+        nonlocal quote, evidence
+        if quote is not None and evidence is not None:
+            evidence["quote"] = "\n".join(quote).strip("\n")
+        quote = None
+
+    for line in text.split("\n"):
+        header = next((h for h in HEADERS if line.startswith(h)), None)
+        if quote is not None and header is None:
+            quote.append(line)
+            continue
+        close_quote()
+        if header == "CLAIM:":
+            current = {"claim": line[len("CLAIM:"):].strip(), "evidence": [],
+                       "severity": None, "falsification": None}
+            claims.append(current)
+            evidence = None
+        elif current is None:
+            continue
+        elif header == "EVIDENCE:":
+            evidence = _classify(line[len("EVIDENCE:"):].strip())
+            if evidence is None:
+                evidence = {"kind": None, "raw": line[len("EVIDENCE:"):].strip()}
+            current["evidence"].append(evidence)
+        elif header == "QUOTE:":
+            quote = []
+            rest = line[len("QUOTE:"):].strip()
+            if rest:
+                quote.append(rest)
+        elif header == "SEVERITY:":
+            current["severity"] = line[len("SEVERITY:"):].strip().lower()
+        elif header == "FALSIFICATION:":
+            current["falsification"] = {"command": line[len("FALSIFICATION:"):].strip()}
+    close_quote()
+
+    # The single-file_quote view the verifier and its tests were written against.
+    for claim in claims:
+        first = next((e for e in claim["evidence"] if e.get("kind") == "file_quote"), {})
+        claim.update({"path": first.get("path"), "start": first.get("start"),
+                      "end": first.get("end"), "quote": first.get("quote")})
     return claims, [m.group("unknown") for m in UNKNOWN_RE.finditer(text)]
 
 
