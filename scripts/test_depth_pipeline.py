@@ -71,6 +71,13 @@ def _run(replies, stages="survey,claims", task="does add add?"):
         dp.invoke = original
 
 
+def test_a_stage_is_told_where_to_put_its_scratch_files() -> None:
+    """Six runs left twelve repro scripts in the repository root."""
+    _, fake, out, _ = _run(["an inventory of src/m.py:1-2", SOLID])
+    assert str(out / "scratch") in fake.prompts[0], fake.prompts[0][-400:]
+    assert (out / "scratch").is_dir()
+
+
 def test_every_turn_names_its_own_model_to_the_client() -> None:
     """A stale global availableModels list otherwise sends the request to a cloud model."""
     results, fake, out, _ = _run(["an inventory of src/m.py:1-2", SOLID])

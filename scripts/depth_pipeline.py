@@ -147,7 +147,7 @@ def cache_since(offset: int) -> list[tuple[int, int]]:
 
 
 def compose(head: Path, contract: cc_ledger.Contract, stage: Stage, task: str,
-            out_dir: Path) -> str:
+            out_dir: Path, scratch: Path) -> str:
     parts = [cc_ledger.contract_markdown(contract), "", "STAGE: %s" % stage.name, stage.stance,
              "", "TASK: %s" % task]
     for name in stage.consumes:
@@ -155,7 +155,14 @@ def compose(head: Path, contract: cc_ledger.Contract, stage: Stage, task: str,
         if prior.is_file():
             parts += ["", "--- %s (from the previous stage) ---" % name,
                       prior.read_text(errors="replace").strip()]
-    parts += ["", "Write your answer to the reply. It is checked, not read charitably."]
+    parts += ["",
+              # Twelve repro scripts turned up in the repository root after six runs. A stage is
+              # meant to be read-only, and Bash is the hole in that: it is the tool the adversary
+              # stage exists for, so it cannot be taken away, only aimed somewhere harmless.
+              "Any scratch file you write -- a repro script, a probe, a scratch test -- goes in "
+              "%s and nowhere else. Do not create files in the repository you are reviewing."
+              % scratch,
+              "", "Write your answer to the reply. It is checked, not read charitably."]
     return "\n".join(parts)
 
 
@@ -267,7 +274,9 @@ def check(answer: str, contract: cc_ledger.Contract, session: str, cwd: Path):
 def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str, head: Path,
               out_dir: Path, cwd: Path, yolo: bool, dry_run: bool) -> StageResult:
     session = str(uuid.uuid4())
-    prompt = compose(head, contract, stage, task, out_dir)
+    scratch = out_dir / "scratch"
+    scratch.mkdir(exist_ok=True)
+    prompt = compose(head, contract, stage, task, out_dir, scratch)
     (out_dir / ("%s.prompt.txt" % stage.name)).write_text(prompt)
     result = StageResult(stage=stage.name, session=session)
     if dry_run:
