@@ -9,6 +9,7 @@ header, and a body assignment being indistinguishable from a parameter to a rege
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -179,3 +180,20 @@ def test_a_probe_left_in_scratch_is_not_a_test_of_the_change() -> None:
         (pathlib.Path(root) / "out/scratch").mkdir(parents=True)
         (pathlib.Path(root) / "out/scratch/test_probe.py").write_text(FRESH_TEST)
         assert cc_diff.hollow_tests(cc_diff.diff(root)) == []
+
+def test_untracked_files_are_read_in_a_linked_worktree() -> None:
+    """In a linked worktree .git is a file, not a directory.
+
+    Every review of another repository here runs in one, so assuming root/.git meant the
+    temporary index path was invalid, every git call failed quietly, and untracked files went
+    unread in exactly the setting the check was written for.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = _repo(tmp, BEFORE)
+        linked = os.path.join(tmp, "linked")
+        subprocess.run(["git", "worktree", "add", "--detach", linked], cwd=root,
+                       capture_output=True, check=True)
+        assert os.path.isfile(os.path.join(linked, ".git")), "not a linked worktree"
+        open(os.path.join(linked, "tests/test_new.py"), "w").write(FRESH_TEST)
+        found = cc_diff.hollow_tests(cc_diff.diff(linked))
+    assert found and "test_new.py" in found[0], found

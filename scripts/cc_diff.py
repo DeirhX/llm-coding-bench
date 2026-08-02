@@ -65,13 +65,21 @@ def diff(root: str) -> str:
     fresh = [f for f in listing.split("\n") if f.strip()]
     if not fresh:
         return tracked
-    index = os.path.join(root, ".git", "cc_diff_index")
+    # Ask git where its directory is rather than assuming root/.git. In a linked worktree -- which
+    # is how every review of another repository runs here -- .git is a file, so the assumed path was
+    # invalid, every command below failed quietly, and untracked files went unread in exactly the
+    # setting this was written for.
+    gitdir = _git(root, "rev-parse", "--absolute-git-dir").strip()
+    if not gitdir:
+        return tracked
+    index = os.path.join(gitdir, "cc_diff_index.%d" % os.getpid())
     env = dict(os.environ, GIT_INDEX_FILE=index)
     try:
-        subprocess.run(["git", "read-tree", "HEAD"], cwd=root, env=env, capture_output=True,
-                       timeout=30)
-        subprocess.run(["git", "add", "--intent-to-add", "--"] + fresh, cwd=root, env=env,
-                       capture_output=True, timeout=30)
+        for args in (["read-tree", "HEAD"], ["add", "--intent-to-add", "--"] + fresh):
+            step = subprocess.run(["git"] + args, cwd=root, env=env, capture_output=True,
+                                  timeout=30)
+            if step.returncode != 0:
+                return tracked
         out = subprocess.run(["git", "diff", "HEAD", "--"] + fresh, cwd=root, env=env,
                              capture_output=True, text=True, timeout=30)
         added = out.stdout if out.returncode == 0 else ""
@@ -141,7 +149,8 @@ def hollow_tests(text: str) -> list[str]:
                 if _MOCK_ASSERT.search(line):
                     mocky += 1
         close()
-    return out
+    # Same method name in three classes, one per function under test: one message is the finding.
+    return list(dict.fromkeys(out))
 
 
 def _defaults(source: str) -> dict[str, set[str]]:
