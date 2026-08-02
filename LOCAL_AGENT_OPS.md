@@ -1016,12 +1016,34 @@ the command that demonstrates a defect usually exits non-zero. After the fix, th
 name alone passes "I ran python3" in any session that ever runs python3. It was right, and it
 demonstrated it with a command it really executed.
 
+**Six runs in, the loop closes on itself.** Each round the gate was fixed, the next run attacked the
+fix, and the attacks kept getting better because the cheap answers had been closed off. Run 4 said
+the falsification check "only verifies that some command using the same executable was run" and
+proved it with `python3 -c ...` plus the words "I ran python3". Run 5 said sharing one flag was
+enough, `-c` being in every second command, and was right again. Run 6 found the two that mattered
+most: a session using nothing but `Read` and answering in under 120 words is never asked for a
+ledger at all, and `absence`/`log_match` "verify state on disk but not observation in the
+transcript" — a quote is checked against what the session read, a claim of absence never was. Both
+came with repro scripts written and run in the session, five probes recorded, and the answer was
+accepted first time.
+
+The first of those two is still open on purpose. The 120-word floor is deliberate — there is a test
+named `short factual answer is not forced into a ledger` — and closing it means a refusal round on
+every one-line question, which is a worse trade than the hole.
+
+The rule that a design opinion is not a defect worked in the only way worth having: run 6 did not
+argue and did not drop the thought, it wrote `UNKNOWN: whether the API proxy's structural coupling
+constitutes a defect or a design choice`. Refusals teach; they do not have to silence.
+
 **What the model is worth on this task, honestly.** Across the runs: on this repository, three real
 defects and one non-finding repeated in all three runs — that the proxy is "structurally coupled and
 will need duplication to add a backend", quoted from a function signature, which names nothing the
-code does wrong and is now ruled out in the review stance. On the trading repository, one accurate
-finding (a cash-collateral check defaulting to the on-disk holdings snapshot while a sibling module
-passes live holdings) and two honest UNKNOWNs pointing at the two risks worth chasing next. No
+code does wrong and is now ruled out in the review stance. On the trading repository, two accurate findings — a
+cash-collateral check defaulting to the on-disk holdings snapshot while a sibling module passes live
+holdings, and a stated architectural invariant ("the browser can never inject a limit price") that
+the code does not keep, since `set_basket_leg_limit_price` accepts one from the client and
+`explicit_limits` takes precedence over the lock store — plus honest UNKNOWNs pointing at the risks
+worth chasing next. No
 surviving fabrication in either, after the parser fix. Thin, true, and cheap enough to run nightly —
 which is a different thing from a good reviewer, and should not be described as one.
 
