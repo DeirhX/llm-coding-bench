@@ -12,6 +12,16 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT_ROOT="$REPO/artifacts/reviews/$STAMP"
 mkdir -p "$OUT_ROOT"
 
+# A detached worktree at HEAD, not the repository itself: a stage runs with permission prompts off,
+# and a review has no business touching somebody's uncommitted work. Rebuilt when missing so the
+# review leaves nothing behind in the tree it reviewed.
+assay_tree() {
+  local src="$HOME/Projects/assay" tree=/tmp/assay-review
+  [[ -d "$tree" ]] && return 0
+  git -C "$src" worktree add --detach "$tree" HEAD >/dev/null 2>&1 \
+    || { echo "cannot make a worktree of $src" >&2; return 1; }
+}
+
 review() {
   local name="$1" cwd="$2" task="$3"
   local out="$OUT_ROOT/$name"
@@ -34,9 +44,9 @@ ASSAY_TASK='In-depth architecture and code review of the trade execution path of
 
 case "${1:-both}" in
   self)  review self  "$REPO"           "$SELF_TASK" ;;
-  assay) review assay /tmp/assay-review "$ASSAY_TASK" ;;
+  assay) assay_tree && review assay /tmp/assay-review "$ASSAY_TASK" ;;
   both)  review self  "$REPO"           "$SELF_TASK"
-         review assay /tmp/assay-review "$ASSAY_TASK" ;;
+         assay_tree && review assay /tmp/assay-review "$ASSAY_TASK" ;;
   *)     echo "usage: $0 [self|assay|both]" >&2; exit 2 ;;
 esac
 

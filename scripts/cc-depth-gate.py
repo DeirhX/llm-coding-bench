@@ -285,8 +285,13 @@ def _was_run(falsification: str, probes: list) -> bool:
             if program not in said:
                 continue
             rest = [w.strip("'\"").lower() for w in words[1:]]
-            rest = [w for w in rest if len(w) > 1]
-            if not rest or any(w in said for w in rest):
+            # A flag is not enough. The gate's own review made this claim and proved it: sharing
+            # `-c` with `python3 -c "..."` satisfied the check, and every second command has a -c.
+            # Prefer a word that identifies *this* command -- a path, a name, a subcommand -- and
+            # fall back to the flags only when the command consists of nothing else.
+            named = [w for w in rest if len(w) > 2 and not w.startswith("-")]
+            wanted = named or [w for w in rest if len(w) > 1]
+            if not wanted or any(w in said for w in wanted):
                 return True
     return False
 

@@ -207,12 +207,15 @@ HEADERS = ("CLAIM:", "EVIDENCE:", "QUOTE:", "UNKNOWN:", "SEVERITY:", "FALSIFICAT
 # made two adapters impossible to satisfy: refactor-proposal requires an `absence` search and
 # ops-perf a `log_match`, and a model writing blocks had nowhere to put either. The gate would then
 # have demanded, every time, something the answer format could not express.
-FILE_EV = re.compile(r"^(?P<path>\S+?):(?P<start>\d+)-(?P<end>\d+)$")
+FILE_EV = re.compile(r"^(?P<path>\S+?):(?P<start>\d+)(?:-(?P<end>\d+))?$")
 # The same citation with the decoration a model puts on a path, and anywhere in the line rather
 # than alone on it. One whole review came back empty because every EVIDENCE line read
 # `tools/trade_service.py:1925-1926` in backticks and the anchored form matched none of them --
 # a refusal for punctuation, indistinguishable to the reader from a refusal for fabrication.
-FILE_EV_ANY = re.compile(r"(?P<path>[^\s`*'\"]+?):(?P<start>\d+)-(?P<end>\d+)")
+FILE_EV_ANY = re.compile(r"(?P<path>[^\s`*'\",]+?):(?P<start>\d+)(?:-(?P<end>\d+))?")
+# "file.py:48, 345-348" -- one path, then further ranges that never repeat it. Written by the model
+# in the run that found the lock-file claim, and refused for citing nothing.
+MORE_RANGES = re.compile(r"(?<![:\w.-])(?P<start>\d+)-(?P<end>\d+)(?![\w.-])")
 DECORATION = re.compile(r"[`*]+")
 COMMAND_EV = re.compile(r"^command:\s*(?P<command>.+?)(?:\s*->\s*(?P<expect>.+?))?$", re.I)
 ABSENCE_EV = re.compile(r"^absence:\s*(?P<pattern>.+?)(?:\s+in\s+(?P<globs>\S+))?$", re.I)
@@ -230,10 +233,17 @@ def _classify_all(body: str) -> list[dict]:
     single = _classify(body)
     if single is not None and single["kind"] != "file_quote":
         return [single]
-    found = [{"kind": "file_quote", "path": m.group("path"),
-              "start": int(m.group("start")), "end": int(m.group("end"))}
-             for m in FILE_EV_ANY.finditer(DECORATION.sub("", body))]
+    plain = DECORATION.sub("", body)
+    found = [{"kind": "file_quote", "path": m.group("path"), "start": int(m.group("start")),
+              "end": int(m.group("end") or m.group("start"))}
+             for m in FILE_EV_ANY.finditer(plain)]
     if found:
+        # Ranges after the last citation, carrying no path of their own, belong to the last path
+        # named. Only those beyond it: the ones inside a citation are already accounted for.
+        tail = plain[max(m.end() for m in FILE_EV_ANY.finditer(plain)):]
+        last = found[-1]["path"]
+        found += [{"kind": "file_quote", "path": last, "start": int(m.group("start")),
+                   "end": int(m.group("end"))} for m in MORE_RANGES.finditer(tail)]
         return found
     return [single] if single else []
 
@@ -241,8 +251,8 @@ def _classify_all(body: str) -> list[dict]:
 def _classify(body: str) -> dict | None:
     m = FILE_EV.match(DECORATION.sub("", body))
     if m:
-        return {"kind": "file_quote", "path": m.group("path"),
-                "start": int(m.group("start")), "end": int(m.group("end"))}
+        return {"kind": "file_quote", "path": m.group("path"), "start": int(m.group("start")),
+                "end": int(m.group("end") or m.group("start"))}
     m = COMMAND_EV.match(body)
     if m:
         return {"kind": "command_result", "command": m.group("command").strip(),

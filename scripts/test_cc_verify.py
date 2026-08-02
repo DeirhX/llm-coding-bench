@@ -150,6 +150,21 @@ def test_two_citations_on_one_line_are_both_kept() -> None:
     assert ev[-1].get("quote") == "    pass", "the quote belongs to the citation it sits under"
 
 
+def test_a_single_line_citation_is_a_citation() -> None:
+    claims, _ = vf.parse_ledger("CLAIM: x\nEVIDENCE: a/b.py:48\nQUOTE:\n    pass\n")
+    ev = claims[0]["evidence"]
+    assert [(e["start"], e["end"]) for e in ev] == [(48, 48)], ev
+
+
+def test_ranges_after_a_path_belong_to_that_path() -> None:
+    """Written by the model as `depth_pipeline.py`:48, 345-348, and refused for citing nothing."""
+    claims, _ = vf.parse_ledger(
+        "CLAIM: x\nEVIDENCE: `s/depth_pipeline.py`:48, 345-348\nQUOTE:\n    pass\n")
+    ev = claims[0]["evidence"]
+    assert [(e["path"], e["start"], e["end"]) for e in ev] == \
+[("s/depth_pipeline.py", 48, 48), ("s/depth_pipeline.py", 345, 348)], ev
+
+
 def test_a_command_is_not_split_on_its_punctuation() -> None:
     claims, _ = vf.parse_ledger(
         "CLAIM: x\nEVIDENCE: command: rg -n 'a:1-2' src && echo done -> done\n")

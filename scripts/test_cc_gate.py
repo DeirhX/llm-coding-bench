@@ -227,6 +227,15 @@ def test_a_pasted_command_is_a_falsification() -> None:
     assert "did not run" not in reason, reason
 
 
+def test_sharing_only_a_flag_is_not_a_falsification() -> None:
+    """The gate's review of its own fix: every second command has a -c."""
+    with tempfile.TemporaryDirectory() as tmp:
+        answer = HIGH + "FALSIFICATION: python3 repro_bypass.py printed Bypass result: True.\n"
+        reason = Session(tmp, answer=answer, bash=1,
+                         bash_command="python3 -c \"import cc_verify\"").run().get("reason", "")
+    assert "did not run" in reason, reason
+
+
 def test_a_one_word_command_needs_only_its_name() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         answer = HIGH + "FALSIFICATION: ran pytest, it printed 2 passed.\n"
