@@ -232,6 +232,21 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
                     "that fails is fine and informative; describing one is not."
                     % (contract.min_probes, len(probes)))
 
+    if contract.needs_red_green:
+        pair, red = _red_then_green(probes)
+        report["red_green"] = pair
+        if not pair:
+            gaps.append("Nothing here failed and then passed. Run the check that demonstrates the "
+                        "problem before the change, then run that same command again afterwards -- "
+                        "same words, so the two runs can be compared. A command that only ever "
+                        "passed does not distinguish a fix from a no-op.")
+        elif not _behavioural(red):
+            gaps.append("The failing run of `%s` failed because the code it calls did not exist "
+                        "yet -- a missing argument, a missing name, an import. That is the test "
+                        "agreeing with the diff's shape, not with its effect: written before the "
+                        "change and run after it, it would pass either way. Make it fail on a "
+                        "value that is wrong, and say which value." % pair[:60])
+
     if contract.min_measurements:
         measured = sum(1 for v in report["verdicts"]
                        if v.get("kind") in (cc_ledger.LOG_MATCH, cc_ledger.COMMAND_RESULT))
@@ -346,6 +361,56 @@ def _was_searched(ev, calls) -> bool:
                 in str(call.args.get("file_path") or call.args.get("path") or "").lower()):
             return True
     return False
+
+
+# What a test prints when the code it calls is not there yet, as opposed to being wrong. The first
+# implement run produced all of it: three tests whose red was `TypeError: _put_cash_requirement()
+# got an unexpected keyword argument 'holdings'`, which is the test asserting that the diff has the
+# shape the diff has. Every one of them passed the red/green check and none of them touched
+# behaviour -- the change threaded a parameter that no caller ever passes.
+_INTERFACE = re.compile(r"(?i)unexpected keyword argument|takes \d+ positional argument|"
+                        r"ModuleNotFoundError|ImportError|IndentationError|SyntaxError|"
+                        r"AttributeError: (?:module|type object|'\w+' object) .*has no attribute|"
+                        r"NameError: name|no tests ran|errors? (?:during|while) collecting")
+# An assertion that failed is the shape of a test that ran and disagreed with what it found.
+_BEHAVIOURAL = re.compile(r"(?i)AssertionError|^E\s+assert|assert\w* .* (?:!=|==|not in)|"
+                          r"Expected .* but got|\bmismatch\b", re.M)
+
+
+def _behavioural(red) -> bool:
+    """Did the failing run fail on a value, or on the code not being written yet?
+
+    Generous where it is uncertain: no output at all counts as behavioural, because a check that
+    cannot read the failure should not be the thing that refuses the answer. It only fires when the
+    output says plainly that a name or a signature was missing and says nothing about a value.
+    """
+    text = str(getattr(red, "text", "") or "")
+    if not text.strip():
+        return True
+    return bool(_BEHAVIOURAL.search(text)) or not _INTERFACE.search(text)
+
+
+def _red_then_green(probes: list) -> tuple[str | None, object]:
+    """The one command that failed and later passed, with the failing call, or (None, None).
+
+    This is the implement adapter's whole evidential basis, and it is deliberately literal: the same
+    command string, an early run that failed, a later run that did not. Normalising harder -- same
+    program, same test file, close enough -- would accept the case this exists to catch, where the
+    "after" run quietly narrows the selection to the test that was made to pass.
+
+    Cost of the strictness is a session that retypes its command slightly and is asked once to run
+    it again verbatim. Cost of the looseness is a green tick for a fix that fixed nothing.
+    """
+    outcomes: dict[str, list] = {}
+    for call in probes:
+        command = " ".join(str(call.args.get("command") or "").split())
+        if command:
+            outcomes.setdefault(command, []).append(call)
+    for command, runs in outcomes.items():
+        results = [bool(c.ok) for c in runs]
+        if False in results and True in results[results.index(False) + 1:]:
+            return command, runs[results.index(False)]
+    return None, None
 
 
 def _is_opinion(claim) -> bool:

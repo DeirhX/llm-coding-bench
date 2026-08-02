@@ -35,7 +35,7 @@ class Session:
 
     def __init__(self, tmp: str, reads=((1, 5),), answer: str = "", adapter: str = "review",
                  bash: int = 0, bash_command: str = "pytest -q", bash_output: str = "2 passed",
-                 bash_failed: bool = False):
+                 bash_failed: bool = False, commands=()):
         self.root = Path(tmp)
         self.session = "test-session"
         (self.root / "src").mkdir(parents=True, exist_ok=True)
@@ -56,15 +56,18 @@ class Session:
                 "message": {"role": "user", "content": [
                     {"type": "tool_result", "tool_use_id": tid, "is_error": False,
                      "content": SAMPLE}]}})
-        for i in range(bash):
+        # `bash` repeats one call; `commands` spells out a sequence, which is what an adapter
+        # judged on how outcomes changed over the session needs.
+        sequence = list(commands) or [(bash_command, bash_output, bash_failed)] * bash
+        for i, (command, output, failed) in enumerate(sequence):
             tid = "b%d" % i
             events.append({"type": "assistant", "message": {"role": "assistant", "content": [
                 {"type": "tool_use", "id": tid, "name": "Bash",
-                 "input": {"command": bash_command}}]}})
-            events.append({"type": "user", "toolUseResult": bash_output,
+                 "input": {"command": command}}]}})
+            events.append({"type": "user", "toolUseResult": output,
                            "message": {"role": "user", "content": [
                                {"type": "tool_result", "tool_use_id": tid,
-                                "is_error": bool(bash_failed), "content": bash_output}]}})
+                                "is_error": bool(failed), "content": output}]}})
         events.append({"type": "assistant", "message": {"role": "assistant",
                                                         "content": [{"type": "text",
                                                                      "text": answer}]}})
@@ -464,3 +467,99 @@ def test_the_payload_answer_beats_a_lagging_transcript() -> None:
             "last_assistant_message": GOOD,
         })
         assert out == {}, "the payload's answer should have been judged, not the stale one"
+
+
+# --------------------------------------------------------------------------- #
+# The implement adapter: judged on what changed, not on what is written down
+# --------------------------------------------------------------------------- #
+_SUITE = "python -m pytest tools/tests -q"
+_ONE = "python -m pytest tools/tests/test_cash.py -q"
+DONE = ("CLAIM: stale cash capacity is refreshed before the put sizing runs.\n"
+        "EVIDENCE: command: %s -> 1 passed\n" % _ONE)
+
+
+def _implement(commands, answer: str = DONE) -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        session = Session(tmp, answer=answer, adapter="implement", commands=commands)
+        return session.run().get("reason", "")
+
+
+def test_implement_accepts_a_command_that_failed_and_then_passed() -> None:
+    reason = _implement([
+        (_ONE, "1 failed -- stale capacity used", True),
+        (_ONE, "1 passed", False),
+        (_SUITE, "1446 passed, 2 skipped", False),
+    ])
+    assert reason == "", reason
+
+
+def test_all_green_from_the_start_is_not_evidence_of_a_fix() -> None:
+    """Three passing runs cannot tell a fix from a no-op, so the adapter does not accept them."""
+    reason = _implement([
+        (_ONE, "1 passed", False),
+        (_ONE, "1 passed", False),
+        (_SUITE, "1446 passed, 2 skipped", False),
+    ])
+    assert "failed and then passed" in reason, reason
+
+
+def test_a_narrowed_rerun_is_not_the_same_command() -> None:
+    """The failure is shown on the suite and the pass on one test picked out of it.
+
+    This is the cheapest way to fake a fix, and the reason the pair is matched on the literal
+    command: whatever else was failing is still failing, out of frame.
+    """
+    reason = _implement([
+        (_SUITE, "1 failed, 1445 passed", True),
+        (_ONE + " -k cash_is_refreshed", "1 passed", False),
+        (_ONE, "1 passed", False),
+    ])
+    assert "failed and then passed" in reason, reason
+
+
+def test_implement_will_not_take_a_quote_of_the_diff_it_just_wrote() -> None:
+    quoted = ("CLAIM: the capacity is now refreshed before sizing.\n"
+              "EVIDENCE: src/widen.py:1-2\n"
+              "QUOTE:\ndef widen(rows):\n    width = 0\n")
+    reason = _implement([
+        (_ONE, "1 failed", True),
+        (_ONE, "1 passed", False),
+        (_SUITE, "1446 passed", False),
+    ], answer=quoted)
+    assert "requires command_result evidence" in reason, reason
+
+
+def test_a_red_that_is_only_a_missing_argument_is_not_a_red() -> None:
+    """The first real implement run failed exactly here, and passed.
+
+    Three tests asserted that a function now takes a ``holdings`` keyword. Removing the change made
+    them raise TypeError, restoring it made them pass, and the pair looked like proof. It was not:
+    no caller passed the new argument, so production behaviour was identical before and after.
+    """
+    reason = _implement([
+        (_ONE, "TypeError: _put_cash_requirement() got an unexpected keyword argument 'holdings'",
+         True),
+        (_ONE, "1 passed", False),
+        (_SUITE, "1449 passed, 2 skipped", False),
+    ])
+    assert "did not exist yet" in reason, reason
+
+
+def test_a_red_on_a_wrong_value_is_accepted() -> None:
+    """The same shape of run, failing on what the code computed rather than on its signature."""
+    reason = _implement([
+        (_ONE, "E       AssertionError: 1000000.0 != 0.0\n1 failed", True),
+        (_ONE, "1 passed", False),
+        (_SUITE, "1449 passed, 2 skipped", False),
+    ])
+    assert reason == "", reason
+
+
+def test_an_unreadable_failure_is_given_the_benefit_of_the_doubt() -> None:
+    """A check that cannot read the failure must not be the thing that refuses the answer."""
+    reason = _implement([
+        (_ONE, "", True),
+        (_ONE, "1 passed", False),
+        (_SUITE, "1449 passed", False),
+    ])
+    assert reason == "", reason

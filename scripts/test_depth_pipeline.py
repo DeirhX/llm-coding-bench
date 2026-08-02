@@ -39,16 +39,18 @@ class Fake:
         self.prompts: list[str] = []
         self.resumed: list[bool] = []
         self.settings: list = []
+        self.tools: list[str] = []
 
     def __call__(self, prompt, model, head, session, cwd, settings, resume=False, yolo=False,
-                 timeout=3600):
+                 timeout=3600, tools=dp.STAGE_TOOLS):
         self.prompts.append(prompt)
         self.resumed.append(resume)
         self.settings.append(settings)
+        self.tools.append(tools)
         return (self.replies.pop(0) if self.replies else ""), ""
 
 
-def _run(replies, stages="survey,claims", task="does add add?"):
+def _run(replies, stages="survey,claims", task="does add add?", adapter="review"):
     tmp = tempfile.mkdtemp()
     root = Path(tmp)
     (root / "src").mkdir()
@@ -60,10 +62,10 @@ def _run(replies, stages="survey,claims", task="does add add?"):
     dp.LOCK = root / "lock"
     try:
         head = dp.head_file(out)
-        contract = cc_ledger.contract_for("review")
+        contract = cc_ledger.contract_for(adapter)
         results = []
         for name in stages.split(","):
-            stage = {s.name: s for s in dp.DEFAULT_STAGES}[name]
+            stage = {s.name: s for s in dp.DEFAULT_STAGES + dp.IMPLEMENT_STAGES}[name]
             results.append(dp.run_stage(stage, contract, task, "fake-model", head, out, root,
                                         False, False))
         return results, fake, out, root
@@ -167,3 +169,24 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_only_the_implement_stage_is_handed_the_editing_tools() -> None:
+    """The plan reads and the verify stage judges; a stage that could edit either would be judging
+    a tree it had moved."""
+    _, fake, _, _ = _run(["where the bug is", "changed it", "stashed it and it failed"],
+                         stages="plan,implement,verify", adapter="implement")
+    handed = dict(zip(["plan", "implement", "verify"], fake.tools))
+    assert "Edit" not in handed["plan"] and "Write" not in handed["plan"], handed
+    assert "Edit" in handed["implement"] and "Write" in handed["implement"], handed
+    assert "Edit" not in handed["verify"] and "Write" not in handed["verify"], handed
+
+
+def test_the_writing_stage_is_told_to_change_the_repository_not_scratch() -> None:
+    """The read-only stages are told the opposite, and that instruction would send a fix to /tmp."""
+    _, fake, out, _ = _run(["where the bug is", "changed it", "stashed it and it failed"],
+                           stages="plan,implement,verify", adapter="implement")
+    plan, implement = fake.prompts[0], fake.prompts[1]
+    assert "Do not create files in the repository" in plan, plan[-300:]
+    assert "Change the files the task requires" in implement, implement[-300:]
+    assert str(out / "scratch") in implement, implement[-300:]

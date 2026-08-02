@@ -51,8 +51,10 @@ OLLAMA_LOG = Path.home() / ".ollama" / "logs" / "server.log"
 CACHE_HIT = re.compile(r"cache hit.*?total=(\d+)\s+matched=(\d+)")
 
 # Tools a stage may use. Deliberately read-only plus Bash: a stage that can edit is a stage whose
-# evidence describes a file it changed halfway through reading.
+# evidence describes a file it changed halfway through reading. Exactly one stage of an implement
+# run is allowed the editing tools, so every other stage's citations refer to a tree it did not move.
 STAGE_TOOLS = "Read,Grep,Glob,Bash"
+EDITING_TOOLS = STAGE_TOOLS + ",Edit,Write,MultiEdit"
 
 
 @dataclass
@@ -64,6 +66,11 @@ class Stage:
     produces: str
     consumes: tuple[str, ...] = ()
     verify: bool = True
+    writes: bool = False
+
+    @property
+    def tools(self) -> str:
+        return EDITING_TOOLS if self.writes else STAGE_TOOLS
 
 
 DEFAULT_STAGES = [
@@ -99,6 +106,48 @@ DEFAULT_STAGES = [
                 "claim your attack kills is deleted, and a claim you cannot test becomes an "
                 "UNKNOWN with the reason. Do not add new findings. Do not soften the surviving "
                 "ones -- restate them with their evidence intact."),
+    ),
+]
+
+
+# The implement flow. Same engine, three stances, and only the middle one may write. The split is
+# not tidiness: a session that reads, edits and then judges its own edit has no state left that it
+# did not produce, which is the exact condition the gate cannot check anything under.
+IMPLEMENT_STAGES = [
+    Stage(
+        name="plan",
+        produces="plan.md",
+        verify=False,     # nothing is claimed yet, and nothing has been run
+        stance=("Find the code the task names and stop. Report the file and line range you opened, "
+                "the behaviour as it stands, and the single smallest test that would fail because "
+                "of it -- where that test goes, what it asserts, and the exact command that would "
+                "run it. Write no code and change nothing. If the task's premise does not survive "
+                "reading the code, say so and stop; that is a complete and useful answer."),
+    ),
+    Stage(
+        name="implement",
+        produces="change.md",
+        consumes=("plan.md",),
+        verify=False,     # judged in the next stage, on a tree it can no longer touch
+        writes=True,
+        stance=("Do it, in this order, and report each step with what it printed. Write the test "
+                "from the plan and run it: it must fail, and the failure must be about the "
+                "behaviour, not an import or a typo. Then change the source until that same "
+                "command passes -- same command, not a narrower one. Then run the suite around it. "
+                "Change nothing the task did not ask for; a tidy-up in the same diff makes the "
+                "next stage unable to attribute either. If the test cannot be made to fail first, "
+                "stop and say why rather than writing a test that passes on both sides."),
+    ),
+    Stage(
+        name="verify",
+        produces="verdict.md",
+        consumes=("plan.md", "change.md"),
+        stance=("Prove the change is load-bearing by taking it away. Stash the source edit and "
+                "keep the test -- `git stash push -- <the source files, not the test>` -- run the "
+                "exact command from the previous stage and show it failing, then `git stash pop` "
+                "and run that same command again and show it passing. Then run the suite and cite "
+                "its counts. Report both runs as command evidence. If the test passes with the "
+                "change stashed, the change is not what made it pass, and that is the finding."),
     ),
 ]
 
@@ -158,10 +207,14 @@ def compose(head: Path, contract: cc_ledger.Contract, stage: Stage, task: str,
     parts += ["",
               # Twelve repro scripts turned up in the repository root after six runs. A stage is
               # meant to be read-only, and Bash is the hole in that: it is the tool the adversary
-              # stage exists for, so it cannot be taken away, only aimed somewhere harmless.
-              "Any scratch file you write -- a repro script, a probe, a scratch test -- goes in "
-              "%s and nowhere else. Do not create files in the repository you are reviewing."
-              % scratch,
+              # stage exists for, so it cannot be taken away, only aimed somewhere harmless. The one
+              # stage that may edit needs the opposite instruction, or it writes its fix to scratch.
+              ("Change the files the task requires and nothing else. Scratch work -- a probe, a "
+               "throwaway script -- still goes in %s, and no scratch file is part of your answer."
+               % scratch) if stage.writes else
+              ("Any scratch file you write -- a repro script, a probe, a scratch test -- goes in "
+               "%s and nowhere else. Do not create files in the repository you are reviewing."
+               % scratch),
               "", "Write your answer to the reply. It is checked, not read charitably."]
     return "\n".join(parts)
 
@@ -192,12 +245,13 @@ def settings_file(model: str, out_dir: Path) -> Path:
 
 
 def invoke(prompt: str, model: str, head: Path, session: str, cwd: Path, settings: Path,
-           resume: bool = False, yolo: bool = False, timeout: int = 3600) -> tuple[str, str]:
+           resume: bool = False, yolo: bool = False, timeout: int = 3600,
+           tools: str = STAGE_TOOLS) -> tuple[str, str]:
     """One `claude -p` turn. Returns (text, error)."""
     cmd = ["claude", "-p", prompt, "--model", model,
            "--append-system-prompt-file", str(head),
            "--settings", str(settings),
-           "--allowed-tools", STAGE_TOOLS,
+           "--allowed-tools", tools,
            "--output-format", "json"]
     cmd += ["--resume", session] if resume else ["--session-id", session]
     if yolo:
@@ -286,7 +340,8 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
     started = time.time()
     offset = log_offset()
     settings = settings_file(model, out_dir)
-    answer, error = invoke(prompt, model, head, session, cwd, settings, yolo=yolo)
+    answer, error = invoke(prompt, model, head, session, cwd, settings, yolo=yolo,
+                           tools=stage.tools)
     if error and not answer:
         result.error = error
         result.seconds = time.time() - started
@@ -299,7 +354,7 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
             # One refusal, same wording the Stop hook uses, so the two paths train the same habit.
             refusal = gate.refusal(gaps, out_dir / "claims.jsonl")
             second, error = invoke(refusal, model, head, session, cwd, settings,
-                                   resume=True, yolo=yolo)
+                                   resume=True, yolo=yolo, tools=stage.tools)
             result.rounds = 2
             if second:
                 answer = second
@@ -334,7 +389,8 @@ def main() -> int:
     ap.add_argument("task", help="the question the pipeline answers")
     ap.add_argument("--adapter", default="review", choices=sorted(cc_ledger.ADAPTERS))
     ap.add_argument("--model", default=os.environ.get("DEPTH_MODEL", "gemma4-31b-mtp-96k"))
-    ap.add_argument("--stages", default="survey,claims,adversary")
+    ap.add_argument("--stages", default="survey,claims,adversary",
+                    help="review flow: survey,claims,adversary; change flow: plan,implement,verify")
     ap.add_argument("--out", default="")
     ap.add_argument("--cwd", default=os.getcwd())
     ap.add_argument("--yolo", action="store_true",
@@ -343,11 +399,19 @@ def main() -> int:
                     help="compose the prompts and assert the head, call no model")
     args = ap.parse_args()
 
-    by_name = {s.name: s for s in DEFAULT_STAGES}
+    by_name = {s.name: s for s in DEFAULT_STAGES + IMPLEMENT_STAGES}
     try:
         stages = [by_name[n.strip()] for n in args.stages.split(",") if n.strip()]
     except KeyError as exc:
         print("unknown stage %s; known: %s" % (exc, ", ".join(by_name)), file=sys.stderr)
+        return 2
+
+    contract_check = cc_ledger.contract_for(args.adapter)
+    if contract_check.needs_red_green and not any(s.writes for s in stages):
+        # Cheap, because the alternative is finding out forty minutes later that every stage was
+        # read-only and the run could not have satisfied its own contract.
+        print("adapter %s must show a command failing and then passing, and no selected stage may "
+              "write. Add the implement stage." % args.adapter, file=sys.stderr)
         return 2
 
     # One runner, one variant, one stage at a time. A second driver would evict the first's model.

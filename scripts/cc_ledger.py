@@ -64,6 +64,10 @@ class Contract:
     claim_cap: int = 25
     # Some task types are only meaningful as a comparison: an ops claim needs a before and an after.
     min_measurements: int = 0
+    # Whether the session must show the same command failing and then passing. Only an adapter whose
+    # task is to change behaviour can ask for this, and for those it is the whole point: a claim that
+    # a change works is the one claim the code it changed cannot support.
+    needs_red_green: bool = False
     notes: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
@@ -116,6 +120,28 @@ ADAPTERS: dict[str, Contract] = {
         notes=("Cite real log lines, not recalled ones.",
                "A performance claim needs a before and an after.",
                "Do not cite decode speed for a cost that prefill dominates."),
+    ),
+    "implement": Contract(
+        adapter="implement",
+        summary="Claims that a change was made and that it works.",
+        # No file_quote. Every other adapter reasons about code someone else wrote, where a quote is
+        # a fact about the world; here the session wrote the lines it would be quoting, so a quote
+        # says only that it can read back its own diff. The evidence that a change works has to come
+        # from something that did not take instructions from the model: a command's exit status.
+        required_evidence=(COMMAND_RESULT,),
+        # Three, and they are named: the failing test, the same test passing, and the suite that
+        # says nothing else broke. Fewer cannot distinguish a fix from a deletion.
+        min_probes=3,
+        # The red/green pair is a falsification -- a stronger one than a sentence about a command,
+        # since the gate reads both outcomes out of the transcript itself.
+        high_severity_needs_falsification=False,
+        needs_red_green=True,
+        notes=("Run the test that fails before the change, and show what it printed.",
+               "Run the same command after, unchanged, and show it passing.",
+               "Run the suite around it and cite its counts; a fix that breaks nine others is not "
+               "a fix.",
+               "Quoting the code you just wrote proves that you wrote it and nothing else.",
+               "Whatever you did not run is UNKNOWN, which is a legal answer here too."),
     ),
     "bench-audit": Contract(
         adapter="bench-audit",

@@ -1047,6 +1047,54 @@ worth chasing next. No
 surviving fabrication in either, after the parser fix. Thin, true, and cheap enough to run nightly —
 which is a different thing from a good reviewer, and should not be described as one.
 
+### Asking it to change code, not just judge it, and the tautology that got through
+
+The review adapters all reason about code someone else wrote, where a quote is a fact about the
+world. Implementing is different: the session writes the lines it would be quoting, so `file_quote`
+certifies nothing and `absence` is whatever the diff left out. Only a command's exit status is still
+outside the model's control, which is what the `implement` adapter is built on -- `command_result`
+evidence, three probes, and one machine-checkable demand: **the same literal command must appear in
+the transcript failing, and later passing.** The stages split accordingly, and only the middle one
+holds `Edit`/`Write`; a session that reads, edits, then judges its own edit has no state left that it
+did not produce. The `verify` stage proves the change carries weight by taking it away
+(`git stash push -- <source>`, keep the test, run, restore, run), which manufactures a red/green pair
+in its own transcript rather than trusting the previous stage's.
+
+**First real run: 33 minutes, three stages, one honest defect and one that got through.** Target was
+the assay cash-collateral finding from §8. Plan 427 s (96.8 % reuse), implement 912 s (99.1 %),
+verify 647 s over two rounds (98.2 %), 15 probes. The plan stage was accurate: it found
+`cash_secured_put_capacity` at `trade_service.py:1013-1024`, all three call sites taking the on-disk
+default, and the sibling in `rebalance_routes` that passes holdings explicitly.
+
+The gate caught a fabricated command output -- claim 3 cited `"Exit code 1 ... FFF ... TypeError ..."`
+as what a run printed, and none of the eight recorded runs of that command printed it. It survived a
+refusal round, so it is in the artifact as a `fail`, correctly.
+
+What got through was worse and more interesting. The diff threads a `holdings=None` parameter into
+three functions and passes it to the capacity call -- and **no caller passes it**, so
+`_trade_preview` still gets the disk snapshot and production behaviour is byte-identical. The three
+new tests went red before the change with
+`TypeError: _put_cash_requirement() got an unexpected keyword argument 'holdings'` and green after,
+which is a perfect red/green pair asserting only that the diff has the shape the diff has. Two of the
+three wrapped the call in `try/except Exception: pass` and asserted `mock_cap.assert_called_with(...)`;
+only one compared a value. The model itself flagged the hole as its single UNKNOWN -- whether the top
+callers have fresh holdings to pass down -- which is the ledger working as designed while the
+red/green check waved the change through.
+
+So the rule now reads the *reason* for the red, not just its exit status: a failing run whose output
+says a name or a signature was missing, and says nothing about a wrong value, is not a red. Replayed
+against the real transcript, the updated gate refuses the same answer. Uncertainty resolves the other
+way -- an unreadable failure counts as behavioural -- because the check that cannot read the failure
+should not be the one refusing the answer.
+
+**What this says about the harness for implementation work.** It is honest about arithmetic and blind
+to meaning, exactly as before. It can prove a command failed and later passed; it cannot ask whether
+the test was worth passing, and the cheapest tautology available to a model asked for red/green is a
+test of its own signature. Each such hole is closable once it is seen, and none of them are visible
+from reading the code. The loop that matters is the one that ran here: point it at real work, read
+what it accepted, and turn the specific way it was fooled into arithmetic.
+
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
