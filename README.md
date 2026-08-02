@@ -187,6 +187,28 @@ An answer is refused unless its claims carry evidence that survives being looked
 Delegates are gated too: `SubagentStop` judges each one on its own answer, and its verdict lands in
 `artifacts/depth/<session>/<agent_id>/gate.json` beside the parent's.
 
+### Reviewing a repository unattended
+
+`scripts/run_reviews.sh [self|assay|both]` drives the pipeline over a repository and writes
+everything into `artifacts/reviews/<stamp>/`: the prompt each stage sent, the artifact it produced,
+and the gate's verdict on it. Three stages cost **24 to 34 minutes** on the resident 31B, of which
+the claims stage is two-thirds, and the claims stage is refused once almost every run.
+
+Two rules that came out of using it, both the hard way:
+
+- **A scripted stage supplies its own settings.** `~/.claude/settings.json` can carry
+  `enforceAvailableModels` with a list a locally built model is not on. The client then does not
+  complain: it asks the cloud for `claude-opus-4-8`, gets a 404, and exits 1 with an empty stderr.
+- **Scope a repository larger than the window to one subsystem.** Unscoped, the survey read to
+  137k tokens against a 98k window; capped at 500 lines per read, the claims stage cited line 2619
+  of a file it had seen to line 500 and invented the code there. A review of everything is a review
+  of nothing.
+
+What it is worth, from four runs: on this repository three real defects in the gate itself — the
+worst being that `FALSIFICATION:` was checked for existence and never for truth — and on a
+mid-sized trading app, one accurate finding and two honest UNKNOWNs. No surviving fabrication in
+either. Thin, true, and cheap enough to run nightly.
+
 ### Reaching a non-Ollama backend
 
 `scripts/anthropic_proxy.py` speaks Anthropic Messages in front and OpenAI chat completions behind,
