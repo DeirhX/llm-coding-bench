@@ -133,6 +133,35 @@ def main() -> int:
     return 0
 
 
+
+def test_a_citation_in_backticks_is_still_a_citation() -> None:
+    """A whole review came back empty over this. The model writes paths as code, as anyone would."""
+    claims, _ = vf.parse_ledger("CLAIM: x\nEVIDENCE: `a/b.py:10-12`\nQUOTE:\n    pass\n")
+    ev = claims[0]["evidence"]
+    assert [e["kind"] for e in ev] == ["file_quote"], ev
+    assert (ev[0]["path"], ev[0]["start"], ev[0]["end"]) == ("a/b.py", 10, 12), ev
+
+
+def test_two_citations_on_one_line_are_both_kept() -> None:
+    claims, _ = vf.parse_ledger(
+        "CLAIM: x\nEVIDENCE: `a/b.py:10-12` and `a/b.py:40-41`\nQUOTE:\n    pass\n")
+    ev = claims[0]["evidence"]
+    assert [(e["start"], e["end"]) for e in ev] == [(10, 12), (40, 41)], ev
+    assert ev[-1].get("quote") == "    pass", "the quote belongs to the citation it sits under"
+
+
+def test_a_command_is_not_split_on_its_punctuation() -> None:
+    claims, _ = vf.parse_ledger(
+        "CLAIM: x\nEVIDENCE: command: rg -n 'a:1-2' src && echo done -> done\n")
+    ev = claims[0]["evidence"]
+    assert [e["kind"] for e in ev] == ["command_result"], ev
+    assert ev[0]["command"] == "rg -n 'a:1-2' src && echo done", ev
+
+
+def test_an_absence_pattern_shaped_like_a_citation_stays_an_absence() -> None:
+    claims, _ = vf.parse_ledger("CLAIM: x\nEVIDENCE: absence: foo:1-2 in *.py\n")
+    assert [e["kind"] for e in claims[0]["evidence"]] == ["absence"], claims[0]["evidence"]
+
 if __name__ == "__main__":
     sys.exit(main())
 

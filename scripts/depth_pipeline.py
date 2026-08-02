@@ -72,9 +72,11 @@ DEFAULT_STAGES = [
         produces="survey.md",
         verify=False,     # an inventory makes no claims, so there is nothing to verify yet
         stance=("Map the territory and stop. List the files, entry points and data that bear on "
-                "the question, each with the line range you actually opened. Draw no conclusions "
-                "and name no defects -- a later stage does that, and anything you assert here it "
-                "will have to re-derive. If something looks wrong, note the location only."),
+                "the question, each with the line range you actually opened. A file here can be "
+                "longer than one read allows, so say which part of it you saw and let the next "
+                "stage search for the rest. Draw no conclusions and name no defects -- a later "
+                "stage does that, and anything you assert here it will have to re-derive. If "
+                "something looks wrong, note the location only."),
     ),
     Stage(
         name="claims",
@@ -82,8 +84,11 @@ DEFAULT_STAGES = [
         consumes=("survey.md",),
         stance=("Now make the claims the survey supports, and only those. Open every file you "
                 "cite, in this stage, before quoting it -- the survey is a map, not a substitute "
-                "for reading. Each claim gets its own block. If the survey pointed somewhere you "
-                "could not resolve, that is an UNKNOWN, not a guess."),
+                "for reading, and it saw at most the first part of a long file. To cite a line "
+                "beyond that, find it with a search and read around the hit; a line number you "
+                "have not seen is a guess even when the claim is right. Each claim gets its own "
+                "block. If the survey pointed somewhere you could not resolve, that is an "
+                "UNKNOWN, not a guess."),
     ),
     Stage(
         name="adversary",

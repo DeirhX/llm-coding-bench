@@ -25,9 +25,19 @@ review() {
 
 SELF_TASK='In-depth architecture and code review of the depth-enforcement machinery in this repository: scripts/cc_ledger.py, scripts/cc-depth-gate.py, scripts/cc_verify.py, scripts/cc_evidence.py, scripts/depth_pipeline.py, scripts/anthropic_proxy.py and bench_lib/. Find the defects that matter: code that does not do what its docstring claims, failure modes that pass silently instead of erroring, evidence checks an answer can satisfy while still being wrong, and structural choices that will break when a second adapter or a second backend is added. For each defect, name the change you would make.'
 
-ASSAY_TASK='In-depth architecture and code review of this repository. Start from ARCHITECTURE.md and ORIENTATION.md to learn what the system is meant to be, then read the code under web/ and tools/ and judge whether it matches. Find the defects that matter: logic that is wrong rather than merely ugly, failure modes that pass silently, state that can go inconsistent, boundaries the code crosses that the architecture says it should not, and duplication that will drift. For each defect, name the change you would make.'
+# Scoped to one subsystem on purpose. This repository is larger than the context window, and the
+# first attempt proved what that costs: the survey read the first 500 lines of each long file, and
+# the claims stage then cited line 2619 of a file it had seen to line 500 -- inventing the code
+# there. A review of everything is a review of nothing; the trade path is where a defect is
+# expensive.
+ASSAY_TASK='In-depth architecture and code review of the trade execution path of this repository: tools/trade_service.py, tools/ibkr_trade.py, tools/rebalance.py and the web/src/trade.ts surface that drives them. Read ARCHITECTURE.md first for the invariants the code is meant to hold. These files are long; find what you need with rg and read around the hit rather than reading from the top. Find the defects that matter: logic that is wrong rather than merely ugly, an order or a fill that can be lost or double-counted, state that can go inconsistent between preview and placement, failure modes that pass silently, and invariants ARCHITECTURE.md states that the code does not keep. For each defect, name the change you would make.'
 
-review self  "$REPO"            "$SELF_TASK"
-review assay /tmp/assay-review  "$ASSAY_TASK"
+case "${1:-both}" in
+  self)  review self  "$REPO"           "$SELF_TASK" ;;
+  assay) review assay /tmp/assay-review "$ASSAY_TASK" ;;
+  both)  review self  "$REPO"           "$SELF_TASK"
+         review assay /tmp/assay-review "$ASSAY_TASK" ;;
+  *)     echo "usage: $0 [self|assay|both]" >&2; exit 2 ;;
+esac
 
 echo "=== done at $(date +%T); artifacts in $OUT_ROOT ===" | tee -a "$OUT_ROOT/run.log"

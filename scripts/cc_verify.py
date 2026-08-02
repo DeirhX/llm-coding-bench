@@ -208,13 +208,38 @@ HEADERS = ("CLAIM:", "EVIDENCE:", "QUOTE:", "UNKNOWN:", "SEVERITY:", "FALSIFICAT
 # ops-perf a `log_match`, and a model writing blocks had nowhere to put either. The gate would then
 # have demanded, every time, something the answer format could not express.
 FILE_EV = re.compile(r"^(?P<path>\S+?):(?P<start>\d+)-(?P<end>\d+)$")
+# The same citation with the decoration a model puts on a path, and anywhere in the line rather
+# than alone on it. One whole review came back empty because every EVIDENCE line read
+# `tools/trade_service.py:1925-1926` in backticks and the anchored form matched none of them --
+# a refusal for punctuation, indistinguishable to the reader from a refusal for fabrication.
+FILE_EV_ANY = re.compile(r"(?P<path>[^\s`*'\"]+?):(?P<start>\d+)-(?P<end>\d+)")
+DECORATION = re.compile(r"[`*]+")
 COMMAND_EV = re.compile(r"^command:\s*(?P<command>.+?)(?:\s*->\s*(?P<expect>.+?))?$", re.I)
 ABSENCE_EV = re.compile(r"^absence:\s*(?P<pattern>.+?)(?:\s+in\s+(?P<globs>\S+))?$", re.I)
 LOG_EV = re.compile(r"^log:\s*(?P<path>\S+)\s*~\s*(?P<pattern>.+)$", re.I)
 
 
+def _classify_all(body: str) -> list[dict]:
+    """Every piece of evidence on one EVIDENCE line, decoration and all.
+
+    A line can carry more than one citation -- "a.py:1-2 and a.py:40-41" is how the model writes a
+    claim that rests on two places -- and taking only the first threw away half the evidence for it.
+    Only file citations are split this way: a command or a glob may legitimately contain the words
+    and punctuation this would split on.
+    """
+    single = _classify(body)
+    if single is not None and single["kind"] != "file_quote":
+        return [single]
+    found = [{"kind": "file_quote", "path": m.group("path"),
+              "start": int(m.group("start")), "end": int(m.group("end"))}
+             for m in FILE_EV_ANY.finditer(DECORATION.sub("", body))]
+    if found:
+        return found
+    return [single] if single else []
+
+
 def _classify(body: str) -> dict | None:
-    m = FILE_EV.match(body)
+    m = FILE_EV.match(DECORATION.sub("", body))
     if m:
         return {"kind": "file_quote", "path": m.group("path"),
                 "start": int(m.group("start")), "end": int(m.group("end"))}
@@ -264,10 +289,14 @@ def parse_ledger(text: str) -> tuple[list[dict], list[str]]:
         elif current is None:
             continue
         elif header == "EVIDENCE:":
-            evidence = _classify(line[len("EVIDENCE:"):].strip())
-            if evidence is None:
-                evidence = {"kind": None, "raw": line[len("EVIDENCE:"):].strip()}
-            current["evidence"].append(evidence)
+            body = line[len("EVIDENCE:"):].strip()
+            found = _classify_all(body)
+            if not found:
+                found = [{"kind": None, "raw": body}]
+            current["evidence"].extend(found)
+            # A QUOTE that follows attaches to the last citation named, which is the one it is
+            # under. The earlier ones are still checked, on their line numbers alone.
+            evidence = found[-1]
         elif header == "QUOTE:":
             quote = []
             rest = line[len("QUOTE:"):].strip()
