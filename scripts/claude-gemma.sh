@@ -186,6 +186,7 @@ USAGE
 # Write and Edit available so findings can be recorded before stopping. Verified against a fake
 # endpoint: a deny is honoured under --dangerously-skip-permissions and its text reaches the model
 # as the tool result. Lift it for a session with `touch /tmp/cc-guard-off`, or launch --no-guard.
+PRE_TOOL=()
 GUARD=1
 DEPTH=0
 DEPTH_ADAPTER="review"
@@ -642,7 +643,7 @@ if (( GUARD )); then
   fi
   GUARD_CMD="$GUARD_SCRIPT --window $CTX_TOKENS --framing $CTX_RESERVE"
   GUARD_CMD="$GUARD_CMD --stop-pct ${CLAUDE_GEMMA_STOP_PCT:-80}"
-  HOOK_EVENTS+=("\"PreToolUse\": [ { \"matcher\": \"Read|Bash|WebFetch|WebSearch\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$GUARD_CMD\" } ] } ]")
+  PRE_TOOL+=("{ \"matcher\": \"Read|Bash|WebFetch|WebSearch\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$GUARD_CMD\" } ] }")
 fi
 
 # The depth gate and the contract that makes it fair. Registering the gate without the contract
@@ -674,8 +675,14 @@ if (( FLOWS )); then
     echo "error: flow guard missing or not executable: $FLOW_GUARD" >&2
     exit 1
   fi
-  HOOK_EVENTS+=("\"PreToolUse\": [ { \"matcher\": \"Task|Agent\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] } ]")
+  # No matcher: while a flow is running, a tool call that does a stage's work outside a stage is
+  # refused, and that is not a question about which tool it was.
+  PRE_TOOL+=("{ \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] }")
 fi
+
+# One PreToolUse key holding every matcher. Two keys of the same name in the same object is not two
+# hooks, it is the second one silently replacing the first.
+(( ${#PRE_TOOL} )) && HOOK_EVENTS+=("\"PreToolUse\": [ ${(j:, :)PRE_TOOL} ]")
 
 GUARD_JSON=""
 (( ${#HOOK_EVENTS} )) && GUARD_JSON="  \"hooks\": { ${(j:, :)HOOK_EVENTS} },"

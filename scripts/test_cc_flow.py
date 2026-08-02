@@ -184,3 +184,71 @@ def test_the_slash_form_starts_one_too() -> None:
     with tempfile.TemporaryDirectory() as root:
         _prompt("/implement fix the stale holdings read", root)
         assert cc_flowstate.load("s1", root)["flow"] == "implement"
+
+
+def test_the_orchestrator_may_not_do_the_stage_s_work() -> None:
+    """Told to run its stages as subagents, the first real session read the file itself and
+    answered from that -- politely, plausibly, with none of the three stances applied."""
+    with tempfile.TemporaryDirectory() as root:
+        cc_flowstate.begin("review", "t", "s1", root)
+        decision, why, _ = run("", root, tool="Read")
+    assert decision == "deny", why
+    assert "STAGE: survey" in why, why
+
+
+def test_a_stage_in_flight_may_read_whatever_it_likes() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.save(state, "s1", root)
+        decision, _, _ = run("", root, tool="Read")
+    assert decision == "allow"
+
+
+def test_bookkeeping_is_not_the_work() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        cc_flowstate.begin("review", "t", "s1", root)
+        assert run("", root, tool="TodoWrite")[0] == "allow"
+        assert run("", root, tool="TaskUpdate")[0] == "allow"
+
+
+def test_when_the_flow_is_done_the_session_may_write_its_summary() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        for name in ("survey", "claims", "adversary"):
+            cc_flowstate.record_launch(state, name)
+            cc_flowstate.record_verdict(state, name, [])
+        cc_flowstate.save(state, "s1", root)
+        assert run("", root, tool="Read")[0] == "allow"
+
+
+GATE = HERE / "cc-depth-gate.py"
+
+
+def _subagent_stop(answer: str, root: str, session: str = "s1") -> str:
+    payload = {"hook_event_name": "SubagentStop", "session_id": session, "cwd": root,
+               "agent_id": "a1", "last_assistant_message": answer,
+               "agent_transcript_path": ""}
+    proc = subprocess.run([sys.executable, str(GATE)], input=json.dumps(payload),
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    if not proc.stdout.strip():
+        return "allow"
+    return json.loads(proc.stdout).get("decision", "allow")
+
+
+def test_a_survey_is_not_refused_for_making_no_claims() -> None:
+    """It is an inventory, and making none is what it was told to do.
+
+    Measured on the first flow that ran: refused at 59 seconds, for obeying its stance.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.save(state, "s1", root)
+        decision = _subagent_stop("The guard lives in scripts/cc-context-guard.py:1-200. "
+                                  "The sleep rule is at line 210.", root)
+        after = cc_flowstate.load("s1", root)
+    assert decision == "allow", decision
+    assert cc_flowstate.done(after) == ["survey"], after
+    assert after["stages"][0]["summary"], "the next stage gets nothing"

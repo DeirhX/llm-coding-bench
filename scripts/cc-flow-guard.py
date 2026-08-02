@@ -68,20 +68,49 @@ def compose(stage, flow: str, task: str, prior: list[str]) -> str:
     return "\n".join(parts)
 
 
+# What the session may do while it is orchestrating rather than working. Bookkeeping and talking to
+# the user are not the work; reading the code is.
+CLERICAL = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput",
+            "TaskStop", "AskUserQuestion", "ExitPlanMode", "SlashCommand"}
+
+
+def _orchestrator_only(state: dict, tool: str) -> None:
+    """While a flow is running with no stage in flight, the session is an orchestrator.
+
+    Told to run its stages as subagents, the first real session read the file itself and answered
+    from that -- politely, plausibly, and with none of the three stances applied. Instruction was
+    not enough, which is the same lesson as every other rule here, so the tool call that does the
+    work is refused until the stage that should be doing it has been launched.
+    """
+    if tool in CLERICAL:
+        allow()
+    if cc_flowstate.running(state):
+        allow()             # a stage is in flight, and this is that stage working
+    nxt = cc_flowstate.next_stage(state)
+    if nxt is None:
+        allow()             # flow complete: the session is writing its summary
+    deny("You are running a %s flow, and %s has not run yet. Do not do its work here: launch a "
+         "subagent whose prompt begins with `STAGE: %s` and wait for it to report. Its stance is "
+         "supplied for you. Reading and running here would answer the question without any of the "
+         "stances the flow exists to apply, and the answer would not be gated."
+         % (state["flow"], nxt, nxt))
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         allow()
 
-    if (payload.get("tool_name") or "") not in ("Task", "Agent"):
-        allow()
-
+    tool = payload.get("tool_name") or ""
     root = payload.get("cwd") or os.getcwd()
     session = cc_flowstate.session_of(payload)
     state = cc_flowstate.load(session, root)
     if not state.get("flow"):
         allow()             # no flow running: ordinary delegation is none of our business
+
+    if tool not in ("Task", "Agent"):
+        return _orchestrator_only(state, tool)
 
     tool_input = payload.get("tool_input") or {}
     prompt = str(tool_input.get("prompt") or "")

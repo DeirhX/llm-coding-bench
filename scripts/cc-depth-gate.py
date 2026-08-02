@@ -561,9 +561,24 @@ def main() -> int:
     # contract is how a plan that committed to nothing came to be accepted and then built upon.
     state = cc_flowstate.load(session, root)
     stage = _stage_of(state, agent, payload)
+    # The client hands over the answer it is about to accept, which removes the race with the
+    # transcript write entirely. The settled read stays as the fallback for clients that do not.
+    text = payload.get("last_assistant_message") or (_settled_text(transcript) if transcript else "")
 
     contract = None
     if stage:
+        # Some stages are not judged at all. A survey is an inventory, and holding an inventory to
+        # a contract that wants claims refuses it for having made none -- which is the one thing it
+        # was told to do. Measured on the first flow that ran: refused at 59 seconds, for obeying.
+        running = cc_flow.stage_in(state.get("flow", ""), stage)
+        if running is not None and not running.verify:
+            cc_flowstate.record_verdict(state, stage, [], agent)
+            for entry in reversed(state.get("stages", [])):
+                if entry.get("stage") == stage and not entry.get("summary"):
+                    entry["summary"] = _digest(text, limit=2000) or text[-1500:]
+                    break
+            cc_flowstate.save(state, session, root)
+            return allow()
         contract = cc_ledger.contract_for(cc_flow.adapter_for(state.get("flow", ""), stage))
     if contract is None:
         contract = cc_ledger.load_contract(session, root)
@@ -574,9 +589,6 @@ def main() -> int:
         contract = cc_ledger.contract_for(adapter)
 
     calls = cc_evidence.collect(transcript) if transcript else []
-    # The client hands over the answer it is about to accept, which removes the race with the
-    # transcript write entirely. The settled read stays as the fallback for clients that do not.
-    text = payload.get("last_assistant_message") or (_settled_text(transcript) if transcript else "")
 
     out_key = "%s/%s" % (session, agent) if agent else session
     claims_path = cc_ledger.run_dir(out_key, root) / "claims.jsonl"
