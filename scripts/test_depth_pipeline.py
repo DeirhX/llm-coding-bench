@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import json
 import sys
+import os
 import tempfile
 from pathlib import Path
 
@@ -319,3 +320,11 @@ def test_a_judging_stage_that_edits_the_tree_is_caught_however_it_did_it() -> No
     finally:
         dp.invoke = original
     assert any("changed the working tree" in g for g in result.gaps), result.gaps
+
+def test_a_lock_whose_holder_is_gone_is_not_a_lock() -> None:
+    """A run killed mid-stage leaves the lock behind, and the next one asks a human whether a
+    pid from an hour ago still means anything. The pid answers that.
+    """
+    assert dp.holder_alive("2026-08-02 16:40:11 pid %d model m" % os.getpid())
+    assert not dp.holder_alive("2026-08-02 16:40:11 pid 999999 model m")
+    assert dp.holder_alive("something with no pid in it")

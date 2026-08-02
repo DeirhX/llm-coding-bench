@@ -508,6 +508,21 @@ def run_flow(stages, contract: cc_ledger.Contract, task: str, model: str, head: 
     return results
 
 
+def holder_alive(note: str) -> bool:
+    """Whether the process named in a lock file still exists. Unreadable notes are held to be live,
+    since refusing to start is the cheaper mistake."""
+    found = re.search(r"pid (\d+)", note or "")
+    if not found:
+        return True
+    try:
+        os.kill(int(found.group(1)), 0)
+    except ProcessLookupError:
+        return False
+    except (OSError, ValueError):
+        return True
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("task", help="the question the pipeline answers")
@@ -540,9 +555,15 @@ def main() -> int:
 
     # One runner, one variant, one stage at a time. A second driver would evict the first's model.
     if LOCK.exists() and not args.dry_run:
-        print("another pipeline holds %s (started %s). Wait, or remove it if it is stale."
-              % (LOCK, LOCK.read_text().strip()[:60]), file=sys.stderr)
-        return 1
+        held = LOCK.read_text().strip()
+        if holder_alive(held):
+            print("another pipeline holds %s (started %s). Wait, or remove it if it is stale."
+                  % (LOCK, held[:60]), file=sys.stderr)
+            return 1
+        # A run killed mid-stage leaves the lock behind, and the next one then asks a human to
+        # decide whether a pid from an hour ago is still meaningful. The pid answers that.
+        print("clearing a lock whose holder is gone (%s)" % held[:60], file=sys.stderr)
+        LOCK.unlink(missing_ok=True)
 
     out_dir = Path(args.out or (Path(args.cwd) / "artifacts/pipeline"
                                 / time.strftime("%Y%m%d-%H%M%S")))
