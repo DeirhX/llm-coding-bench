@@ -76,6 +76,12 @@ OPTIONS = {
     "num_ctx": int(os.environ.get("BENCH_NUM_CTX", "65536")),
     "num_predict": default_num_predict(8192, think_base=24576),
 }
+from bench_lib.system_prompt import initial_messages, local_system_prompt
+
+# No default: every score on record for this bench was measured with no system message,
+# so one appears only when BENCH_SYSTEM_PROMPT_FILE explicitly names it.
+LOCAL_SYSTEM_PROMPT = local_system_prompt()
+
 MAX_ROUNDS = int(os.environ.get("BENCH_MAX_ROUNDS", "40"))
 MAX_TOOL_CALLS = int(os.environ.get("BENCH_MAX_TOOL_CALLS", "40"))
 HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
@@ -313,7 +319,7 @@ def run_selftest() -> int:
 
 def run_model_ollama() -> dict[str, Any]:
     session = ToolSession(max_calls=MAX_TOOL_CALLS)
-    messages = [{"role": "user", "content": PROMPT}]
+    messages = initial_messages(PROMPT, LOCAL_SYSTEM_PROMPT)
     transcript = RoundTranscript(OUT_DIR, TAG, "claim")
     totals = {"wall_s": 0.0, "prompt_tokens": 0, "eval_tokens": 0, "rounds": 0, "done_reason": None}
     final = None

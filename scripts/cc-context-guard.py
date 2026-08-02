@@ -177,6 +177,10 @@ def main():
     ap.add_argument("--framing", type=int, default=4477, help="per-turn overhead the transcript omits")
     ap.add_argument("--stop-pct", type=float, default=80.0)
     ap.add_argument("--max-lines", type=int, default=DEFAULT_MAX_LINES)
+    # An interactive session can write its findings down and be resumed. A pipeline stage has
+    # read-only tools and one reply, so telling it to write NOTES.md names a tool it does not have,
+    # and a model that cannot obey an instruction tends to ignore the sentence around it too.
+    ap.add_argument("--stop-advice", choices=("notes", "answer"), default="notes")
     args = ap.parse_args()
 
     if OFF_SWITCH.exists():
@@ -197,12 +201,18 @@ def main():
 
     finishing = tool == "Bash" and FINISHING.match(tool_input.get("command") or "")
     if pct >= args.stop_pct and tool in BULKY and not finishing:
+        if args.stop_advice == "answer":
+            advice = ("Do not gather anything further. Answer now with what you have established, "
+                      "and put everything you did not get to under UNKNOWN. An answer that stops "
+                      "early and says so is complete; one that runs the window out is not.")
+        else:
+            advice = ("Do not gather anything further. Write what you have established, and what "
+                      "remains to be done, to NOTES.md with Write or Edit, then stop and say the "
+                      "task needs a fresh session. git add, git commit and git status remain "
+                      "available so you can land what is done.")
         deny(
             f"Context guard: the conversation is at {used:,} tokens, {pct:.0f}% of the "
-            f"{args.window:,}-token window, and nothing here compacts by itself. Do not gather "
-            f"anything further. Write what you have established, and what remains to be done, to "
-            f"NOTES.md with Write or Edit, then stop and say the task needs a fresh session. "
-            f"git add, git commit and git status remain available so you can land what is done. "
+            f"{args.window:,}-token window, and nothing here compacts by itself. {advice} "
             f"Overrunning the window costs minutes per turn, not seconds. "
             f"(To lift this: touch {OFF_SWITCH})"
         )

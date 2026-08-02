@@ -83,41 +83,18 @@ OPTIONS = {
     "num_predict": default_num_predict(8192, think_base=24576),
 }
 
+from bench_lib.system_prompt import initial_messages, local_system_prompt
+
 MAX_ROUNDS = int(os.environ.get("BENCH_MAX_ROUNDS", "40"))
 MAX_TOOL_CALLS = int(os.environ.get("BENCH_MAX_TOOL_CALLS", "40"))
 FINALIZE_AFTER = int(os.environ.get("BENCH_FINALIZE_AFTER", "0"))
 
 
-def _load_local_system_prompt() -> str | None:
-    """System message for Ollama/OpenAI-local runs only (not Cursor).
-
-    Disable with ``BENCH_SYSTEM_PROMPT=0``. Override path via
-    ``BENCH_SYSTEM_PROMPT_FILE``.
-    """
-    raw = os.environ.get("BENCH_SYSTEM_PROMPT", "1").strip().lower()
-    if raw in ("0", "false", "off", "no", ""):
-        return None
-    path = Path(
-        os.environ.get(
-            "BENCH_SYSTEM_PROMPT_FILE",
-            str(_ROOT / "system_local.md"),
-        )
-    )
-    if not path.is_file():
-        return None
-    text = path.read_text(encoding="utf-8").strip()
-    return text or None
-
-
-LOCAL_SYSTEM_PROMPT = _load_local_system_prompt()
+LOCAL_SYSTEM_PROMPT = local_system_prompt(_ROOT / "system_local.md")
 
 
 def _initial_messages(user_prompt: str) -> list[dict[str, str]]:
-    msgs: list[dict[str, str]] = []
-    if LOCAL_SYSTEM_PROMPT:
-        msgs.append({"role": "system", "content": LOCAL_SYSTEM_PROMPT})
-    msgs.append({"role": "user", "content": user_prompt})
-    return msgs
+    return initial_messages(user_prompt, LOCAL_SYSTEM_PROMPT)
 
 
 def chat(

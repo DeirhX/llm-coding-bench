@@ -133,6 +133,8 @@ def main():
         ("pytest at 82%", "Bash", {"command": "python -m pytest -q"}, full, (), "deny"),
         ("bulk call under a raised threshold", "Read", {"file_path": str(small)}, full,
          ("--stop-pct", "95"), "allow"),
+        ("a read-only stage is told to answer, not to write notes", "Read", {"file_path": str(small)},
+         full, ("--stop-advice", "answer"), "deny"),
         # failing open
         ("missing transcript", "Read", {"file_path": str(small)},
          TMP / "nonexistent.jsonl", (), "allow"),
@@ -150,6 +152,14 @@ def main():
         elif not ok and reason:
             print(f"          {' '.join(reason.split())[:104]}")
 
+    # The advice a refusal carries has to name a tool the stage actually has, so check the wording
+    # and not merely the verdict: a pipeline stage has no Write.
+    _, said = run("Read", {"file_path": str(small)}, full, ("--stop-advice", "answer"))
+    ok = "Answer now" in said and "NOTES.md" not in said
+    failures_in_wording = 0 if ok else 1
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'and its wording names no missing tool':<42} "
+          f"expected answer-advice got {'it' if ok else said[:80]}")
+
     OFF.touch()
     got, _ = run("Read", {"file_path": str(big)}, empty)
     ok = got == "allow"
@@ -157,8 +167,9 @@ def main():
     print(f"  {'ok  ' if ok else 'FAIL'}  {'off-switch present':<42} expected allow got {got}")
     OFF.unlink(missing_ok=True)
 
+    failures += failures_in_wording
     print(f"\n{'SELFTEST OK' if not failures else f'{failures} FAILURES'} "
-          f"({len(cases) + 1} cases)")
+          f"({len(cases) + 2} cases)")
     return 1 if failures else 0
 
 

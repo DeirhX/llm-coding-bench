@@ -1,0 +1,114 @@
+[
+ {
+  "arm": "baseline",
+  "wall_s": 16.0,
+  "prompt_tokens": 1832,
+  "predicted_tokens": 1400,
+  "prefill_tok_s": 2646.0,
+  "decode_tok_s": 91.52,
+  "draft_accepted": null,
+  "draft_total": null,
+  "chars_out": 4943
+ },
+ {
+  "arm": "combo_both",
+  "task": "prose",
+  "wall_s": 7.17,
+  "predicted_tokens": 800,
+  "decode_tok_s": 113.34
+ },
+ {
+  "arm": "combo_both",
+  "wall_s": 4.01,
+  "prompt_tokens": 1832,
+  "predicted_tokens": 1400,
+  "prefill_tok_s": 2531.2,
+  "decode_tok_s": 426.7,
+  "draft_accepted": null,
+  "draft_total": null,
+  "chars_out": 4943
+ },
+ {
+  "arm": "mod_both",
+  "task": "prose",
+  "wall_s": 8.75,
+  "predicted_tokens": 800,
+  "decode_tok_s": 92.54
+ },
+ {
+  "arm": "mod_both",
+  "wall_s": 4.63,
+  "prompt_tokens": 1832,
+  "predicted_tokens": 1400,
+  "prefill_tok_s": 2656.3,
+  "decode_tok_s": 356.12,
+  "draft_accepted": null,
+  "draft_total": null,
+  "chars_out": 4943
+ },
+ {
+  "arm": "mtp_both",
+  "task": "prose",
+  "wall_s": 7.24,
+  "predicted_tokens": 800,
+  "decode_tok_s": 112.21
+ },
+ {
+  "arm": "mtp_both",
+  "wall_s": 9.86,
+  "prompt_tokens": 1832,
+  "predicted_tokens": 1400,
+  "prefill_tok_s": 2538.3,
+  "decode_tok_s": 153.35,
+  "draft_accepted": null,
+  "draft_total": null,
+  "chars_out": 4943
+ },
+ {
+  "arm": "ngram_map_k",
+  "task": "prose",
+  "wall_s": 8.82,
+  "predicted_tokens": 800,
+  "decode_tok_s": 91.9
+ },
+ {
+  "arm": "ngram_map_k",
+  "wall_s": 5.26,
+  "prompt_tokens": 1832,
+  "predicted_tokens": 1400,
+  "prefill_tok_s": 2653.1,
+  "decode_tok_s": 307.04,
+  "draft_accepted": null,
+  "draft_total": null,
+  "chars_out": 4943
+ },
+ {
+  "arm": "ngram_mod",
+  "wall_s": 4.63,
+  "prompt_tokens": 1832,
+  "predicted_tokens": 1400,
+  "prefill_tok_s": 2636.9,
+  "decode_tok_s": 356.17,
+  "draft_accepted": null,
+  "draft_total": null,
+  "chars_out": 4943
+ },
+ {
+  "arm": "none_both",
+  "task": "prose",
+  "wall_s": 8.81,
+  "predicted_tokens": 800,
+  "decode_tok_s": 91.86
+ },
+ {
+  "arm": "none_both",
+  "wall_s": 16.06,
+  "prompt_tokens": 1832,
+  "predicted_tokens": 1400,
+  "prefill_tok_s": 2650.1,
+  "decode_tok_s": 91.18,
+  "draft_accepted": null,
+  "draft_total": null,
+  "chars_out": 4943
+ }
+]

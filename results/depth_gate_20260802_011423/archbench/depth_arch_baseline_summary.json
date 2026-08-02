@@ -1,0 +1,9 @@
+{
+  "model": "gemma4-31b-mtp-96k:latest",
+  "tag": "depth_arch_baseline",
+  "score": 83,
+  "max_score": 90,
+  "pass": 8,
+  "tasks": 9,
+  "path": "/Users/deirh/Projects/llm-coding-bench/results/depth_gate_20260802_011423/archbench/depth_arch_baseline_arch_20260802_011423.json"
+}

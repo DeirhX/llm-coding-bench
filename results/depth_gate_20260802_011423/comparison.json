@@ -1,0 +1,244 @@
+{
+  "arch/baseline": {
+    "score": 83,
+    "max": 90,
+    "tasks": 9,
+    "per_task": [
+      [
+        "chain_delete_order",
+        10,
+        10
+      ],
+      [
+        "chain_payment_webhook",
+        6,
+        10
+      ],
+      [
+        "tenant_invoice_isolation",
+        9,
+        10
+      ],
+      [
+        "invariant_doc_vs_code",
+        8,
+        10
+      ],
+      [
+        "review_list_orders_n1",
+        10,
+        10
+      ],
+      [
+        "review_cache_on_paid",
+        10,
+        10
+      ],
+      [
+        "incident_duplicate_order_paid",
+        10,
+        10
+      ],
+      [
+        "incident_outbox_ack_order",
+        10,
+        10
+      ],
+      [
+        "redesign_webhook_idempotency",
+        10,
+        10
+      ]
+    ],
+    "wall_min": 2.0,
+    "claims": 0,
+    "verified": 0,
+    "unverified": 0,
+    "unresolvable": 0
+  },
+  "arch/contract": {
+    "score": 85,
+    "max": 90,
+    "tasks": 9,
+    "per_task": [
+      [
+        "chain_delete_order",
+        10,
+        10
+      ],
+      [
+        "chain_payment_webhook",
+        10,
+        10
+      ],
+      [
+        "tenant_invoice_isolation",
+        9,
+        10
+      ],
+      [
+        "invariant_doc_vs_code",
+        6,
+        10
+      ],
+      [
+        "review_list_orders_n1",
+        10,
+        10
+      ],
+      [
+        "review_cache_on_paid",
+        10,
+        10
+      ],
+      [
+        "incident_duplicate_order_paid",
+        10,
+        10
+      ],
+      [
+        "incident_outbox_ack_order",
+        10,
+        10
+      ],
+      [
+        "redesign_webhook_idempotency",
+        10,
+        10
+      ]
+    ],
+    "wall_min": 1.9,
+    "claims": 1,
+    "verified": 0,
+    "unverified": 0,
+    "unresolvable": 1
+  },
+  "claim/baseline": {
+    "score": 23,
+    "max": 23,
+    "tasks": 1,
+    "per_task": [
+      [
+        "all_claims",
+        23,
+        23
+      ]
+    ],
+    "wall_min": 0.7,
+    "claims": 0,
+    "verified": 0,
+    "unverified": 0,
+    "unresolvable": 0
+  },
+  "claim/contract": {
+    "score": 23,
+    "max": 23,
+    "tasks": 1,
+    "per_task": [
+      [
+        "all_claims",
+        23,
+        23
+      ]
+    ],
+    "wall_min": 1.3,
+    "claims": 0,
+    "verified": 0,
+    "unverified": 0,
+    "unresolvable": 0
+  },
+  "audittrap/baseline": {
+    "score": 75,
+    "max": 81,
+    "tasks": 7,
+    "per_task": [
+      [
+        "claim_battery",
+        17,
+        21
+      ],
+      [
+        "runner_interrupt_scored",
+        8,
+        10
+      ],
+      [
+        "chat_timeout_dropped",
+        10,
+        10
+      ],
+      [
+        "subprocess_stderr_dropped",
+        10,
+        10
+      ],
+      [
+        "warmup_no_deadline",
+        10,
+        10
+      ],
+      [
+        "sat_assign_cleared",
+        10,
+        10
+      ],
+      [
+        "sql_where_inside_join",
+        10,
+        10
+      ]
+    ],
+    "wall_min": 2.2,
+    "claims": 0,
+    "verified": 0,
+    "unverified": 0,
+    "unresolvable": 0
+  },
+  "audittrap/contract": {
+    "score": 75,
+    "max": 81,
+    "tasks": 7,
+    "per_task": [
+      [
+        "claim_battery",
+        17,
+        21
+      ],
+      [
+        "runner_interrupt_scored",
+        8,
+        10
+      ],
+      [
+        "chat_timeout_dropped",
+        10,
+        10
+      ],
+      [
+        "subprocess_stderr_dropped",
+        10,
+        10
+      ],
+      [
+        "warmup_no_deadline",
+        10,
+        10
+      ],
+      [
+        "sat_assign_cleared",
+        10,
+        10
+      ],
+      [
+        "sql_where_inside_join",
+        10,
+        10
+      ]
+    ],
+    "wall_min": 2.3,
+    "claims": 0,
+    "verified": 0,
+    "unverified": 0,
+    "unresolvable": 0
+  }
+}
