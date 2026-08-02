@@ -443,10 +443,15 @@ def run_flow(stages, contract: cc_ledger.Contract, task: str, model: str, head: 
         if result.error:
             say("   failed: %s" % result.error, err=True)
             break
-        say("   %.0fs, %d round(s), %d claim(s), %d gap(s), %d unknown(s), reuse %s"
-            % (result.seconds, result.rounds, result.claims, len(result.gaps),
-               len(result.unknowns),
-               "not recorded" if result.reuse is None else "%.1f%%" % result.reuse))
+        reuse = "not recorded" if result.reuse is None else "%.1f%%" % result.reuse
+        if stage.verify:
+            say("   %.0fs, %d round(s), %d claim(s), %d gap(s), %d unknown(s), reuse %s"
+                % (result.seconds, result.rounds, result.claims, len(result.gaps),
+                   len(result.unknowns), reuse))
+        else:
+            # "0 claim(s), 0 gap(s)" on a stage nothing judged reads like a clean bill of health.
+            say("   %.0fs, not judged here -- the next stage judges it, reuse %s"
+                % (result.seconds, reuse))
         if stage.blocking and result.gaps:
             say("   %s was refused, and every stage after it would be acting on what it produced, "
                 "so stopping here.\n   %s" % (stage.name, "\n   ".join(result.gaps[:3])), err=True)
@@ -509,6 +514,9 @@ def main() -> int:
 
     summary = {
         "task": args.task, "adapter": args.adapter, "model": args.model,
+        # The tree the run read. Without it a replay has to guess from directory naming, and
+        # judging citations against the wrong tree reports every one of them as a fabrication.
+        "cwd": str(Path(args.cwd).resolve()),
         "head_sha256_12": head_hash, "out": str(out_dir),
         "stages": [{"stage": r.stage, "session": r.session, "seconds": round(r.seconds, 1),
                     "rounds": r.rounds, "claims": r.claims, "gaps": r.gaps,

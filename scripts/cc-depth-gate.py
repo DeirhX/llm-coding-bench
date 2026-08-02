@@ -274,10 +274,18 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
         made = cc_verify.predictions(answer)
         report["predictions"] = [p.get("expect") for p in made]
         if not made:
-            gaps.append("This plan commits to nothing. Add a PREDICT line naming the exact command "
-                        "and a string its output will contain while the defect is present, so the "
-                        "stage that acts on this plan can be held to it. A plan whose failing run "
-                        "is chosen afterwards can always be satisfied.")
+            # Two rounds of a real stage were spent being told this in the abstract. The line is
+            # short enough to print, so print it: a model that cannot produce the shape from a
+            # description of it can copy the shape.
+            gaps.append("This plan commits to nothing. Add one line, exactly like this:\n"
+                        "  PREDICT: command: <the command you will run> -> <a string its output "
+                        "will contain while the defect is present>\n"
+                        "For example: PREDICT: command: pytest tests/test_cash.py -q -> "
+                        "available_cash_czk 1000000\n"
+                        "The string must be one the run cannot print once the defect is gone, so a "
+                        "wrong value qualifies and a stack trace does not. Without it the stage "
+                        "that acts on this plan picks its own failure afterwards, and any change "
+                        "can be made to fail somehow.")
 
     if contract.min_measurements:
         measured = sum(1 for v in report["verdicts"]

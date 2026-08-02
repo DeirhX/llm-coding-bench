@@ -66,7 +66,9 @@ def judge(run: Path, verbose: bool) -> list[dict]:
     # The tree the run read. Only the runs against this repository can be replayed: the throwaway
     # worktrees the others used are gone, and judging citations against a missing tree would report
     # every one of them as a fabrication.
-    root = REPO if run.name == "self" else None
+    root = Path(meta["cwd"]) if meta.get("cwd") else (REPO if run.name == "self" else None)
+    if root is not None and not root.is_dir():
+        root = None
     out = []
     for stage in meta["stages"]:
         recorded = run / ("%s.gate.json" % stage["stage"])
