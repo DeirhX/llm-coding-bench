@@ -55,14 +55,24 @@ def record_launch(state: dict, stage: str, agent: str = "") -> dict:
 
 
 def record_verdict(state: dict, stage: str, gaps: list, agent: str = "") -> dict:
-    """Attach a gate verdict to the most recent launch of `stage`."""
-    for entry in reversed(state.get("stages", [])):
-        if entry.get("stage") == stage and entry.get("verdict") is None:
-            entry["verdict"] = "refused" if gaps else "accepted"
-            entry["gaps"] = list(gaps)
-            entry["agent"] = agent or entry.get("agent", "")
-            entry["finished"] = time.time()
-            break
+    """Attach a gate verdict to the most recent launch of `stage`.
+
+    A refusal does not end a subagent, it sends it round again, so the same launch reports twice --
+    once refused, once with whatever it did about that. Without the second branch here the later
+    verdict lands nowhere: a stage that was refused and then fixed itself stays refused forever, and
+    for a blocking stage that means a flow that can never continue.
+    """
+    pending = [e for e in state.get("stages", [])
+               if e.get("stage") == stage and e.get("verdict") is None]
+    same = [e for e in state.get("stages", [])
+            if e.get("stage") == stage and (not agent or e.get("agent") == agent)]
+    entry = pending[-1] if pending else (same[-1] if same else None)
+    if entry is not None:
+        entry["verdict"] = "refused" if gaps else "accepted"
+        entry["gaps"] = list(gaps)
+        entry["agent"] = agent or entry.get("agent", "")
+        entry["finished"] = time.time()
+        entry["rounds"] = int(entry.get("rounds", 1)) + (0 if pending else 1)
     return state
 
 

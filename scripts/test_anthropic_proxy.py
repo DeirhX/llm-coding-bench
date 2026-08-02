@@ -243,3 +243,23 @@ def test_the_model_list_names_the_model_we_force() -> None:
     finally:
         ap.Proxy.force_model = ""
     assert [m["id"] for m in body["data"]] == ["qwopus"], body
+
+
+def test_one_answer_is_bounded() -> None:
+    """A stage took 24,847 tokens in a single response at 334 t/s -- three times this model's
+    measured rate, which is what near-total speculative acceptance looks like when the output has
+    gone round in a circle. The parent was blocked on the report and the GPU was busy throughout.
+    """
+    asked = {"model": "m", "max_tokens": 32000, "messages": [{"role": "user", "content": "hi"}]}
+    assert ap.to_openai(asked)["max_tokens"] == ap.MAX_OUTPUT
+    assert ap.to_openai(asked, 512)["max_tokens"] == 512
+
+
+def test_a_modest_request_is_left_alone() -> None:
+    asked = {"model": "m", "max_tokens": 100, "messages": [{"role": "user", "content": "hi"}]}
+    assert ap.to_openai(asked)["max_tokens"] == 100
+
+
+def test_a_client_that_names_no_limit_still_gets_one() -> None:
+    asked = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+    assert ap.to_openai(asked)["max_tokens"] == ap.MAX_OUTPUT

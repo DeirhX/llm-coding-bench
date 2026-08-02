@@ -365,3 +365,17 @@ def test_the_launch_keeps_the_arguments_it_came_with() -> None:
     assert "Map the territory" in amended["prompt"], amended
     # A backgrounded stage reports to nobody and the flow waits for a result that never comes.
     assert "run_in_background" not in amended, amended
+
+
+def test_a_stage_that_answers_the_refusal_stops_being_refused() -> None:
+    """A refusal sends the subagent round again rather than ending it, so one launch reports
+    twice. Without this the later verdict lands nowhere and a blocking stage stays refused for
+    good -- a flow that can never continue."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("implement", "t", "s1", root)
+        cc_flowstate.record_launch(state, "plan", agent="a1")
+        cc_flowstate.record_verdict(state, "plan", ["commits to nothing"], agent="a1")
+        assert cc_flowstate.refused(state), state
+        cc_flowstate.record_verdict(state, "plan", [], agent="a1")
+    assert cc_flowstate.done(state) == ["plan"], state
+    assert state["stages"][-1]["rounds"] == 2, state

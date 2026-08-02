@@ -65,7 +65,15 @@ def _text_of(content: Any) -> str:
     return ""
 
 
-def to_openai(body: dict) -> dict:
+# The most a single answer may be. The client asks for 32,000 and a stage took 24,847 of them in
+# one response at 334 t/s -- three times this model's measured rate, which is what near-total
+# speculative acceptance looks like when the output has gone round in a circle. Nothing else bounds
+# it: the parent was blocked on the report, the gate only sees answers that finish, and the GPU was
+# busy the whole time. A ledger that needs more than this is not a ledger.
+MAX_OUTPUT = 8192
+
+
+def to_openai(body: dict, ceiling: int = 0) -> dict:
     """An Anthropic Messages request as OpenAI chat completions."""
     messages: list[dict] = []
     system = _text_of(body.get("system"))
@@ -122,6 +130,10 @@ def to_openai(body: dict) -> dict:
                      ("top_p", "top_p"), ("stop_sequences", "stop")):
         if body.get(src) is not None:
             out[dst] = body[src]
+    limit = ceiling or MAX_OUTPUT
+    if limit:
+        asked = out.get("max_tokens")
+        out["max_tokens"] = min(int(asked), limit) if isinstance(asked, int) else limit
     if body.get("tools"):
         out["tools"] = [{"type": "function",
                          "function": {"name": t.get("name", ""),
@@ -277,7 +289,8 @@ def iter_openai_sse(stream) -> Iterator[dict]:
 
 class Proxy(http.server.BaseHTTPRequestHandler):
     upstream = DEFAULT_UPSTREAM
-    force_model = ""      # rewrite every request to this model, whatever the client asked for
+    force_model = ""     # rewrite every request to this model, whatever the client asked for
+    ceiling = 0          # and cap what a single answer may cost, whatever the client asked for
     logfile: Any = None
     lock = threading.Lock()
     protocol_version = "HTTP/1.1"
@@ -337,7 +350,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                   tools=len(body.get("tools") or []))
 
         request = urllib.request.Request(
-            self.upstream, data=json.dumps(to_openai(body)).encode(),
+            self.upstream, data=json.dumps(to_openai(body, self.ceiling)).encode(),
             headers={"content-type": "application/json",
                      "authorization": self.headers.get("authorization", "Bearer local")})
         try:
@@ -392,9 +405,11 @@ class Threaded(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 
-def serve(port: int, upstream: str, log_path: str, force_model: str = "") -> None:
+def serve(port: int, upstream: str, log_path: str, force_model: str = "",
+          ceiling: int = MAX_OUTPUT) -> None:
     Proxy.upstream = upstream
     Proxy.force_model = force_model
+    Proxy.ceiling = ceiling
     Proxy.logfile = open(os.path.expanduser(log_path), "a", encoding="utf-8") if log_path else None
     try:
         server = Threaded(("127.0.0.1", port), Proxy)
@@ -414,11 +429,13 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=11435)
     ap.add_argument("--upstream", default=DEFAULT_UPSTREAM)
     ap.add_argument("--log", default="/tmp/anthropic-proxy.jsonl")
+    ap.add_argument("--max-output", type=int, default=MAX_OUTPUT,
+                    help="cap on tokens in one answer; 0 to pass the client's own limit through")
     ap.add_argument("--force-model", default="",
                     help="answer every request with this model, whatever the client asked for")
     args = ap.parse_args()
     try:
-        serve(args.port, args.upstream, args.log, args.force_model)
+        serve(args.port, args.upstream, args.log, args.force_model, args.max_output)
     except KeyboardInterrupt:
         return 0
     return 0
