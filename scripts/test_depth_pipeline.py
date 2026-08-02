@@ -38,10 +38,13 @@ class Fake:
         self.replies = list(replies)
         self.prompts: list[str] = []
         self.resumed: list[bool] = []
+        self.settings: list = []
 
-    def __call__(self, prompt, model, head, session, cwd, resume=False, yolo=False, timeout=3600):
+    def __call__(self, prompt, model, head, session, cwd, settings, resume=False, yolo=False,
+                 timeout=3600):
         self.prompts.append(prompt)
         self.resumed.append(resume)
+        self.settings.append(settings)
         return (self.replies.pop(0) if self.replies else ""), ""
 
 
@@ -66,6 +69,17 @@ def _run(replies, stages="survey,claims", task="does add add?"):
         return results, fake, out, root
     finally:
         dp.invoke = original
+
+
+def test_every_turn_names_its_own_model_to_the_client() -> None:
+    """A stale global availableModels list otherwise sends the request to a cloud model."""
+    results, fake, out, _ = _run(["an inventory of src/m.py:1-2", SOLID])
+    assert fake.settings, "no turn was made"
+    for path in fake.settings:
+        written = json.loads(Path(path).read_text())
+        assert written["model"] == "fake-model"
+        assert written["enforceAvailableModels"] is False
+        assert written["availableModels"] == ["fake-model"]
 
 
 def test_stage_output_reaches_the_next_stage() -> None:

@@ -154,11 +154,30 @@ def compose(head: Path, contract: cc_ledger.Contract, stage: Stage, task: str,
     return "\n".join(parts)
 
 
-def invoke(prompt: str, model: str, head: Path, session: str, cwd: Path,
+def settings_file(model: str, out_dir: Path) -> Path:
+    """A settings file for this run, because the user's global one can veto the model.
+
+    ~/.claude/settings.json may carry `enforceAvailableModels` with a list this model is not on --
+    trivially so, since that list names models by hand and this one is built locally. The client
+    then does not complain: it falls back to its cloud default, asks Ollama for claude-opus-4-8,
+    gets a 404, and exits 1 with nothing on stderr, which reads exactly like a crashed stage.
+    A session that supplies its own model cannot be overruled by a stale global list.
+    """
+    path = out_dir / "settings.json"
+    path.write_text(json.dumps({
+        "model": model,
+        "availableModels": [model],
+        "enforceAvailableModels": False,
+    }, indent=2) + "\n")
+    return path
+
+
+def invoke(prompt: str, model: str, head: Path, session: str, cwd: Path, settings: Path,
            resume: bool = False, yolo: bool = False, timeout: int = 3600) -> tuple[str, str]:
     """One `claude -p` turn. Returns (text, error)."""
     cmd = ["claude", "-p", prompt, "--model", model,
            "--append-system-prompt-file", str(head),
+           "--settings", str(settings),
            "--allowed-tools", STAGE_TOOLS,
            "--output-format", "json"]
     cmd += ["--resume", session] if resume else ["--session-id", session]
@@ -187,7 +206,14 @@ def invoke(prompt: str, model: str, head: Path, session: str, cwd: Path,
     except subprocess.TimeoutExpired:
         return "", "timed out after %ds" % timeout
     if proc.returncode != 0:
-        return "", "claude exited %d: %s" % (proc.returncode, proc.stderr.strip()[:300])
+        # The client reports an API error as JSON on stdout and leaves stderr empty, so a bare
+        # "exited 1" hides the only sentence that says what went wrong.
+        said = proc.stderr.strip() or proc.stdout.strip()
+        try:
+            said = str(json.loads(said).get("result") or said)
+        except ValueError:
+            pass
+        return "", "claude exited %d: %s" % (proc.returncode, said[:300])
     try:
         payload = json.loads(proc.stdout)
     except ValueError:
@@ -238,7 +264,8 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
 
     started = time.time()
     offset = log_offset()
-    answer, error = invoke(prompt, model, head, session, cwd, yolo=yolo)
+    settings = settings_file(model, out_dir)
+    answer, error = invoke(prompt, model, head, session, cwd, settings, yolo=yolo)
     if error and not answer:
         result.error = error
         result.seconds = time.time() - started
@@ -250,7 +277,8 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
         if gaps:
             # One refusal, same wording the Stop hook uses, so the two paths train the same habit.
             refusal = gate.refusal(gaps, out_dir / "claims.jsonl")
-            second, error = invoke(refusal, model, head, session, cwd, resume=True, yolo=yolo)
+            second, error = invoke(refusal, model, head, session, cwd, settings,
+                                   resume=True, yolo=yolo)
             result.rounds = 2
             if second:
                 answer = second
