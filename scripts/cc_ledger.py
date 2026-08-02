@@ -75,8 +75,14 @@ ADAPTERS: dict[str, Contract] = {
         required_evidence=(FILE_QUOTE,),
         min_probes=0,
         high_severity_needs_falsification=True,
+        # The third note is here because three consecutive runs produced the same non-finding: that
+        # the proxy is "structurally coupled to Anthropic and OpenAI and will need duplication to
+        # add a backend", quoted from a function signature. It names nothing the code does wrong,
+        # and there is no reading of it under which anything is broken.
         notes=("Every defect claim quotes the code it is about.",
                "A high-severity defect needs a probe that reproduces it, or it is not high.",
+               "A claim that names no wrong behaviour is not a defect. That a design would be "
+               "awkward to extend, quoted from a signature, is an opinion; leave it out.",
                "No defect found is a legal and complete answer."),
     ),
     "debug": Contract(

@@ -179,6 +179,31 @@ def test_a_falsification_unrelated_to_anything_run_is_refused() -> None:
     assert "no command was run at all" not in reason, "a command did run, just not that one"
 
 
+def test_naming_only_the_program_is_not_a_falsification() -> None:
+    """The gate's own review found this, and proved it by running python3 and writing "I ran
+    python3". Every session runs python3 or rg at some point."""
+    with tempfile.TemporaryDirectory() as tmp:
+        answer = HIGH + "FALSIFICATION: I ran pytest and nothing came of it.\n"
+        reason = Session(tmp, answer=answer, bash=1,
+                         bash_command="pytest -q tests/test_widen.py").run().get("reason", "")
+    assert "did not run" in reason, reason
+
+
+def test_a_pasted_command_is_a_falsification() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        answer = HIGH + "FALSIFICATION: pytest -q tests/test_widen.py printed 2 passed.\n"
+        reason = Session(tmp, answer=answer, bash=1,
+                         bash_command="pytest -q tests/test_widen.py").run().get("reason", "")
+    assert "did not run" not in reason, reason
+
+
+def test_a_one_word_command_needs_only_its_name() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        answer = HIGH + "FALSIFICATION: ran pytest, it printed 2 passed.\n"
+        reason = Session(tmp, answer=answer, bash=1, bash_command="pytest").run().get("reason", "")
+    assert "did not run" not in reason, reason
+
+
 def test_a_probe_that_failed_still_counts_as_a_probe() -> None:
     """The refusal text has always said a failing probe is fine; the counter demanded success.
 

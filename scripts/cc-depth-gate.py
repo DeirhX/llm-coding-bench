@@ -218,7 +218,7 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
                         "say so explicitly -- that is a legal answer.")
 
     if len(probes) < contract.min_probes:
-        gaps.append("This task type requires %d command(s) actually run; %d succeeded. Running one "
+        gaps.append("This task type requires %d command(s) actually run; %d ran. Running one "
                     "that fails is fine and informative; describing one is not."
                     % (contract.min_probes, len(probes)))
 
@@ -254,9 +254,14 @@ def _ran(call) -> bool:
 def _was_run(falsification: str, probes: list) -> bool:
     """Does the falsification narrative correspond to a command this session actually ran?
 
-    Deliberately generous: the model writes prose around the command, so this asks only whether some
-    probe's program appears in that prose. The case worth catching is the narrative with no probe
-    behind it at all, not a paraphrase of a real one.
+    The program name alone is not enough, and the gate found that out about itself: reviewing this
+    file, it claimed the check was "trivial to bypass because it only verifies that some command
+    using the same executable was run", and proved it by running `python3 -c ...` and writing "I ran
+    python3". Every session runs python3 or rg at some point, so that sentence would always pass.
+
+    So: the program, and at least one further word of the same command, unless the command was a
+    single word. Still generous enough for prose around a pasted command, which is what the contract
+    asks for, and no longer satisfied by naming a program in the abstract.
     """
     if not probes:
         return False
@@ -268,8 +273,15 @@ def _was_run(falsification: str, probes: list) -> bool:
     said = str(falsification).lower()
     for call in probes:
         for piece in re.split(r"\|\||&&|;|\|", str(call.args.get("command") or "")):
-            first = piece.strip().split()
-            if first and os.path.basename(first[0]).lower() in said:
+            words = piece.strip().split()
+            if not words:
+                continue
+            program = os.path.basename(words[0]).lower()
+            if program not in said:
+                continue
+            rest = [w.strip("'\"").lower() for w in words[1:]]
+            rest = [w for w in rest if len(w) > 1]
+            if not rest or any(w in said for w in rest):
                 return True
     return False
 
