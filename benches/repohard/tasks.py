@@ -90,6 +90,16 @@ def run_private_pytest(work: Path, task_id: str) -> dict[str, Any]:
         text=True,
     )
     out = (r.stdout or "") + (r.stderr or "")
+    if "No module named pytest" in out:
+        # Every fix task in the suite would otherwise score 0 with `pytest 0/1`, which is
+        # indistinguishable from a model that cannot fix anything -- and it happened: a whole
+        # audittrap run scored 0 on all six fix tasks while producing a patch byte-identical to one
+        # that had scored 10/10 three days earlier. The interpreter running the bench simply had no
+        # pytest. Refuse to grade rather than publish a number that means nothing.
+        raise SystemExit(
+            "%s has no pytest, so no fix task can be graded. Run the benches with the "
+            "repository venv: .venv/bin/python run.py ..." % sys.executable
+        )
     passed, total = _parse_pytest_counts(out, r.returncode)
     return {
         "returncode": r.returncode,

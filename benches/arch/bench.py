@@ -72,6 +72,12 @@ OPTIONS = {
     "num_predict": default_num_predict(8192, think_base=24576),
 }
 
+from bench_lib.system_prompt import initial_messages, local_system_prompt
+
+# No default: every score on record for this bench was measured with no system message,
+# so one appears only when BENCH_SYSTEM_PROMPT_FILE explicitly names it.
+LOCAL_SYSTEM_PROMPT = local_system_prompt()
+
 MAX_ROUNDS = int(os.environ.get("BENCH_MAX_ROUNDS", "32"))
 MAX_TOOL_CALLS = int(os.environ.get("BENCH_MAX_TOOL_CALLS", "30"))
 HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
@@ -221,7 +227,7 @@ def run_agent_ollama(task: Task) -> dict[str, Any]:
     from bench_lib.task_timeout import task_timeout_s
 
     session = ToolSession(max_calls=MAX_TOOL_CALLS)
-    messages = [{"role": "user", "content": task.prompt}]
+    messages = initial_messages(task.prompt, LOCAL_SYSTEM_PROMPT)
     tool_trace: list[dict[str, Any]] = []
     transcript = RoundTranscript(OUT_DIR, TAG, task.id)
     totals = {

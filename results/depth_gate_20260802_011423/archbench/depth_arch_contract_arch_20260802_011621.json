@@ -1,0 +1,635 @@
+[
+  {
+    "model": "gemma4-31b-mtp-96k:latest",
+    "provider": "ollama",
+    "task": "chain_delete_order",
+    "title": "Call chain: DELETE /orders/{id}",
+    "family": "call_chain",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; effects 3/3; evidence(reads) 2/2",
+    "answer": {
+      "chain": [
+        "api.orders.handle_delete_order",
+        "pkg.auth.authenticate",
+        "service.order_service.cancel_order",
+        "pkg.tenant.require_tenant",
+        "store.order_repo.get",
+        "store.order_repo.soft_delete",
+        "store.outbox.insert",
+        "store.cache.invalidate_order",
+        "pkg.auth.clear_auth"
+      ],
+      "side_effects": [
+        "Soft delete order in database",
+        "Insert OrderCancelled event into outbox",
+        "Invalidate order cache entry"
+      ],
+      "citations": [
+        "api/orders.py:handle_delete_order",
+        "service/order_service.py:cancel_order"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "api/orders.py",
+      "service/order_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "DELETE /orders",
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/orders.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 12.75,
+    "prompt_tokens": 6140,
+    "eval_tokens": 336,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 593,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/depth_gate_20260802_011423/archbench/depth_arch_contract__chain_delete_order.txt",
+    "raw_content": "<arch_final>\n{\n  \"chain\": [\n    \"api.orders.handle_delete_order\",\n    \"pkg.auth.authenticate\",\n    \"service.order_service.cancel_order\",\n    \"pkg.tenant.require_tenant\",\n    \"store.order_repo.get\",\n    \"store.order_repo.soft_delete\",\n    \"store.outbox.insert\",\n    \"store.cache.invalidate_order\",\n    \"pkg.auth.clear_auth\"\n  ],\n  \"side_effects\": [\n    \"Soft delete order in database\",\n    \"Insert OrderCancelled event into outbox\",\n    \"Invalidate order cache entry\"\n  ],\n  \"citations\": [\n    \"api/orders.py:handle_delete_order\",\n    \"service/order_service.py:cancel_order\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4-31b-mtp-96k:latest",
+    "provider": "ollama",
+    "task": "chain_payment_webhook",
+    "title": "Call chain: POST /webhooks/payment",
+    "family": "call_chain",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "ordered_hops 5/5; payment_effect=1; evidence(reads) 2/2",
+    "answer": {
+      "chain": [
+        "api.webhooks.handle_payment_webhook",
+        "service.payment_service.handle_payment_webhook",
+        "service.payment_service._already_processed",
+        "store.db.put",
+        "store.outbox.insert",
+        "service.order_service.mark_paid",
+        "service.payment_service._mark_processed"
+      ],
+      "side_effects": [
+        "Payment record created in db",
+        "Order paid event inserted into outbox",
+        "Order marked as paid via order_service",
+        "Webhook ID recorded as processed in db"
+      ],
+      "citations": [
+        "api/webhooks.py:handle_payment_webhook",
+        "service/payment_service.py:handle_payment_webhook",
+        "service/payment_service.py:_already_processed",
+        "service/payment_service.py:_mark_processed"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "api/webhooks.py",
+      "service/payment_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "/webhooks/payment",
+          "path": "api"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/webhooks.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 12.28,
+    "prompt_tokens": 5386,
+    "eval_tokens": 370,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 750,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/depth_gate_20260802_011423/archbench/depth_arch_contract__chain_payment_webhook.txt",
+    "raw_content": "<arch_final>\n{\n  \"chain\": [\n    \"api.webhooks.handle_payment_webhook\",\n    \"service.payment_service.handle_payment_webhook\",\n    \"service.payment_service._already_processed\",\n    \"store.db.put\",\n    \"store.outbox.insert\",\n    \"service.order_service.mark_paid\",\n    \"service.payment_service._mark_processed\"\n  ],\n  \"side_effects\": [\n    \"Payment record created in db\",\n    \"Order paid event inserted into outbox\",\n    \"Order marked as paid via order_service\",\n    \"Webhook ID recorded as processed in db\"\n  ],\n  \"citations\": [\n    \"api/webhooks.py:handle_payment_webhook\",\n    \"service/payment_service.py:handle_payment_webhook\",\n    \"service/payment_service.py:_already_processed\",\n    \"service/payment_service.py:_mark_processed\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4-31b-mtp-96k:latest",
+    "provider": "ollama",
+    "task": "tenant_invoice_isolation",
+    "title": "Tenant isolation for invoices",
+    "family": "invariant",
+    "ok": true,
+    "score": 9,
+    "max_score": 10,
+    "grade_detail": "enforced/bypass scoring; evidence(reads) 1/2; unread=['store/invoice_repo.py']; enf='service.invoice_service.list_invoices' by='service.invoice_service.get_invoice | service.invoice_service.admin_export_invoices'",
+    "answer": {
+      "enforced_at": [
+        "service.invoice_service.list_invoices"
+      ],
+      "bypasses": [
+        "service.invoice_service.get_invoice",
+        "service.invoice_service.admin_export_invoices"
+      ],
+      "citations": [
+        "service/invoice_service.py:11",
+        "service/invoice_service.py:17",
+        "service/invoice_service.py:28"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "api/invoices.py",
+      "service/invoice_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "invoice",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 11.73,
+    "prompt_tokens": 9110,
+    "eval_tokens": 261,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 345,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/depth_gate_20260802_011423/archbench/depth_arch_contract__tenant_invoice_isolation.txt",
+    "raw_content": "<arch_final>\n{\n  \"enforced_at\": [\n    \"service.invoice_service.list_invoices\"\n  ],\n  \"bypasses\": [\n    \"service.invoice_service.get_invoice\",\n    \"service.invoice_service.admin_export_invoices\"\n  ],\n  \"citations\": [\n    \"service/invoice_service.py:11\",\n    \"service/invoice_service.py:17\",\n    \"service/invoice_service.py:28\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4-31b-mtp-96k:latest",
+    "provider": "ollama",
+    "task": "invariant_doc_vs_code",
+    "title": "Which README invariants fail?",
+    "family": "invariant",
+    "ok": false,
+    "score": 6,
+    "max_score": 10,
+    "grade_detail": "violated=['I2']; evidence(reads) 2/3; unread=['service/payment_service.py']",
+    "answer": {
+      "violated_invariants": [
+        "I2"
+      ],
+      "evidence": {
+        "I2": "The `get_invoice` function in `service/invoice_service.py` calls `require_tenant()` to ensure authentication but does not use the tenant ID to scope the database lookup, allowing any authenticated user to retrieve any invoice by its ID."
+      },
+      "citations": [
+        "service/invoice_service.py:get_invoice"
+      ]
+    },
+    "tool_calls": 5,
+    "files_read": [
+      "README.md",
+      "api/invoices.py",
+      "service/invoice_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "invoice",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "api/invoices.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/invoice_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 13.55,
+    "prompt_tokens": 10823,
+    "eval_tokens": 273,
+    "rounds": 6,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 391,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/depth_gate_20260802_011423/archbench/depth_arch_contract__invariant_doc_vs_code.txt",
+    "raw_content": "<arch_final>\n{\n  \"violated_invariants\": [\"I2\"],\n  \"evidence\": {\n    \"I2\": \"The `get_invoice` function in `service/invoice_service.py` calls `require_tenant()` to ensure authentication but does not use the tenant ID to scope the database lookup, allowing any authenticated user to retrieve any invoice by its ID.\"\n  },\n  \"citations\": [\"service/invoice_service.py:get_invoice\"]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4-31b-mtp-96k:latest",
+    "provider": "ollama",
+    "task": "review_list_orders_n1",
+    "title": "Review: list_orders performance smell",
+    "family": "review",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1; false_auth=False",
+    "answer": {
+      "findings": [
+        {
+          "id": "n_plus_1",
+          "severity": "high",
+          "summary": "The list_orders function performs an N+1 lookup pattern by calling get_order for every row returned by the initial tenant listing."
+        }
+      ],
+      "max_severity": "high",
+      "auth_ok": true,
+      "citations": [
+        "service/order_service.py:list_orders"
+      ]
+    },
+    "tool_calls": 2,
+    "files_read": [
+      "service/order_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 14.64,
+    "prompt_tokens": 3205,
+    "eval_tokens": 350,
+    "rounds": 3,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 920,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/depth_gate_20260802_011423/archbench/depth_arch_contract__review_list_orders_n1.txt",
+    "raw_content": "CLAIM: The `list_orders` function implements an N+1 query pattern by calling `get_order` inside a loop over the results of `order_repo.list_by_tenant`.\nEVIDENCE: service/order_service.py:27-28\nQUOTE:\n    for row in rows:\n        enriched.append(get_order(row[\"id\"]))\n\nSEVERITY: high\nFALSIFICATION: I cannot run the code, but logically `list_orders` fetches a list of IDs and then performs an individual lookup (which may hit cache or DB) for every single item in that list. If there are 100 orders, it makes 1 + 100 calls to the data layer/cache.\n\n<arch_final>\n{\n  \"findings\": [\n    {\n      \"id\": \"n_plus_1\",\n      \"severity\": \"high\",\n      \"summary\": \"The list_orders function performs an N+1 lookup pattern by calling get_order for every row returned by the initial tenant listing.\"\n    }\n  ],\n  \"max_severity\": \"high\",\n  \"auth_ok\": true,\n  \"citations\": [\n    \"service/order_service.py:list_orders\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4-31b-mtp-96k:latest",
+    "provider": "ollama",
+    "task": "review_cache_on_paid",
+    "title": "Review: cache vs status change (I4)",
+    "family": "review",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1",
+    "answer": {
+      "i4_holds": false,
+      "findings": [
+        {
+          "summary": "The mark_paid function updates the order status to 'paid' but fails to call cache.invalidate_order(order_id), violating invariant I4.",
+          "severity": "high"
+        }
+      ],
+      "citations": [
+        "service/order_service.py:mark_paid"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "README.md",
+      "service/order_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "README.md"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "mark_paid",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/order_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 9.41,
+    "prompt_tokens": 5750,
+    "eval_tokens": 238,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 325,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/depth_gate_20260802_011423/archbench/depth_arch_contract__review_cache_on_paid.txt",
+    "raw_content": "<arch_final>\n{\n  \"i4_holds\": false,\n  \"findings\": [\n    {\n      \"summary\": \"The mark_paid function updates the order status to 'paid' but fails to call cache.invalidate_order(order_id), violating invariant I4.\",\n      \"severity\": \"high\"\n    }\n  ],\n  \"citations\": [\n    \"service/order_service.py:mark_paid\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4-31b-mtp-96k:latest",
+    "provider": "ollama",
+    "task": "incident_duplicate_order_paid",
+    "title": "Incident: duplicate OrderPaid",
+    "family": "incident",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1",
+    "answer": {
+      "root_cause": "The idempotency check in handle_payment_webhook is performed at the start, but the webhook is only marked as processed after the OrderPaid event is inserted into the outbox and the order is marked paid. If a retry occurs before _mark_processed(webhook_id) completes (e.g., due to a crash or timeout), the next request will pass the _already_processed check and insert a duplicate OrderPaid event.",
+      "fix_function": "service.payment_service.handle_payment_webhook",
+      "fix_functions": [
+        "service.payment_service.handle_payment_webhook"
+      ],
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "service/payment_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "OrderPaid",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "webhook_id",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 12.25,
+    "prompt_tokens": 6107,
+    "eval_tokens": 301,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 654,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/depth_gate_20260802_011423/archbench/depth_arch_contract__incident_duplicate_order_paid.txt",
+    "raw_content": "<arch_final>\n{\n  \"root_cause\": \"The idempotency check in handle_payment_webhook is performed at the start, but the webhook is only marked as processed after the OrderPaid event is inserted into the outbox and the order is marked paid. If a retry occurs before _mark_processed(webhook_id) completes (e.g., due to a crash or timeout), the next request will pass the _already_processed check and insert a duplicate OrderPaid event.\",\n  \"fix_function\": \"service.payment_service.handle_payment_webhook\",\n  \"fix_functions\": [\"service.payment_service.handle_payment_webhook\"],\n  \"citations\": [\"service/payment_service.py:handle_payment_webhook\"]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4-31b-mtp-96k:latest",
+    "provider": "ollama",
+    "task": "incident_outbox_ack_order",
+    "title": "Incident: lost outbox events",
+    "family": "incident",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "evidence(reads) 1/1",
+    "answer": {
+      "root_cause": "The worker calls `outbox.ack()` before calling `publish()`. If the publisher crashes after acking but before publishing, the event is marked as processed (`acked=True`) and will never be retried by `claim_batch`, causing it to disappear.",
+      "fix_function": "worker.outbox_worker.process_once",
+      "citations": [
+        "worker/outbox_worker.py:15",
+        "store/outbox.py:30"
+      ]
+    },
+    "tool_calls": 4,
+    "files_read": [
+      "store/outbox.py",
+      "worker/outbox_worker.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "outbox",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "worker/outbox_worker.py"
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "store/outbox.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 11.93,
+    "prompt_tokens": 8577,
+    "eval_tokens": 264,
+    "rounds": 5,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 422,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/depth_gate_20260802_011423/archbench/depth_arch_contract__incident_outbox_ack_order.txt",
+    "raw_content": "<arch_final>\n{\n  \"root_cause\": \"The worker calls `outbox.ack()` before calling `publish()`. If the publisher crashes after acking but before publishing, the event is marked as processed (`acked=True`) and will never be retried by `claim_batch`, causing it to disappear.\",\n  \"fix_function\": \"worker.outbox_worker.process_once\",\n  \"citations\": [\n    \"worker/outbox_worker.py:15\",\n    \"store/outbox.py:30\"\n  ]\n}\n</arch_final>"
+  },
+  {
+    "model": "gemma4-31b-mtp-96k:latest",
+    "provider": "ollama",
+    "task": "redesign_webhook_idempotency",
+    "title": "Constrained fix: webhook idempotency",
+    "family": "redesign",
+    "ok": true,
+    "score": 10,
+    "max_score": 10,
+    "grade_detail": "files=['service/payment_service.py']; evidence(reads) 1/1",
+    "answer": {
+      "touch_files": [
+        "service/payment_service.py"
+      ],
+      "plan_steps": [
+        "Move the call to _mark_processed(webhook_id) from line 43 to immediately after the check for _already_processed(webhook_id) at line 26.",
+        "This ensures that if a concurrent request with the same webhook_id arrives, it will be caught by _already_processed before OrderPaid is inserted into the outbox or order_service.mark_paid is called."
+      ],
+      "idempotency_change": "_mark_processed(webhook_id) moves from after side-effects (outbox/order_service) to before them, immediately following the _already_processed check.",
+      "citations": [
+        "service/payment_service.py:handle_payment_webhook"
+      ]
+    },
+    "tool_calls": 3,
+    "files_read": [
+      "service/payment_service.py"
+    ],
+    "tool_trace": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "grep",
+        "arguments": {
+          "pattern": "webhook",
+          "path": "."
+        },
+        "result_ok": true
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "service/payment_service.py"
+        },
+        "result_ok": true
+      }
+    ],
+    "wall_s": 12.81,
+    "prompt_tokens": 5712,
+    "eval_tokens": 291,
+    "rounds": 4,
+    "done_reason": "stop",
+    "num_ctx": 65536,
+    "num_predict": 8192,
+    "last_content_chars": 695,
+    "thinking_chars": 0,
+    "transcript": "/Users/deirh/Projects/llm-coding-bench/results/depth_gate_20260802_011423/archbench/depth_arch_contract__redesign_webhook_idempotency.txt",
+    "raw_content": "<arch_final>\n{\n  \"touch_files\": [\"service/payment_service.py\"],\n  \"plan_steps\": [\n    \"Move the call to _mark_processed(webhook_id) from line 43 to immediately after the check for _already_processed(webhook_id) at line 26.\",\n    \"This ensures that if a concurrent request with the same webhook_id arrives, it will be caught by _already_processed before OrderPaid is inserted into the outbox or order_service.mark_paid is called.\"\n  ],\n  \"idempotency_change\": \"_mark_processed(webhook_id) moves from after side-effects (outbox/order_service) to before them, immediately following the _already_processed check.\",\n  \"citations\": [\"service/payment_service.py:handle_payment_webhook\"]\n}\n</arch_final>"
+  }
+]
