@@ -574,7 +574,21 @@ def main() -> int:
     # A session that ends in the middle of a flow has answered from one stage of three. The first
     # one to run did exactly that: the survey reported, the orchestrator relayed it, and the flow
     # stopped two stances short of an answer anybody should act on.
-    if not agent and state.get("flow") and not resumed:
+    if os.environ.get("CC_FLOW_TRACE"):
+        try:
+            with open(os.environ["CC_FLOW_TRACE"], "a") as fh:
+                fh.write(json.dumps({"hook": payload.get("hook_event_name"),
+                                     "agent": agent, "resumed": resumed,
+                                     "flow": state.get("flow"),
+                                     "nudges": state.get("nudges")}) + "\n")
+        except OSError:
+            pass
+
+    # `stop_hook_active` is not consulted here. Its purpose is to stop a Stop hook looping, and a
+    # bounded nudge count does that job better: the flag was already set on the parent's stop after
+    # a subagent had finished, so treating it as "we have pushed once already" meant never pushing
+    # at all. Measured: a flow that completed its survey and then ended, with the counter at zero.
+    if not agent and state.get("flow"):
         # A stage still marked in flight when the parent stops is one whose subagent went away:
         # a parent cannot finish a turn while its own Task call is outstanding. Measured on the
         # second flow: the orchestrator said it would wait for the survey, then answered from a
@@ -589,13 +603,15 @@ def main() -> int:
             state["nudges"] = nudges + 1
             cc_flowstate.save(state, session, root)
             return block(
-                "The %s flow is not finished. %s %s run; %s has not. Launch a subagent whose "
+                "The %s flow is not finished. %s run; %s has not. Launch a subagent whose "
                 "prompt begins with `STAGE: %s`. The Task tool hands you that subagent's report as "
                 "its result -- there is nothing to wait for and nothing running in the background, "
                 "so do not stop to wait. Answering now would give me one stage's view of this, and "
                 "the stages after it exist because that view is the one that has been wrong before."
-                % (state["flow"], ", ".join(done) or "No stage has",
-                   "have" if len(done) > 1 else "has", left, left))
+                % (state["flow"],
+                   ("%s %s" % (", ".join(done), "have" if len(done) > 1 else "has"))
+                   if done else "No stage has",
+                   left, left))
 
     contract = None
     if stage:

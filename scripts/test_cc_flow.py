@@ -340,3 +340,28 @@ def test_a_stage_reporting_refills_the_budget() -> None:
         cc_flowstate.save(state, "s1", root)
         _subagent_stop("survey found scripts/cc-context-guard.py:1-40", root)
         assert cc_flowstate.load("s1", root)["nudges"] == 0
+
+
+def test_the_launch_keeps_the_arguments_it_came_with() -> None:
+    """updatedInput replaces the input object rather than merging into it.
+
+    Returning only the prompt deleted description and subagent_type, and every launch came back as
+    "the required parameter description is missing" -- ten in one session, each read by the model
+    as its own mistake, none of them its mistake.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        cc_flowstate.begin("review", "t", "s1", root)
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "session_id": "s1",
+                   "cwd": root, "tool_input": {"prompt": "STAGE: survey\nhave a look",
+                                               "description": "Survey the thing",
+                                               "subagent_type": "general-purpose",
+                                               "run_in_background": True}}
+        proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                              capture_output=True, text=True, timeout=30)
+        out = json.loads(proc.stdout)["hookSpecificOutput"]
+    amended = out["updatedInput"]
+    assert amended["description"] == "Survey the thing", amended
+    assert amended["subagent_type"] == "general-purpose", amended
+    assert "Map the territory" in amended["prompt"], amended
+    # A backgrounded stage reports to nobody and the flow waits for a result that never comes.
+    assert "run_in_background" not in amended, amended

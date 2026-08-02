@@ -40,13 +40,23 @@ def deny(reason: str) -> None:
     sys.exit(0)
 
 
-def amend(prompt: str, reason: str) -> None:
-    """Let the call through with a prompt of our own."""
+def amend(tool_input: dict, prompt: str, reason: str) -> None:
+    """Let the call through with a prompt of our own, and everything else it came with.
+
+    `updatedInput` replaces the whole input object rather than merging into it. Returning just the
+    prompt therefore deleted `description` and `subagent_type`, and every launch came back as
+    "the required parameter description is missing" -- ten of them in one session, each one read by
+    the model as its own mistake, none of them its mistake.
+    """
+    merged = dict(tool_input)
+    merged["prompt"] = prompt
+    # A backgrounded stage reports to nobody and the flow waits for a result that never arrives.
+    merged.pop("run_in_background", None)
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
         "permissionDecisionReason": reason,
-        "updatedInput": {"prompt": prompt}}}))
+        "updatedInput": merged}}))
     sys.exit(0)
 
 
@@ -144,7 +154,7 @@ def main() -> int:
     # The model asked for the right stage; the wording of it is not its business. Substituting the
     # stance verbatim also keeps the interactive path and the scripted one on the same words, which
     # is the only reason a result from one says anything about the other.
-    return amend(compose(stage, state["flow"], state.get("task", ""), prior),
+    return amend(tool_input, compose(stage, state["flow"], state.get("task", ""), prior),
                  "stage %s of the %s flow" % (stage_name, state["flow"]))
 
 
