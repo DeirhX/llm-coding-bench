@@ -252,3 +252,49 @@ def test_a_survey_is_not_refused_for_making_no_claims() -> None:
     assert decision == "allow", decision
     assert cc_flowstate.done(after) == ["survey"], after
     assert after["stages"][0]["summary"], "the next stage gets nothing"
+
+
+def _stop(answer: str, root: str, session: str = "s1", resumed: bool = False) -> tuple[str, str]:
+    payload = {"hook_event_name": "Stop", "session_id": session, "cwd": root,
+               "last_assistant_message": answer, "transcript_path": "",
+               "stop_hook_active": resumed}
+    proc = subprocess.run([sys.executable, str(GATE)], input=json.dumps(payload),
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    if not proc.stdout.strip():
+        return "allow", ""
+    out = json.loads(proc.stdout)
+    return out.get("decision", "allow"), out.get("reason", "")
+
+
+def test_a_session_may_not_end_two_stances_short() -> None:
+    """The first flow that ran did exactly this: the survey reported, the orchestrator relayed it,
+    and the session ended with one stage's view of the question."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.record_verdict(state, "survey", [])
+        cc_flowstate.save(state, "s1", root)
+        decision, why = _stop("Here is what the survey found.", root)
+    assert decision == "block", decision
+    assert "STAGE: claims" in why, why
+
+
+def test_a_finished_flow_may_end() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        for name in ("survey", "claims", "adversary"):
+            cc_flowstate.record_launch(state, name)
+            cc_flowstate.record_verdict(state, name, [])
+        cc_flowstate.save(state, "s1", root)
+        decision, _ = _stop("Here is what survived.", root)
+    assert decision == "allow", decision
+
+
+def test_the_session_is_not_blocked_while_a_stage_is_working() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.save(state, "s1", root)
+        decision, _ = _stop("waiting on the survey", root)
+    assert decision == "allow", decision

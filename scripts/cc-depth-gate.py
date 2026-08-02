@@ -565,6 +565,21 @@ def main() -> int:
     # transcript write entirely. The settled read stays as the fallback for clients that do not.
     text = payload.get("last_assistant_message") or (_settled_text(transcript) if transcript else "")
 
+    # A session that ends in the middle of a flow has answered from one stage of three. The first
+    # one to run did exactly that: the survey reported, the orchestrator relayed it, and the flow
+    # stopped two stances short of an answer anybody should act on.
+    if not agent and state.get("flow") and not resumed:
+        left = cc_flowstate.next_stage(state)
+        if left and not cc_flowstate.running(state):
+            done = cc_flowstate.done(state)
+            return block(
+                "The %s flow is not finished. %s %s run; %s has not. Launch a subagent whose "
+                "prompt begins with `STAGE: %s` and wait for it to report. Answering now would "
+                "give me one stage's view of this, and the stages after it exist because that view "
+                "is the one that has been wrong before."
+                % (state["flow"], ", ".join(done) or "No stage has",
+                   "have" if len(done) > 1 else "has", left, left))
+
     contract = None
     if stage:
         # Some stages are not judged at all. A survey is an inventory, and holding an inventory to
