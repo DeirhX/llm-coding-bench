@@ -224,3 +224,35 @@ def test_stripping_a_gutter_cannot_rescue_a_wrong_quote(tmp_path) -> None:
     wrong = "1 def add(a, b):\n2     return a - b"
     verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, wrong)
     assert not verdict.ok, verdict
+
+def test_two_ranges_quoted_with_an_elision_are_checked_separately(tmp_path) -> None:
+    """A definition and its use, cited together -- the citation a review wants to make.
+
+    Attaching the whole block to the last range failed both halves of a correct claim: quote
+    not present on one, incomplete on the other.
+    """
+    (tmp_path / "m.py").write_text(
+        "LOCK = 1\n" + "filler\n" * 3 + "def use():\n    return LOCK\n")
+    text = ("CLAIM: the lock is global.\n"
+            "EVIDENCE: m.py:1, 5-6\n"
+            "QUOTE:\nLOCK = 1\n...\ndef use():\n    return LOCK\n")
+    claims, _ = vf.parse_ledger(text)
+    quoted = [(e["start"], e["end"], e["quote"]) for e in claims[0]["evidence"]]
+    assert quoted[0][2] == "LOCK = 1", quoted
+    assert quoted[1][0] == 5, quoted
+    for citation in claims[0]["evidence"]:
+        verdict = vf.file_quote(str(tmp_path), citation["path"], citation["start"],
+                                citation["end"], citation["quote"])
+        assert verdict.ok, (citation, verdict)
+
+
+def test_an_elision_inside_a_single_range_is_still_content(tmp_path) -> None:
+    """One range, one quote: splitting it would invent fragments nobody cited."""
+    (tmp_path / "m.py").write_text("a = 1\n...\nb = 2\n")
+    text = ("CLAIM: it elides.\n"
+            "EVIDENCE: m.py:1-3\n"
+            "QUOTE:\na = 1\n...\nb = 2\n")
+    claims, _ = vf.parse_ledger(text)
+    citation = claims[0]["evidence"][0]
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 3, citation["quote"])
+    assert verdict.ok, verdict

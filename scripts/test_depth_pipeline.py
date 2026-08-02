@@ -259,3 +259,12 @@ def test_a_plan_that_commits_lets_the_flow_continue() -> None:
     results, _, _, _ = _run([PLAN, "changed it", "verified"],
                             stages="plan,implement,verify", adapter="implement")
     assert [r.stage for r in results] == ["plan", "implement", "verify"], results
+
+def test_no_cache_lines_is_not_a_measurement_of_zero() -> None:
+    """Pointed at llama-server, nothing matches Ollama's log and the column read 0.0%.
+
+    That is an absence of measurement printed as a measurement, in the one column that says
+    whether the shared head is earning its keep.
+    """
+    assert dp.StageResult(stage="s", session="x").reuse is None
+    assert dp.StageResult(stage="s", session="x", cache=[(100, 80)]).reuse == 80.0

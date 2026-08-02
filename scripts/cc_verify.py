@@ -304,6 +304,22 @@ def _classify(body: str) -> dict | None:
     return None
 
 
+_ELISION = re.compile(r"^\s*(?:\.\.\.|\u2026|#\s*\.\.\.|//\s*\.\.\.|<\s*snip\s*>)\s*$")
+
+
+def _elided(body: str) -> list[str]:
+    """Split a quote on lines that are nothing but an elision marker."""
+    pieces, current = [], []
+    for line in _unfenced(body).split("\n"):
+        if _ELISION.match(line):
+            pieces.append("\n".join(current).strip("\n"))
+            current = []
+        else:
+            current.append(line)
+    pieces.append("\n".join(current).strip("\n"))
+    return [p for p in pieces if p.strip()]
+
+
 def parse_ledger(text: str) -> tuple[list[dict], list[str]]:
     """Split an answer into claims and declared unknowns.
 
@@ -314,12 +330,25 @@ def parse_ledger(text: str) -> tuple[list[dict], list[str]]:
     claims: list[dict] = []
     current: dict | None = None
     evidence: dict | None = None
+    cited: list[dict] = []
     quote: list[str] | None = None
 
     def close_quote() -> None:
         nonlocal quote, evidence
-        if quote is not None and evidence is not None:
-            evidence["quote"] = "\n".join(quote).strip("\n")
+        if quote is None:
+            quote = None
+            return
+        body = "\n".join(quote).strip("\n")
+        pieces = _elided(body)
+        if len(cited) > 1 and len(pieces) == len(cited):
+            # One EVIDENCE line naming two ranges, quoted with an elision between them: the
+            # definition and the use, which is the citation an architecture review actually wants
+            # to make. Attaching the whole block to the last range failed both -- "quote not
+            # present" on one and "incomplete" on the other -- on a claim that was correct.
+            for citation, piece in zip(cited, pieces):
+                citation["quote"] = piece
+        elif evidence is not None:
+            evidence["quote"] = body
         quote = None
 
     for line in text.split("\n"):
@@ -341,6 +370,7 @@ def parse_ledger(text: str) -> tuple[list[dict], list[str]]:
             if not found:
                 found = [{"kind": None, "raw": body}]
             current["evidence"].extend(found)
+            cited = found
             # A QUOTE that follows attaches to the last citation named, which is the one it is
             # under. The earlier ones are still checked, on their line numbers alone.
             evidence = found[-1]

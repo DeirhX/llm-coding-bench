@@ -176,9 +176,17 @@ class StageResult:
     error: str = ""
 
     @property
-    def reuse(self) -> float:
+    def reuse(self) -> float | None:
+        """None when nothing was recorded, which is not the same as nothing was reused.
+
+        The figure comes from Ollama's log. Pointed at llama-server, no line ever matches and the
+        old arithmetic reported a confident 0.0% -- an absence of measurement printed as a
+        measurement of zero, in the one column that says whether the head is earning its keep.
+        """
         total = sum(t for t, _ in self.cache)
-        return 100.0 * sum(m for _, m in self.cache) / total if total else 0.0
+        if not total:
+            return None
+        return 100.0 * sum(m for _, m in self.cache) / total
 
 
 def transcript_for(session: str, cwd: str) -> Path:
@@ -435,9 +443,10 @@ def run_flow(stages, contract: cc_ledger.Contract, task: str, model: str, head: 
         if result.error:
             say("   failed: %s" % result.error, err=True)
             break
-        say("   %.0fs, %d round(s), %d claim(s), %d gap(s), %d unknown(s), reuse %.1f%%"
+        say("   %.0fs, %d round(s), %d claim(s), %d gap(s), %d unknown(s), reuse %s"
             % (result.seconds, result.rounds, result.claims, len(result.gaps),
-               len(result.unknowns), result.reuse))
+               len(result.unknowns),
+               "not recorded" if result.reuse is None else "%.1f%%" % result.reuse))
         if stage.blocking and result.gaps:
             say("   %s was refused, and every stage after it would be acting on what it produced, "
                 "so stopping here.\n   %s" % (stage.name, "\n   ".join(result.gaps[:3])), err=True)
@@ -503,7 +512,7 @@ def main() -> int:
         "head_sha256_12": head_hash, "out": str(out_dir),
         "stages": [{"stage": r.stage, "session": r.session, "seconds": round(r.seconds, 1),
                     "rounds": r.rounds, "claims": r.claims, "gaps": r.gaps,
-                    "unknowns": r.unknowns, "reuse_pct": round(r.reuse, 1), "error": r.error}
+                    "unknowns": r.unknowns, "reuse_pct": None if r.reuse is None else round(r.reuse, 1), "error": r.error}
                    for r in results],
     }
     (out_dir / "run.json").write_text(json.dumps(summary, indent=2) + "\n")
