@@ -140,6 +140,10 @@ Usage: claude-gemma [31b|26b] [fast|accurate] [64k|96k|128k|max] [mlx] [options]
                  three of them by quoting 33 to 194 lines of a file at an
                  indentation guessed one level out. Its own effect is unmeasured.
   --no-edit-rule Force it off.
+  --depth [kind] Gate the session: a task contract goes in, and an answer whose
+                 citations do not check out is refused once, with every gap listed.
+                 kind is one of review, debug, refactor-proposal, ops-perf,
+                 bench-audit (default review). touch /tmp/cc-depth-off to lift.
   --yolo         Bypass every permission check for the session. Edits, writes and
                  shell commands run unattended, in the current directory, with no
                  confirmation. See the warning it prints before you use it.
@@ -183,6 +187,8 @@ USAGE
 # endpoint: a deny is honoured under --dangerously-skip-permissions and its text reaches the model
 # as the tool result. Lift it for a session with `touch /tmp/cc-guard-off`, or launch --no-guard.
 GUARD=1
+DEPTH=0
+DEPTH_ADAPTER="review"
 LEAN_TOOLS=1
 UNUSED_TOOLS="Workflow,Agent,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskStop"
 UNUSED_TOOLS="$UNUSED_TOOLS,TaskOutput,ReportFindings,SendMessage,CronCreate"
@@ -211,6 +217,12 @@ while [[ $# -gt 0 ]]; do
     --all-tools) LEAN_TOOLS=0; shift ;;
     --guard) GUARD=1; shift ;;
     --no-guard) GUARD=0; shift ;;
+    --depth)
+      DEPTH=1; shift
+      case "${1:-}" in
+        review|debug|refactor-proposal|ops-perf|bench-audit) DEPTH_ADAPTER="$1"; shift ;;
+      esac ;;
+    --no-depth) DEPTH=0; shift ;;
     --list)
       echo "Installed Gemma variants:"
       ollama list 2>/dev/null | awk 'NR==1 || /^gemma4-(31b|26b)-(coding|mtp|mlx)-|^gemma4-coding:/ { print "  " $0 }'
@@ -390,6 +402,11 @@ if (( GUARD )); then
 else
   echo "guard:  off. Unbounded reads and window overruns are permitted; a single task can"
   echo "        fill the window, and nothing here compacts by itself."
+fi
+if (( DEPTH )); then
+  echo "depth:  gated as '$DEPTH_ADAPTER'. The contract goes in with your first prompt; an"
+  echo "        answer whose citations do not survive re-reading is refused once, with every"
+  echo "        gap in one message. touch /tmp/cc-depth-off to lift."
 fi
 echo "note:   the model and window above apply to new conversations only -- resuming one"
 echo "        keeps whatever it was created with, whatever this banner says"
@@ -601,7 +618,7 @@ fi
 # matched: the hook always allows them, and matching them would spawn a process per edit for nothing.
 # A missing script is a hard error rather than a silent downgrade, for the same reason the prompt
 # files are: this launcher once ran for days claiming a prompt it was not sending.
-GUARD_JSON=""
+typeset -a HOOK_EVENTS
 if (( GUARD )); then
   GUARD_SCRIPT="$ROOT/scripts/cc-context-guard.py"
   if [[ ! -x "$GUARD_SCRIPT" ]]; then
@@ -611,9 +628,29 @@ if (( GUARD )); then
   fi
   GUARD_CMD="$GUARD_SCRIPT --window $CTX_TOKENS --framing $CTX_RESERVE"
   GUARD_CMD="$GUARD_CMD --stop-pct ${CLAUDE_GEMMA_STOP_PCT:-80}"
-  GUARD_JSON="  \"hooks\": { \"PreToolUse\": [ { \"matcher\": \"Read|Bash|WebFetch|WebSearch\","
-  GUARD_JSON="$GUARD_JSON \"hooks\": [ { \"type\": \"command\", \"command\": \"$GUARD_CMD\" } ] } ] },"
+  HOOK_EVENTS+=("\"PreToolUse\": [ { \"matcher\": \"Read|Bash|WebFetch|WebSearch\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$GUARD_CMD\" } ] } ]")
 fi
+
+# The depth gate and the contract that makes it fair. Registering the gate without the contract
+# would refuse answers against a shape the model was never told about, so the two are one switch.
+# SubagentStop is included because a subagent that closes early hands its parent a confident
+# summary, which is the same failure one level down and harder to see.
+if (( DEPTH )); then
+  DEPTH_GATE="$ROOT/scripts/cc-depth-gate.py"
+  DEPTH_CONTRACT="$ROOT/scripts/cc-depth-contract.py --adapter $DEPTH_ADAPTER"
+  if [[ ! -x "$ROOT/scripts/cc-depth-gate.py" || ! -x "$ROOT/scripts/cc-depth-contract.py" ]]; then
+    echo "error: depth hooks missing or not executable in $ROOT/scripts" >&2
+    echo "       launch without --depth to proceed" >&2
+    exit 1
+  fi
+  HOOK_EVENTS+=("\"SessionStart\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_CONTRACT\" } ] } ]")
+  HOOK_EVENTS+=("\"UserPromptSubmit\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_CONTRACT\" } ] } ]")
+  HOOK_EVENTS+=("\"Stop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\" } ] } ]")
+  HOOK_EVENTS+=("\"SubagentStop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\" } ] } ]")
+fi
+
+GUARD_JSON=""
+(( ${#HOOK_EVENTS} )) && GUARD_JSON="  \"hooks\": { ${(j:, :)HOOK_EVENTS} },"
 
 # enforceAvailableModels is set in the user's global settings and would reject a model
 # that is not on its list. Rather than editing that file, this session supplies its own.

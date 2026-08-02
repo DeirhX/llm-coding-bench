@@ -14,3 +14,7 @@ results/**/*.pid
 
 .pytest_cache/
 *.nohup.out
+
+# Per-session output of the depth gate: contract.json, claims.jsonl, gate.json.
+# Keyed by session id, so it is never the same twice and never worth a diff.
+artifacts/depth/
