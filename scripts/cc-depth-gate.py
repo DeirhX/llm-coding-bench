@@ -187,6 +187,11 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
                 gaps.append("%s cites %s:%s-%s, which no read in this session covered. Read it, "
                             "then quote what you see." % (label, ev.path, ev.start, ev.end))
                 report["verdicts"][-1]["verdict"] = "uncovered"
+            elif (check_coverage and ev.kind in (cc_ledger.ABSENCE, cc_ledger.LOG_MATCH)
+                  and not _was_searched(ev, calls)):
+                gaps.append("%s rests on %s that nothing in this session looked for. Run the search "
+                            "and report what it printed." % (label, ev.kind.replace("_", " ")))
+                report["verdicts"][-1]["verdict"] = "unsearched"
 
         if contract.defects_only and _is_opinion(claim):
             gaps.append("%s says a design will be inconvenient and names nothing it does wrong. "
@@ -317,6 +322,30 @@ _CONSEQUENCE = re.compile(r"(?i)\b(silently|crash\w*|raise\w*|throw\w*|wrong|inc
                           r"lost|loses|dropp?\w*|leak\w*|hang\w*|deadlock\w*|race|corrupt\w*|"
                           r"never (?:runs|fires|matches)|always (?:passes|fails)|off by|"
                           r"double[- ]count\w*|out of date|mismatch\w*|overflow\w*)\b")
+
+
+def _was_searched(ev, calls) -> bool:
+    """Did this session run something that could have produced this absence or log evidence?
+
+    The gate checked a quote against the file *and* against what the session read, but checked an
+    absence and a log match against the disk alone -- so a lucky guess passed, with no search behind
+    it. Its own review put it plainly: those two "verify state on disk but not observation in the
+    transcript". `absence` even says in its docstring that a claim of absence is only as good as the
+    search behind it, which was true of the ripgrep the verifier runs and not of the model.
+
+    Generous again: any command mentioning the pattern counts, and for a log, reading it counts too.
+    """
+    needle = str(getattr(ev, "pattern", "") or "").strip().lower()
+    if not needle:
+        return True
+    for call in calls:
+        if call.tool == "Bash" and needle in str(call.args.get("command") or "").lower():
+            return True
+        if (ev.kind == cc_ledger.LOG_MATCH and call.tool in ("Read", "Grep")
+                and os.path.basename(str(ev.path or "")).lower()
+                in str(call.args.get("file_path") or call.args.get("path") or "").lower()):
+            return True
+    return False
 
 
 def _is_opinion(claim) -> bool:

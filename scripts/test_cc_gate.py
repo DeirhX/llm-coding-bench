@@ -209,6 +209,25 @@ def test_an_opinion_is_legal_where_the_adapter_asks_for_one() -> None:
     assert "names nothing it does wrong" not in reason, reason
 
 
+ABSENT = ("CLAIM: nothing here handles the empty case.\n"
+          "EVIDENCE: absence: zzz_no_such_token in *.py\n")
+
+
+def test_an_absence_nobody_searched_for_is_refused() -> None:
+    """A quote was checked against the transcript; an absence was checked against the disk alone,
+    so a lucky guess passed with no search behind it. The gate found that about itself."""
+    reason = _blocks(ABSENT, adapter="refactor-proposal")
+    assert "nothing in this session looked for" in reason, reason
+
+
+def test_an_absence_that_was_searched_for_is_accepted() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        reason = Session(tmp, answer=ABSENT, adapter="refactor-proposal", bash=1,
+                         bash_command="rg -n zzz_no_such_token --glob '*.py'",
+                         bash_output="", bash_failed=True).run().get("reason", "")
+    assert "nothing in this session looked for" not in reason, reason
+
+
 def test_naming_only_the_program_is_not_a_falsification() -> None:
     """The gate's own review found this, and proved it by running python3 and writing "I ran
     python3". Every session runs python3 or rg at some point."""
