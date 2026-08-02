@@ -263,7 +263,12 @@ def invoke(prompt: str, model: str, head: Path, session: str, cwd: Path, setting
         cmd.append("--dangerously-skip-permissions")
     env = dict(os.environ)
     env.update({
-        "ANTHROPIC_BASE_URL": env.get("OLLAMA_HOST_URL", "http://127.0.0.1:11434"),
+        # Ollama is the default backend, not the only one. A caller that has already pointed
+        # ANTHROPIC_BASE_URL somewhere -- llama-server behind the proxy, say -- means it, and
+        # overwriting it here sent every request to Ollama, which answered that the model does not
+        # exist. The error names the model, so it reads as a bad --model rather than as this line.
+        "ANTHROPIC_BASE_URL": (env.get("ANTHROPIC_BASE_URL")
+                               or env.get("OLLAMA_HOST_URL", "http://127.0.0.1:11434")),
         "ANTHROPIC_AUTH_TOKEN": "ollama",
         "ANTHROPIC_API_KEY": "",
         "ANTHROPIC_MODEL": model,

@@ -224,3 +224,22 @@ def test_the_prediction_reaches_the_stage_that_must_honour_it() -> None:
     import cc_verify
     assert [p["expect"] for p in cc_verify.predictions((out / "plan.md").read_text())] \
         == ["AssertionError: 5 != 6"]
+
+
+def test_a_base_url_the_caller_set_is_not_overwritten(monkeypatch) -> None:
+    """Pointing the pipeline at llama-server has to be possible from outside it."""
+    import depth_pipeline as dp
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8099")
+    seen = {}
+
+    def fake(cmd, **kw):
+        seen.update(kw.get("env") or {})
+        raise SystemExit(0)
+
+    monkeypatch.setattr(dp.subprocess, "run", fake)
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            dp.invoke("p", "m", Path(tmp) / "h.md", "s", Path(tmp), Path(tmp) / "s.json", ())
+        except SystemExit:
+            pass
+    assert seen.get("ANTHROPIC_BASE_URL") == "http://127.0.0.1:8099", seen.get("ANTHROPIC_BASE_URL")

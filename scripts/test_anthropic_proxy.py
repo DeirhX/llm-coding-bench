@@ -227,3 +227,19 @@ def test_force_model_rewrites_whatever_the_client_asked_for() -> None:
         assert FakeUpstream.seen[-1]["model"] == "resident-31b"
     finally:
         ap.Proxy.force_model = ""
+
+
+def test_the_model_list_names_the_model_we_force() -> None:
+    """An empty list reads to the client as "no such model", and it refuses to start.
+
+    The failure it prints -- the selected model may not exist or you may not have access to it --
+    points at configuration rather than at an endpoint answering GET /v1/models with nothing.
+    """
+    _stack(18085, 18086)
+    ap.Proxy.force_model = "qwopus"
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:18086/v1/models", timeout=10) as fh:
+            body = json.loads(fh.read())
+    finally:
+        ap.Proxy.force_model = ""
+    assert [m["id"] for m in body["data"]] == ["qwopus"], body

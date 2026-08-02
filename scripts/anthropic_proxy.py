@@ -295,7 +295,14 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:                   # noqa: N802
         if self.path.rstrip("/").endswith("/models"):
-            self._json(200, {"data": [], "object": "list"})
+            # An empty list here is not "no opinion", it is "no such model": the client refuses to
+            # start with `the selected model may not exist`, which reads like a configuration
+            # problem miles from the actual cause. Advertising the model we force every request to
+            # is both truthful and the only answer that lets a session begin.
+            named = self.force_model or "local"
+            self._json(200, {"object": "list", "has_more": False,
+                             "data": [{"type": "model", "id": named, "display_name": named,
+                                       "created_at": "2020-01-01T00:00:00Z"}]})
         else:
             self._json(404, {"error": "not found"})
 
