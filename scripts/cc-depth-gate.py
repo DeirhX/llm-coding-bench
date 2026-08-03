@@ -186,7 +186,13 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
             claim.verdict, claim.detail = verdict.kind, verdict.detail
             report["verdicts"].append({"claim": claim.claim, "kind": ev.kind,
                                        "verdict": verdict.kind, "detail": verdict.detail})
-            if not verdict.ok:
+            if not verdict.ok and _read_showed(ev, calls, root):
+                # The file moved under the stage. Reported, because the reader should know the
+                # citation could not be checked against the file as it stands, but not counted
+                # against the stage, which quoted what it was shown.
+                report["verdicts"][-1]["verdict"] = "moved"
+                report.setdefault("moved", []).append(ev.path)
+            elif not verdict.ok:
                 gaps.append("%s: %s -- %s" % (label, verdict.kind, verdict.detail))
             elif (check_coverage and ev.kind == cc_ledger.FILE_QUOTE and ev.path and ev.start
                   and not cc_evidence.covers(ranges, ev.path, ev.start, ev.end or ev.start, root)):
@@ -500,6 +506,57 @@ def _is_probe(command: str | None) -> bool:
         if first and os.path.basename(first[0]) not in _LOOKING:
             return True
     return False
+
+
+def _read_showed(ev, calls: list, root: str) -> bool:
+    """Did a Read in this session show this quote in this file, whatever the file says now?
+
+    A file edited while a stage was reading it makes every citation of it look like fabrication:
+    the quote is verbatim, the address has moved, and the verdict says "not present in". That
+    happened twice in one afternoon here, to a stage that had done nothing wrong.
+
+    A Read result is written by the client, not by the model, so it cannot be arranged. Bash output
+    can be -- `echo` prints whatever it is given -- so only Read counts.
+
+    Showing the quote is not enough on its own: a stage that cites real text at line 200 when it
+    sits at line 4 has done the thing the line numbers exist to prevent, and the Read shows that
+    text too. So the file must also have changed since the Read, which the Read itself proves --
+    lines it displayed that the file no longer has anywhere.
+    """
+    if ev.kind != cc_ledger.FILE_QUOTE or not (ev.path and ev.quote):
+        return False
+    wanted = [ln.strip() for ln in ev.quote.splitlines() if ln.strip()]
+    if not wanted:
+        return False
+    for call in calls:
+        if call.tool != "Read" or not call.text:
+            continue
+        named = str(call.args.get("file_path") or "")
+        if not named.endswith(ev.path.lstrip("./")) and Path(named).name != Path(ev.path).name:
+            continue
+        if all(line in call.text for line in wanted) and _drifted(call, root, ev.path):
+            return True
+    return False
+
+
+_GUTTERED = re.compile(r"^\s{0,8}\d{1,6}(?:\s*[|:>]|\s)(?P<code>.*)$")
+
+
+def _drifted(call, root: str, path: str) -> bool:
+    """Does the file no longer hold what this Read displayed?"""
+    try:
+        now = Path(root, path).read_text(errors="replace")
+    except OSError:
+        return False
+    shown = []
+    for line in call.text.splitlines():
+        seen = _GUTTERED.match(line)
+        body = (seen.group("code") if seen else line).strip()
+        if len(body) > 12:
+            shown.append(body)
+    if not shown:
+        return False
+    return any(line not in now for line in sorted(shown, key=len, reverse=True)[:20])
 
 
 def _check(ev, root: str, calls: list):

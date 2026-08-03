@@ -20,6 +20,7 @@ _REPO = Path(__file__).resolve().parent.parent
 _GATE = str(_REPO / "scripts" / "cc-depth-gate.py")
 sys.path.insert(0, str(_REPO / "scripts"))
 
+import cc_evidence
 import cc_ledger  # noqa: E402
 
 SAMPLE = """def widen(rows):
@@ -677,3 +678,34 @@ def test_a_long_report_in_the_wrong_shape_is_not_told_it_stopped_early() -> None
                                     check_coverage=False, answer=report)
     assert any("No claims were stated" in g for g in gaps), gaps
     assert not any("ended before you answered" in g for g in gaps), gaps
+
+
+def test_a_file_edited_under_a_stage_is_not_the_stage_lying() -> None:
+    """Twice in one afternoon a stage quoted a file verbatim, the file was edited while it worked,
+    and the gate reported "quote not present in" -- which reads as fabrication and is not."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "g.py"
+        target.write_text("def guard():\n    return 'new text'\n")
+        shown = "  1  def guard():\n  2      return 'old text'\n"
+        call = cc_evidence.ToolCall(agent="claims", tool="Read", call_id="1",
+                                    args={"file_path": str(target)}, text=shown)
+        answer = "CLAIM: the guard returns the old text\nQUOTE: g.py:2 `    return 'old text'`\n"
+        claims, unknowns = cc_ledger.claims_from_text(answer, tmp)
+        gaps, report = _load_gate().evaluate(cc_ledger.contract_for("review"), claims, unknowns,
+                                             [call], tmp, check_coverage=False, answer=answer)
+        assert not gaps, gaps
+        assert report.get("moved"), report
+
+
+def test_a_quote_nothing_read_is_still_a_gap() -> None:
+    """The excuse rests on the transcript showing the text. Bash output does not count: a stage can
+    print whatever it likes with echo, and a Read result is written by the client."""
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "g.py").write_text("def guard():\n    return 'new text'\n")
+        faked = cc_evidence.ToolCall(agent="claims", tool="Bash", call_id="1",
+                                     args={"command": "echo"}, text="    return 'old text'")
+        answer = "CLAIM: the guard returns the old text\nQUOTE: g.py:2 `    return 'old text'`\n"
+        claims, unknowns = cc_ledger.claims_from_text(answer, tmp)
+        gaps, _ = _load_gate().evaluate(cc_ledger.contract_for("review"), claims, unknowns,
+                                        [faked], tmp, check_coverage=False, answer=answer)
+        assert gaps, "a quote only Bash showed is not evidence the file moved"
