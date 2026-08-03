@@ -602,8 +602,11 @@ HEADERS = ("CLAIM:", "EVIDENCE:", "QUOTES:", "QUOTE:", "UNKNOWN:", "SEVERITY:", 
 # `QUOTE (lines 212-217):` -- the header with the range said in passing before the colon. Written
 # that way by a stage whose ledger was otherwise complete, and unrecognised as a header at all, so
 # the quote never attached to anything and nine claims were reported as incomplete.
+# Case-insensitive because a stage writing a report writes `Evidence:`, not `EVIDENCE:`. Matched
+# only at the start of a line and only before a colon, which is where a header lives and where prose
+# does not put these words. 188 claims cited nothing over the case of one letter.
 HEADER_RE = re.compile(r"^(?P<name>%s)\s*(?:\([^)]*\))?\s*:"
-                       % "|".join(h.rstrip(":") for h in HEADERS))
+                       % "|".join(h.rstrip(":") for h in HEADERS), re.I)
 
 # The four shapes an EVIDENCE line may take. Only the first was accepted originally, which quietly
 # made two adapters impossible to satisfy: refactor-proposal requires an `absence` search and
@@ -765,7 +768,7 @@ def _elided(body: str) -> list[str]:
 
 
 _MARKED = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?P<name>%s)\s*(?:\([^)]*\))?\s*:(?P<body>.*)$"
-                     % "|".join(h.rstrip(":") for h in HEADERS))
+                     % "|".join(h.rstrip(":") for h in HEADERS), re.I)
 _EMPHASIS = re.compile(r"(\*\*|__|\*|_)")
 # `**Finding 1: the rule is broader than its intent.**` -- what a review stage calls a claim when
 # nobody has told it the word. A seven-finding report with a path and a line range under every one
@@ -777,6 +780,13 @@ _SYNONYM = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?:finding\s*#?\s*\d+|(?:issue|
 # no evidence under it, so a report of four findings scored eight claims, half of them citing
 # nothing, and the arithmetic made an accurate report look like a half-empty one.
 _CONCLUSION = re.compile(r"^[\s>*_#-]{0,6}(?:finding|conclusion|verdict)s?\s*:", re.I)
+
+# `CLAIMS` on a line of its own, and then `**1. The off-switch can still be turned on.**` -- the word
+# said once as a heading and the findings numbered under it, which is how a person writes a report.
+# Nothing in it says CLAIM, so a stage that made 188 of these parsed as none and was told no claims
+# were stated. Only numbered under such a heading: a numbered list in prose is a numbered list.
+_SECTION = re.compile(r"^[\s>*_#]{0,6}(?:claims|findings)\s*:?\s*[*_#]{0,3}\s*$", re.I)
+_NUMBERED = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?P<n>\d{1,3})[.)]\s+(?P<rest>\S.*)$")
 
 
 def _starts_with_citation(line: str) -> bool:
@@ -802,7 +812,15 @@ def normalise(text: str) -> str:
     """
     out: list[str] = []
     claimed = False                 # the last header emitted was a CLAIM, so a citation is its own
+    listing = False                 # a CLAIMS heading has been seen, so numbered items are claims
     for line in text.split("\n"):
+        if _SECTION.match(line):
+            listing = True
+            out.append(line)
+            continue
+        numbered = _NUMBERED.match(line) if listing else None
+        if numbered and not HEADER_RE.match(line) and not _SYNONYM.match(line):
+            line = "%sCLAIM: %s" % (numbered.group("lead"), numbered.group("rest"))
         if _CONCLUSION.match(line) and not HEADER_RE.match(line) and not _SYNONYM.match(line):
             out.append(line)
             continue
@@ -834,8 +852,8 @@ def normalise(text: str) -> str:
                 # is trailing prose, so it was dropped: eight findings arrived as `claim 1 ()` and
                 # were refused for citing nothing, the citations having gone the same way.
                 body, extra = extra, ""
-        out.append("%s: %s" % (seen.group("name"), body.strip()))
-        claimed = seen.group("name") == "CLAIM"
+        out.append("%s: %s" % (seen.group("name").upper(), body.strip()))
+        claimed = seen.group("name").upper() == "CLAIM"
         if extra.strip() and _classify_all(extra.strip()):
             out.append("EVIDENCE: %s" % extra.strip())
             claimed = False
@@ -1089,7 +1107,7 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
 
     for line in text.split("\n"):
         seen = HEADER_RE.match(line)
-        header = seen.group("name") + ":" if seen else None
+        header = seen.group("name").upper() + ":" if seen else None
         if header == "QUOTES:":
             header = "QUOTE:"
         if quote is not None and header is None:

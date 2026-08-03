@@ -860,3 +860,47 @@ def test_a_quote_in_no_file_resolves_to_no_file() -> None:
         Path(root, "g.py").write_text("import re\nVERBS = 1\n")
         _tracked_repo(root)
         assert vf.resolve_path(root, 2, 2, "NOTHING_LIKE_THIS = 9") is None
+
+
+def test_findings_numbered_under_a_claims_heading_are_claims() -> None:
+    """The word said once as a heading and the findings numbered under it, which is how a person
+    writes a report. A stage that made 188 of these parsed as none and was told no claims were
+    stated -- so the cap it had blown never even applied."""
+    text = ("CLAIMS\n\n"
+            "**1. The switch can still be made.** scripts/g.py:12-14\n"
+            "**2. The removal is allowed.** scripts/g.py:20-20\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 2, [c["claim"] for c in claims]
+    assert claims[0]["claim"] == "The switch can still be made.", claims[0]
+    assert claims[0]["evidence"][0]["start"] == 12, claims[0]["evidence"]
+
+
+def test_a_numbered_list_outside_a_claims_heading_is_a_numbered_list() -> None:
+    text = ("Here is what I did:\n"
+            "1. Read the file.\n"
+            "2. Ran the hook.\n"
+            "CLAIM: the rule is narrow.\n"
+            "EVIDENCE: scripts/g.py:1-2\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, [c["claim"] for c in claims]
+
+
+def test_a_header_written_the_way_a_person_writes_it_is_a_header() -> None:
+    """`Evidence:` is what a stage writing a report writes. 188 claims cited nothing over the case of
+    one letter."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("\n" * 11 + "if x:\n    pass\n")
+        claims, _ = vf.parse_ledger("Claim: the rule is narrow.\n"
+                                    "Evidence: g.py:12-13\n"
+                                    "Quote: Line 12: `if x:`\n")
+        assert len(claims) == 1, claims
+        piece = claims[0]["evidence"][0]
+        assert piece["start"] == 12 and piece["path"] == "g.py", piece
+        assert vf.file_quote(root, "g.py", 12, 13, piece["quote"]).ok
+
+
+def test_the_word_in_a_sentence_is_still_not_a_header() -> None:
+    claims, _ = vf.parse_ledger("CLAIM: the evidence: it was never read.\n"
+                                "EVIDENCE: scripts/g.py:1-2\n")
+    assert len(claims) == 1, claims
+    assert claims[0]["claim"].startswith("the evidence:"), claims[0]
