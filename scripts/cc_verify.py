@@ -409,7 +409,7 @@ LOG_EV = re.compile(r"^log:\s*(?P<path>\S+)\s*~\s*(?P<pattern>.+)$", re.I)
 # `cc-context-guard.py lines 174, 188-189, 212-213` -- the path and the lines, with everything but
 # the colon. Written this way by every stage that has run here, and refused by a parser that wanted
 # `path:174`, which is a quarrel about punctuation rather than about evidence.
-PATH_LINES = re.compile(r"(?P<path>[^\s`*'\",]+\.[A-Za-z0-9_]+)\s+lines?\s+"
+PATH_LINES = re.compile(r"(?P<path>[^\s`*'\",]+\.[A-Za-z0-9_]+)\s*,?\s+lines?\s+"
                         r"(?P<ranges>\d{1,6}(?:\s*[-\u2013]\s*\d{1,6})?"
                         r"(?:\s*,\s*\d{1,6}(?:\s*[-\u2013]\s*\d{1,6})?)*)")
 ONE_RANGE = re.compile(r"(?P<start>\d{1,6})(?:\s*[-\u2013]\s*(?P<end>\d{1,6}))?")
@@ -421,22 +421,51 @@ LINES_PATH = re.compile(r"lines?\s+(?P<ranges>\d{1,6}(?:\s*[-\u2013]\s*\d{1,6})?
                         r"\s+(?:of|in|from)\s+(?P<path>[^\s`*'\",]+\.[A-Za-z0-9_]+)")
 
 
+# `guard.py, line 208: "# A stage put a test run in the background"` -- the quote on the citation's
+# own line instead of under a QUOTE header. Only text in quotes or backticks is taken this way; the
+# prose a claim ends with is not evidence and must not be compared against the file as though it
+# were, which would turn "no citation" into "quote not present" and read as fabrication.
+_INLINE_QUOTE = re.compile(r"^\s*[:,-]?\s*(?P<q>[\"'`])(?P<text>.+)(?P=q)\s*$", re.S)
+
+
+def _inline_quote(body: str, path: str, ranges: str) -> str | None:
+    """The quoted text a citation is followed by on its own line, if that is all that follows.
+
+    Read from the body as written rather than the copy with backticks and asterisks stripped: the
+    stripping is there to see through decoration around a path, and run over a quote it eats the
+    `*` out of `\\s*` and leaves a citation that cannot match the file it came from.
+    """
+    where = re.search(re.escape(path) + r"[^\n]*?" + re.escape(ranges), body)
+    if where is None:
+        return None
+    found = _INLINE_QUOTE.match(body[where.end():])
+    return found.group("text") if found else None
+
+
 def _path_lines(body: str) -> list[dict]:
     """Citations written as a path followed by the lines, rather than path:line."""
     out = []
     plain = DECORATION.sub("", body)
     for found in LINES_PATH.finditer(plain):
+        inline = _inline_quote(body, found.group("path"), found.group("ranges"))
         for span in ONE_RANGE.finditer(found.group("ranges")):
             start = int(span.group("start"))
-            out.append({"kind": "file_quote", "path": found.group("path"), "start": start,
-                        "end": int(span.group("end") or start)})
+            piece = {"kind": "file_quote", "path": found.group("path"), "start": start,
+                     "end": int(span.group("end") or start)}
+            if inline:
+                piece["quote"] = inline
+            out.append(piece)
     if out:
         return out
-    for found in PATH_LINES.finditer(DECORATION.sub("", body)):
+    for found in PATH_LINES.finditer(plain):
+        inline = _inline_quote(body, found.group("path"), found.group("ranges"))
         for span in ONE_RANGE.finditer(found.group("ranges")):
             start = int(span.group("start"))
-            out.append({"kind": "file_quote", "path": found.group("path"), "start": start,
-                        "end": int(span.group("end") or start)})
+            piece = {"kind": "file_quote", "path": found.group("path"), "start": start,
+                     "end": int(span.group("end") or start)}
+            if inline:
+                piece["quote"] = inline
+            out.append(piece)
     return out
 
 
@@ -564,6 +593,14 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
             rest = line[seen.end():].strip()
             if rest:
                 quote.append(rest)
+        elif header is None and evidence is not None and _classify_all(line.strip()):
+            # A citation on a line of its own, under an EVIDENCE header that named another. Five
+            # arrived that way in one block and only the first was read; the rest were dropped, and
+            # the claim they supported was reported as citing nothing.
+            more = _classify_all(line.strip())
+            current["evidence"].extend(more)
+            cited = more
+            evidence = more[-1]
         elif header == "SEVERITY:":
             current["severity"] = line[seen.end():].strip().lower()
         elif header == "FALSIFICATION:":

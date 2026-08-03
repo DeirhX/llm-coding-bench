@@ -402,3 +402,30 @@ def test_an_unknown_declared_as_a_claim_is_an_unknown() -> None:
     claims, unknowns = vf.parse_ledger("CLAIM: UNKNOWN: whether the suite is slow\n")
     assert claims == [], claims
     assert unknowns == ["whether the suite is slow"], unknowns
+
+
+def test_a_quote_given_on_the_citation_line_is_read() -> None:
+    """`guard.py, line 208: "# comment"` -- the quote where the citation is, rather than under a
+    QUOTE header. Eight claims in a row were reported as citing nothing for writing it this way."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("def _inline_quote("))
+    text = 'CLAIM: x\nEVIDENCE: scripts/cc_verify.py, line %d: "%s"\n' % (n, body[n - 1])
+    claims, _ = vf.parse_ledger(text, ROOT)
+    assert claims[0]["quote"] == body[n - 1], claims[0]
+    assert vf.verify_ledger(ROOT, text)[0][1].ok, vf.verify_ledger(ROOT, text)[0][1].detail
+
+
+def test_prose_after_a_citation_is_not_taken_for_a_quote() -> None:
+    """Comparing a claim's own words against the file would report fabrication where there was
+    only a missing quote."""
+    found = vf._classify_all("scripts/cc_verify.py line 10 defines the pattern it needs")
+    assert found and "quote" not in found[0], found
+
+
+def test_every_citation_in_a_multi_line_evidence_block_is_read() -> None:
+    """Five citations arrived under one EVIDENCE header, on lines of their own. Only the first was
+    read and the claim was reported as citing nothing."""
+    claims, _ = vf.parse_ledger(
+        "CLAIM: x\nEVIDENCE: a/b.py line 10\nc/d.py line 20\ne/f.py line 30\n")
+    paths = [e.get("path") for e in claims[0]["evidence"]]
+    assert paths == ["a/b.py", "c/d.py", "e/f.py"], claims[0]["evidence"]
