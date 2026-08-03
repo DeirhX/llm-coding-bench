@@ -1403,12 +1403,49 @@ retried.
 
 `claude-gemma.sh` had declared the window since the first week. `flow_smoke.sh` -- where every long
 unattended run happens -- never did. **Check the environment of the launcher you actually use**, not
-the one you read. The headless path now asks llama-server for `n_ctx` at `/props` and declares it
-short by 8k, because the client and the server do not count tokens the same way.
+the one you read. The headless path now asks llama-server for `n_ctx` at `/props` and declares
+three quarters of it, because 8k was not enough: see the next section but one.
 
 And note what the two failures of run 18 have in common: a stage was starved of output room by
 refusals, and the session was killed by a prompt nobody was compacting. Both are the context window
 being consumed by the harness rather than by the work, and neither shows up as a harness error.
+
+### 128k buys room for four minutes, once -- and 2.2x on decode
+
+We widened the runner from `-c 98304` to `-c 131072`, because a harness whose refusals are charged to
+the context needs the room more than it needs the tokens per second. The price, measured on
+Qwopus3.6-35B-A3B Q8_0 with `--spec-type ngram-mod` immediately after the change:
+
+| | prompt | prefill | decode |
+|---|---|---|---|
+| short turn | 18 tokens | 0.08 s | **93.2 t/s** |
+| cold, near the ceiling | 123,738 tokens | **237.2 s** (521.8 t/s) | **43.1 t/s** |
+| same head, next turn | 517 new tokens | 2.1 s | 42.5 t/s |
+
+Three things follow, and only one of them is the one people expect.
+
+**Decode costs 2.2x at depth, not 4x.** 93 t/s shallow against 43 t/s at 124k. The 22.6 t/s in the old
+98k session's log is not the comparison it looks like: that turn ran with the machine under memory
+pressure and the prompt cache thrashing (`making room for prompt cache entry` appears hundreds of times,
+evicting 1.3-2.2 GiB entries). Depth is a slope; contention is a cliff.
+
+**The real tax is the cold prefill, and it is paid per head, not per turn.** Four minutes to fill the
+window from nothing, three seconds to ask a second question of the same head. §1's rule -- every agent
+prompt shares a byte-identical head, all variation at the end -- was worth two minutes at 98k. At 128k
+it is worth four, and a refusal round that perturbs the head pays it again. That is the same arithmetic
+as "a gated stage costs 1.8-2.5x an ungated one", now with a larger multiplicand.
+
+**It was never a memory decision.** 35 GB of weights and a full window of KV sat at 41.7 GiB wired with
+24 GiB free. Both 96k and 128k fit; what does not fit is a second model, which is why nothing else may
+be resident.
+
+Two smaller notes from the same restart. `--swa-full` is accepted and silently discarded --
+`swa_full is not supported by this model, it will be disabled` -- so the disk-parking mechanism §6 ruled
+out for gemma is not available here either, for a different reason. And the declared window is now the
+*lower* of the framing ceiling and three quarters of the real one, on both launchers: a fixed reserve
+covers the tools the client does not count, but not the 9.8% by which its estimate trails the runner's
+tokeniser, and at 128k a lean session's 8,192 reserve would have declared 122,880 -- about 135k as the
+server counts it, outside a window we had just widened to fit it.
 
 ### Two models resident is a memory failure with no error message
 

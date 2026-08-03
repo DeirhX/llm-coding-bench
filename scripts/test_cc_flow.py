@@ -951,3 +951,15 @@ def test_the_declared_window_leaves_room_for_the_two_token_counts_to_disagree() 
     and the gap grows with the prompt."""
     text = (pathlib.Path(__file__).resolve().parent / "flow_smoke.sh").read_text()
     assert "DECLARED=$(( CTX * 3 / 4 ))" in text, "the margin is back to a rounding allowance"
+
+
+def test_the_widest_window_is_declared_with_the_margin_the_counts_need() -> None:
+    """A framing reserve does not cover the second error. Run 20 declared 90,112 against a 98,304
+    window and died at 98,950 -- 9.8% past what it believed, because the client estimates tokens and
+    the runner tokenises them. At 128k a lean session's 8,192 reserve would declare 122,880, which is
+    about 135k as the runner counts it: outside a window we had just widened to fit it."""
+    done = subprocess.run(["zsh", str(HERE / "claude-gemma.sh"), "128k", "--print-settings"],
+                          capture_output=True, text=True, timeout=180)
+    printed = done.stdout[done.stdout.index("{"):]
+    declared = int(json.loads(printed)["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"])
+    assert declared <= 131072 * 3 // 4, declared

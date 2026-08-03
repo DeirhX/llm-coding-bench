@@ -12,7 +12,7 @@
 set -uo pipefail
 LS=/Applications/Ollama.app/Contents/Resources/llama-server
 GGUF=$HOME/models/qwopus/Qwopus3.6-35B-A3B-Coder-MTP-Q8_0.gguf
-CTX=${CTX:-32768}
+CTX=${CTX:-131072}
 # llama.cpp builds a tool-call parser by rendering the model's own template against synthetic
 # conversations, and this coder's template raises on a system message that is not first -- which one
 # of those probes always is. Every request carrying tools then fails with a 400 about parser
