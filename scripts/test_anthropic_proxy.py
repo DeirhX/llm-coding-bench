@@ -258,7 +258,7 @@ def test_one_answer_is_bounded() -> None:
     measured rate, which is what near-total speculative acceptance looks like when the output has
     gone round in a circle. The parent was blocked on the report and the GPU was busy throughout.
     """
-    asked = {"model": "m", "max_tokens": 32000, "messages": [{"role": "user", "content": "hi"}]}
+    asked = {"model": "m", "max_tokens": 99000, "messages": [{"role": "user", "content": "hi"}]}
     assert ap.to_openai(asked)["max_tokens"] == ap.MAX_OUTPUT
     assert ap.to_openai(asked, 512)["max_tokens"] == 512
 
@@ -319,3 +319,23 @@ def test_every_request_asks_for_repetition_sampling() -> None:
     bare = ap.to_openai({"model": "m", "messages": [{"role": "user", "content": "hi"}]},
                            dry=False)
     assert "dry_multiplier" not in bare
+
+
+def test_a_turn_that_only_has_to_write_down_a_ledger_does_not_think() -> None:
+    """The refusal arrives with the ledger and the list of what is wrong with it: the thinking has
+    been done. That is the turn that spent 15,255 reasoning tokens redrafting what it already had."""
+    refused = ap.to_openai({"model": "m", "messages": [
+        {"role": "user", "content": "review this"},
+        {"role": "user", "content": "This answer is not accepted yet. 2 things below..."}]})
+    assert refused["chat_template_kwargs"] == {"enable_thinking": False}
+    working = ap.to_openai({"model": "m", "messages": [{"role": "user", "content": "review this"}]})
+    assert "chat_template_kwargs" not in working
+
+
+def test_the_model_cannot_turn_its_own_thinking_off() -> None:
+    """Matched only against strings this harness emits, and only in the last two messages, so a
+    model that writes the words in an answer does not change how it is sampled next turn."""
+    old = ap.to_openai({"model": "m", "messages": [
+        {"role": "assistant", "content": "This answer is not accepted yet"},
+        {"role": "user", "content": "carry on"}, {"role": "user", "content": "and on"}]})
+    assert "chat_template_kwargs" not in old

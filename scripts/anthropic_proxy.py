@@ -83,7 +83,7 @@ def _text_of(content: Any) -> str:
 # the same budget, and a ten-claim ledger with quotes ran past it twice. Still far under the client's
 # 32,000, which is the number that matters -- a cut answer is recoverable, but only because the cut
 # is reported as an ordinary turn rather than as the max_tokens stop that ends a session.
-MAX_OUTPUT = 16384
+MAX_OUTPUT = 32768
 
 
 # Repetition sampling, sent with every request because the failure it addresses is not occasional.
@@ -93,6 +93,22 @@ MAX_OUTPUT = 16384
 # continuation that would repeat a sequence already produced, which is exactly that loop, and the
 # allowed length is long enough that repeated code and repeated citations are still cheap.
 DRY = {"dry_multiplier": 0.8, "dry_base": 1.75, "dry_allowed_length": 12, "dry_penalty_last_n": -1}
+
+# Turns where the harness has already told the model what to write. The gate's refusal arrives with
+# the ledger and the list of what is wrong with it, and the cut note asks for the short version --
+# in both cases the thinking has been done and the work left is transcription. Those are exactly the
+# turns that looped: one spent 15,255 reasoning tokens redrafting a ledger it had already written.
+# Only strings this harness itself emits are matched, so nothing the model says can turn it off.
+NO_THINKING = ("This answer is not accepted yet", "cut off at", "Write the ledger now")
+
+
+def _transcribing(messages: list) -> bool:
+    for message in messages[-2:]:
+        content = message.get("content")
+        text = content if isinstance(content, str) else json.dumps(content)
+        if any(mark in (text or "") for mark in NO_THINKING):
+            return True
+    return False
 
 
 def to_openai(body: dict, ceiling: int = 0, dry: bool = True) -> dict:
@@ -175,6 +191,8 @@ def to_openai(body: dict, ceiling: int = 0, dry: bool = True) -> dict:
         # Unknown fields are ignored by servers that do not sample this way, so this costs nothing
         # against an endpoint that is not llama.cpp.
         out.update(DRY)
+    if _transcribing(messages):
+        out["chat_template_kwargs"] = {"enable_thinking": False}
     return out
 
 
