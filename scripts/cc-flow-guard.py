@@ -120,6 +120,8 @@ def compose(stage, flow: str, task: str, prior: list[str], refused: str = "",
 
 # What the session may do while it is orchestrating rather than working. Bookkeeping and talking to
 # the user are not the work; reading the code is.
+EDITS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
 CLERICAL = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput",
             "AskUserQuestion", "ExitPlanMode", "SlashCommand"}
 
@@ -153,6 +155,16 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
         # it was about to cite, announcing each time that it needed to re-read them first.
         spent = cc_flowstate.spend(state, in_flight[0])
         cc_flowstate.save(state, session, root)
+        # A stage that reads and judges must not write. The scripted path checks the tree's
+        # fingerprint after the fact; here there is no after, so the edit is refused as it is made.
+        # Run 12's claims stage wrote six test files into the worktree it was reviewing.
+        if tool in EDITS:
+            stage = cc_flow.stage_in(state.get("flow") or "", in_flight[0])
+            if stage is not None and not stage.writes:
+                deny("The %s stage does not write. Leave the tree exactly as you found it and put "
+                     "what you learned in your answer. A file you create is not evidence here: "
+                     "nothing reads it, and the stage after you sees the tree, not your scratch."
+                     % in_flight[0])
         if spent > cc_flowstate.CALL_BUDGET:
             deny("You have spent %d tool calls on the %s stage. Stop reading and write your answer "
                  "now from what you have already seen. Anything you could not establish is an "

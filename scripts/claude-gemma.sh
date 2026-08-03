@@ -187,6 +187,7 @@ USAGE
 # endpoint: a deny is honoured under --dangerously-skip-permissions and its text reaches the model
 # as the tool result. Lift it for a session with `touch /tmp/cc-guard-off`, or launch --no-guard.
 PRE_TOOL=()
+PRINT_SETTINGS=0
 GUARD=1
 LIFTABLE=0
 DEPTH=0
@@ -236,6 +237,10 @@ while [[ $# -gt 0 ]]; do
       exit 0 ;;
     -h|--help) usage; exit 0 ;;
     --liftable) LIFTABLE=1; shift ;;
+    # Prints the settings this launch would use and exits. The hooks are assembled here at
+    # runtime, so reading the source is not the same as knowing what gets registered: three
+    # fixes in a row went in behind matchers that never routed the tool they were about.
+    --print-settings) PRINT_SETTINGS=1; shift ;;
     --) shift; CLAUDE_ARGS=("$@"); break ;;
     *) CLAUDE_ARGS+=("$1"); shift ;;
   esac
@@ -694,7 +699,10 @@ if (( FLOWS )); then
   fi
   # No matcher: while a flow is running, a tool call that does a stage's work outside a stage is
   # refused, and that is not a question about which tool it was.
-  PRE_TOOL+=("{ \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] }")
+  # First, so that its refusals are the ones the model reads. Behind the context guard, the call
+  # budget was invisible: run 12 spent 280 calls against a budget of 140 and never once saw the
+  # message telling it to stop, because a refusal from the hook ahead of it got there first.
+  PRE_TOOL=("{ \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] }" ${PRE_TOOL[@]+"${PRE_TOOL[@]}"})
   # And afterwards, because a launch this hook permits can still be refused by the client -- which
   # left the flow holding a stage that never existed, and refusing every retry as a duplicate.
   HOOK_EVENTS+=("\"PostToolUse\": [ { \"matcher\": \"Task|Agent|TaskList|TaskOutput\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] } ]")
@@ -746,6 +754,11 @@ $GUARD_JSON
 }
 JSON
 )
+
+if [[ "$PRINT_SETTINGS" == "1" ]]; then
+  echo "$SESSION_SETTINGS"
+  exit 0
+fi
 
 echo
 

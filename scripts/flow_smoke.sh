@@ -52,8 +52,8 @@ cat > "$SETTINGS" <<JSON
     "SessionStart": [ { "hooks": [ { "type": "command", "command": "$CONTRACT" } ] } ],
     "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "$CONTRACT" } ] } ],
     "PreToolUse": [
-      { "matcher": "Read|Bash|WebFetch|WebSearch|Write|Edit|MultiEdit", "hooks": [ { "type": "command", "command": "$GUARD" } ] },
-      { "hooks": [ { "type": "command", "command": "$FLOW" } ] }
+      { "hooks": [ { "type": "command", "command": "$FLOW" } ] },
+      { "matcher": "Read|Bash|WebFetch|WebSearch|Write|Edit|MultiEdit", "hooks": [ { "type": "command", "command": "$GUARD" } ] }
     ],
     "PostToolUse": [
       { "matcher": "Task|Agent|TaskList|TaskOutput", "hooks": [ { "type": "command", "command": "$FLOW" } ] }

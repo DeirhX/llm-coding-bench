@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import os
 import subprocess
 import sys
@@ -768,3 +769,60 @@ def test_the_hand_back_survives_the_hook_and_not_just_the_function() -> None:
         sent = (out.get("updatedInput") or {}).get("prompt", "")
         assert "the switch can be made under another name" in sent, sent[:400]
         assert "claim 6 cites a command nothing ran" in sent, sent[:400]
+
+
+def _edit(session: str, root: str, tool: str = "Write", path: str = "probe.py") -> tuple[str, str]:
+    payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": session,
+               "cwd": root, "tool_input": {"file_path": str(Path(root, path)), "content": "x = 1"}}
+    proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                          capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    if not proc.stdout.strip():
+        return "allow", ""
+    out = json.loads(proc.stdout)["hookSpecificOutput"]
+    return out.get("permissionDecision", "allow"), out.get("permissionDecisionReason", "")
+
+
+def test_a_stage_that_only_reads_cannot_write_to_the_tree_it_judges() -> None:
+    """The scripted path takes the tree's fingerprint and compares it afterwards. Interactively
+    there is no afterwards, so the edit is refused as it is made: run 12's claims stage wrote six
+    test files into the worktree it was reviewing."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "q", "writes", root)
+        cc_flowstate.record_launch(state, "claims")
+        cc_flowstate.save(state, "writes", root)
+        decision, why = _edit("writes", root)
+        assert decision == "deny", why
+        assert "does not write" in why
+
+
+def test_a_stage_that_is_meant_to_write_still_may() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("change", "q", "allowed", root)
+        cc_flowstate.record_launch(state, "implement")
+        cc_flowstate.save(state, "allowed", root)
+        decision, why = _edit("allowed", root)
+        assert decision != "deny", why
+
+
+def test_the_budget_refusal_is_the_one_the_model_reads() -> None:
+    """Behind the context guard the budget was invisible: run 12 spent 280 tool calls against a cap
+    of 140 and never saw the message that says stop, because the hook ahead of it refused first.
+
+    The launcher assembles its hooks at runtime, so this asks it what it would register rather than
+    reading the source -- which is the difference that hid three fixes behind matchers that never
+    routed the tool they were about.
+    """
+    settings = json.loads(pathlib.Path(HERE, "flow_smoke.sh").read_text()
+                          .split("cat > \"$SETTINGS\" <<JSON")[1].split("\nJSON")[0]
+                          .replace("$BASE", "b").replace("$MODEL", "m").replace("$CONTRACT", "c")
+                          .replace("$GUARD", "context-guard").replace("$FLOW", "flow-guard")
+                          .replace("$GATE", "g"))
+    order = [h["hooks"][0]["command"] for h in settings["hooks"]["PreToolUse"]]
+    assert order[0] == "flow-guard", order
+
+    done = subprocess.run(["zsh", str(HERE / "claude-gemma.sh"), "--flows", "--print-settings"],
+                          capture_output=True, text=True, timeout=120)
+    printed = done.stdout[done.stdout.index("{"):]
+    hooks = json.loads(printed)["hooks"]["PreToolUse"]
+    assert "cc-flow-guard" in hooks[0]["hooks"][0]["command"], hooks

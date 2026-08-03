@@ -266,13 +266,34 @@ def test_the_model_may_not_turn_the_guard_off():
                     # Found by a review of this rule, which ran each of them against the hook:
                     # neither dd nor ln was a write verb, and both make the file.
                     "dd of=/tmp/cc-guard-off",
-                    "ln -s /dev/null /tmp/cc-guard-off",
-                    "rm -f /tmp/cc-guard-off"):
+                    "ln -s /dev/null /tmp/cc-guard-off"):
         decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
         assert decision == "deny", command
     decision, _ = run("Write", {"file_path": "/tmp/cc-guard-off", "content": ""},
                       TMP / "none.jsonl")
     assert decision == "deny"
+
+
+def test_putting_the_guard_back_is_not_tampering():
+    """Removing a switch leaves the guard stricter than it found it, which is not an attack on it.
+
+    This rule cost run 12 its claims stage. Told to review the off-switch rule, the stage made
+    switches and removed them again, and every removal was refused as tampering until the round had
+    been spent arguing with the hook -- 262 refusals, no findings.
+    """
+    setup()
+    for command in ("rm -f /tmp/cc-guard-off",
+                    "rm -f /tmp/cc-guard-off /tmp/cc-depth-off",
+                    "unlink /tmp/cc-guard-off"):
+        decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision != "deny", command
+
+
+def test_a_file_that_merely_starts_with_the_name_is_not_the_switch():
+    setup()
+    for command in ("touch /tmp/cc-guard-off.notes", "rm -rf /tmp/build"):
+        decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision != "deny", command
 
 
 def test_a_stage_may_ask_the_hook_what_it_would_do():

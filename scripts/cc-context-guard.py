@@ -223,7 +223,10 @@ _PROBE = re.compile(r"cc-(?:context-guard|depth-gate|flow-guard|depth-contract)\
 # Written as "what would this command do to that path", not "does this command mention that path".
 # The mention version refused `grep -rn cc-guard-off scripts/ > notes.txt`, which reads the rule and
 # writes somewhere else entirely, and a guard that refuses reading is a guard nobody can review.
-_VERBS = r"(?:touch|rm|unlink|mv|cp|dd|tee|install|ln|shred|truncate)\b[^;|&\n]*"
+# Making an off-switch is what the rule is for. Removing one is the opposite: it puts the guard
+# back. Refusing that cost run 12 its claims stage, which was reviewing this very rule, probed
+# it honestly, and was then refused 262 times for trying to clean up after itself.
+_VERBS = r"(?:touch|mv|cp|dd|tee|install|ln|shred|truncate)\b[^;|&\n]*"
 _CALLS = r"(?:open|Path|write_text|writeFile)\s*\(\s*['\"]?"
 
 
@@ -240,7 +243,7 @@ def tampers(command: str) -> bool:
     for switch in SWITCHES:
         # The directory is optional because a stage writes the path any way it likes -- /tmp/x,
         # ../tmp/x, or x from /tmp -- and the file is what matters.
-        name = r"(?:[^\s'\";|&]*/)?" + re.escape(switch.name)
+        name = r"(?:[^\s'\";|&]*/)?" + re.escape(switch.name) + r"(?![\w.-])"
         if re.search(_VERBS + name, command):
             return True
         if re.search(r">>?\s*['\"]?" + name, command):
