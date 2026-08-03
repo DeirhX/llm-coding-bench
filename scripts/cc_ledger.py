@@ -399,7 +399,9 @@ def contract_markdown(contract: Contract) -> str:
         # actually ran, which is evidence, so the form is always offered.
         lines += ["", "A claim about what the code does, rather than what it says, may cite the run "
                   "instead: " + extra[COMMAND_RESULT][0] + " -- checked against the commands you "
-                  "actually ran in this session."]
+                  "actually ran in this session. Both halves are needed. Eight citations in one "
+                  "round named a command and stopped there, which asserts nothing that can be "
+                  "checked and is refused: say what it printed, or that it printed nothing."]
     if contract.min_probes:
         lines.append("")
         lines.append("You must actually run at least %d command(s); describing one does not count."
