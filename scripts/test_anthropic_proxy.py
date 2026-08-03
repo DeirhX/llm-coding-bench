@@ -307,3 +307,15 @@ def test_a_streamed_tool_call_cut_in_half_is_dropped_and_the_cut_is_stated() -> 
     assert "tool_use" not in body, body
     assert "cut off at 8192 tokens" in body, body
     assert '"stop_reason": "end_turn"' in body, body
+
+
+def test_every_request_asks_for_repetition_sampling() -> None:
+    """A claims stage spent 15,255 tokens of reasoning redrafting one ledger -- 787 lines, 211 of
+    them distinct -- hit the ceiling, had its tool call dropped and died without answering. Run 9
+    did that 31 times, which is hours of a machine that generates at 70 tokens a second."""
+    sent = ap.to_openai({"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+    assert sent["dry_multiplier"] > 0
+    assert sent["dry_allowed_length"] >= 8, "short repeats are normal in code and citations"
+    bare = ap.to_openai({"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+                           dry=False)
+    assert "dry_multiplier" not in bare

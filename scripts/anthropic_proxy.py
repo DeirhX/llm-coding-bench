@@ -86,7 +86,16 @@ def _text_of(content: Any) -> str:
 MAX_OUTPUT = 16384
 
 
-def to_openai(body: dict, ceiling: int = 0) -> dict:
+# Repetition sampling, sent with every request because the failure it addresses is not occasional.
+# A claims stage asked to write its ledger spent 15,255 tokens of reasoning redrafting the same
+# ledger -- 787 lines, 211 of them distinct, "- Quote: lines 226-250" thirty times -- hit the output
+# ceiling, had its tool call dropped, and died silently. Run 9 did that 31 times. DRY penalises a
+# continuation that would repeat a sequence already produced, which is exactly that loop, and the
+# allowed length is long enough that repeated code and repeated citations are still cheap.
+DRY = {"dry_multiplier": 0.8, "dry_base": 1.75, "dry_allowed_length": 12, "dry_penalty_last_n": -1}
+
+
+def to_openai(body: dict, ceiling: int = 0, dry: bool = True) -> dict:
     """An Anthropic Messages request as OpenAI chat completions."""
     messages: list[dict] = []
     system = _text_of(body.get("system"))
@@ -162,6 +171,10 @@ def to_openai(body: dict, ceiling: int = 0) -> dict:
         out["tool_choice"] = "none"
     if body.get("stream"):
         out["stream_options"] = {"include_usage": True}
+    if dry:
+        # Unknown fields are ignored by servers that do not sample this way, so this costs nothing
+        # against an endpoint that is not llama.cpp.
+        out.update(DRY)
     return out
 
 
