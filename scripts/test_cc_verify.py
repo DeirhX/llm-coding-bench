@@ -1028,3 +1028,16 @@ def test_a_probe_reported_as_having_produced_no_output_keeps_its_command() -> No
     assert len(piece) == 1, piece
     assert piece[0]["command"].endswith("python3 /tmp/cc-guard.py"), piece[0]["command"]
     assert piece[0]["expect"] == "no output (ALLOW)", piece[0]["expect"]
+
+
+def test_prose_in_an_answer_that_marks_its_claims_stays_prose() -> None:
+    """The paragraph rule is for the answer that marks nothing. Where some findings are marked, the
+    unmarked paragraphs around them are the report's prose, and reading those as claims would refuse
+    a stage for a sentence about what it had just read."""
+    text = ("CLAIMS\n\n"
+            "I read the guard and ran it against six payloads.\n\n"
+            "CLAIM: the rule matches literals only.\nEVIDENCE: scripts/g.py:1-2\n\n"
+            "That is all I could establish in the time.\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, [c["claim"] for c in claims]
+    assert claims[0]["claim"].startswith("the rule matches"), claims[0]

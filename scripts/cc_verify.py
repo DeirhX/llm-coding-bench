@@ -798,6 +798,10 @@ _SYNONYM = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?:finding\s*#?\s*\d+|(?:issue|
 # from it -- the same claim said again, in the stage's own words. Read as a claim of its own it had
 # no evidence under it, so a report of four findings scored eight claims, half of them citing
 # nothing, and the arithmetic made an accurate report look like a half-empty one.
+# A line that says which of its sentences is a finding: an explicit header, a numbered item, or one of
+# the words a report uses for the same thing. Its presence anywhere means the answer marks its claims.
+_MARKS = re.compile(r"^[\s>*_#-]{0,6}(?:claim|unknown)\b|^[\s>*_#-]{0,6}\d{1,2}[.)]\s|"
+                    r"^[\s>*_#-]{0,6}finding\s*\d", re.I)
 _CONCLUSION = re.compile(r"^[\s>*_#-]{0,6}(?:finding|conclusion|verdict)s?\s*:", re.I)
 
 # `CLAIMS` on a line of its own, and then `**1. The off-switch can still be turned on.**` -- the word
@@ -845,6 +849,11 @@ def normalise(text: str) -> str:
     is worse than reporting that it has none.
     """
     out: list[str] = []
+    # Whether the answer marks its findings at all. An answer that marks some of them is read as
+    # meaning the unmarked paragraphs are prose; only in one that marks none is a paragraph under a
+    # claims heading read as the finding it states, which is the shape a bare `CLAIM` heading leaves.
+    unmarked = not any(_MARKS.match(line) and not _SECTION.match(line)
+                       for line in text.split("\n"))
     claimed = False                 # the last header emitted was a CLAIM, so a citation is its own
     listing = False                 # a CLAIMS heading has been seen, so numbered items are claims
     opening = True                   # this line begins a paragraph, so under a heading it is a claim
@@ -856,7 +865,7 @@ def normalise(text: str) -> str:
         numbered = _NUMBERED.match(line) if listing else None
         if numbered and not HEADER_RE.match(line) and not _SYNONYM.match(line):
             line = "%sCLAIM: %s" % (numbered.group("lead"), numbered.group("rest"))
-        elif (listing and opening and line.strip() and not HEADER_RE.match(line)
+        elif (listing and unmarked and opening and line.strip() and not HEADER_RE.match(line)
               and not _SYNONYM.match(line) and not _CONCLUSION.match(line)):
             # Under a bare `CLAIM` heading, one finding to a paragraph and no marker on any of them.
             # A stage wrote four that way, each with its probe in the last sentence, and the answer
