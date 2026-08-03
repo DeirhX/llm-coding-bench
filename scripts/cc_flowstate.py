@@ -48,6 +48,13 @@ def begin(flow: str, task: str, session: str, root: str) -> dict:
     return state
 
 
+# How long a launch may be outstanding before a relaunch is read as replacing it rather than
+# duplicating it. A stage that reports takes tens of seconds to a few minutes; one that has said
+# nothing for this long has died without its stop ever firing, and holding its place would deadlock
+# the flow -- there is no other way back from a subagent that vanishes.
+STALE_AFTER = 600.0
+
+
 def record_launch(state: dict, stage: str, agent: str = "") -> dict:
     state.setdefault("stages", []).append(
         {"stage": stage, "agent": agent, "launched": time.time(), "verdict": None, "gaps": []})
@@ -62,8 +69,12 @@ def record_verdict(state: dict, stage: str, gaps: list, agent: str = "") -> dict
     verdict lands nowhere: a stage that was refused and then fixed itself stays refused forever, and
     for a blocking stage that means a flow that can never continue.
     """
+    # Oldest first: whoever was launched first is the one now reporting, absent any better
+    # evidence. The launch cannot know the agent id -- it is assigned afterwards -- so this is the
+    # only ordering available, and it matters whenever two entries are somehow outstanding.
     pending = [e for e in state.get("stages", [])
                if e.get("stage") == stage and e.get("verdict") is None]
+    pending.reverse()
     same = [e for e in state.get("stages", [])
             if e.get("stage") == stage and (not agent or e.get("agent") == agent)]
     entry = pending[-1] if pending else (same[-1] if same else None)
@@ -79,6 +90,7 @@ def record_verdict(state: dict, stage: str, gaps: list, agent: str = "") -> dict
             # guard then read the working stage as an idle orchestrator and ordered it to delegate
             # its own work to a subagent. It obliged, reported nothing, and was refused again.
             record_launch(state, stage, entry.get("agent", ""))
+            state["stages"][-1]["reopened"] = True
     return state
 
 
@@ -140,13 +152,25 @@ def admits(state: dict, stage: str) -> tuple[bool, str]:
         return False, ("The next stage is %s, not %s. The %s flow runs %s in that order, and each "
                        "one is written to consume what the one before it established."
                        % (expected, stage, flow, ", ".join(known)))
-    if stage in running(state):
-        # Reaching here means the earlier launch never reported: tool calls are sequential, so the
-        # model cannot be issuing this one while that one is outstanding. Denying it as a duplicate
-        # leaves the session with nowhere to go -- measured, twice -- so the stale entry is dropped
-        # and the relaunch admitted.
-        state["stages"] = [e for e in state.get("stages", [])
-                           if not (e.get("stage") == stage and e.get("verdict") is None)]
+    live = [e for e in state.get("stages", [])
+            if e.get("stage") == stage and e.get("verdict") is None
+            and time.time() - float(e.get("launched") or 0) < STALE_AFTER]
+    if live and all(e.get("reopened") for e in live):
+        # A refused stage is held open because its subagent carries on, but it may instead give up.
+        # The session relaunching the stage is the sign that it did, and superseding the held-open
+        # entry here is what keeps that from deadlocking the flow.
+        state["stages"] = [e for e in state.get("stages", []) if e not in live]
+    elif live:
+        # This once dropped the live entry and admitted the relaunch, on the reasoning that tool
+        # calls are sequential so the earlier launch must be stale. They are not: a stage is
+        # launched as a task and the session goes on issuing calls while it runs. So the relaunch
+        # was a real second worker on the same stage, and when one of the two reported, its verdict
+        # closed the entry belonging to the other. That left nothing in flight while a subagent was
+        # still working, and the flow guard duly told it it was the orchestrator.
+        return False, ("The %s stage is already running. Wait for it to report -- read its output "
+                       "rather than starting a second one, which would do the same work against "
+                       "the same files and leave the gate unable to tell whose answer it judged."
+                       % stage)
     return True, ""
 
 

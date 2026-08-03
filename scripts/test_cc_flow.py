@@ -309,13 +309,14 @@ def test_a_stage_still_running_when_the_session_stops_went_away() -> None:
     assert cc_flowstate.running(after) == [], after
 
 
-def test_a_relaunch_of_a_stage_that_never_reported_is_admitted() -> None:
-    """Tool calls are sequential, so a launch arriving while one is outstanding means the earlier
-    one never reported. Denying it as a duplicate leaves the session nowhere to go -- twice, in
-    two live sessions, it said "I need to wait" and stopped."""
+def test_a_relaunch_replaces_a_launch_that_died_without_reporting() -> None:
+    """A subagent that vanishes never fires its stop, so its entry would hold the stage open for
+    good and no relaunch could ever get in. Twice, in two live sessions, the session said "I need
+    to wait" and stopped. Only an old launch counts as dead: a recent one is still working."""
     with tempfile.TemporaryDirectory() as root:
         state = cc_flowstate.begin("review", "t", "s1", root)
         cc_flowstate.record_launch(state, "survey")
+        state["stages"][-1]["launched"] -= cc_flowstate.STALE_AFTER + 1
         cc_flowstate.save(state, "s1", root)
         decision, why, amended = run("STAGE: survey\n", root)
     assert decision == "allow", why
@@ -394,3 +395,17 @@ def test_a_refused_stage_is_still_in_flight() -> None:
         cc_flowstate.record_verdict(state, "claims", [], agent="a1")
         assert cc_flowstate.running(state) == [], state
     assert cc_flowstate.done(state) == ["claims"], state
+
+
+def test_a_stage_already_running_is_not_launched_twice() -> None:
+    """Dropping the live entry to admit a relaunch assumed tool calls are sequential. They are
+    not: a stage is launched as a task and the session goes on issuing calls while it runs, so
+    the relaunch was a real second worker on the same stage. When one reported, its verdict
+    closed the other's entry, leaving nothing in flight while a subagent was still working."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        ok, why = cc_flowstate.admits(state, "survey")
+    assert not ok, state
+    assert "already running" in why, why
+    assert cc_flowstate.running(state) == ["survey"], state
