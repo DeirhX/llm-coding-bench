@@ -81,7 +81,7 @@ def compose(stage, flow: str, task: str, prior: list[str]) -> str:
 # What the session may do while it is orchestrating rather than working. Bookkeeping and talking to
 # the user are not the work; reading the code is.
 CLERICAL = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput",
-            "TaskStop", "AskUserQuestion", "ExitPlanMode", "SlashCommand"}
+            "AskUserQuestion", "ExitPlanMode", "SlashCommand"}
 
 
 def _orchestrator_only(state: dict, tool: str) -> None:
@@ -94,16 +94,26 @@ def _orchestrator_only(state: dict, tool: str) -> None:
     """
     if tool in CLERICAL:
         allow()
+    if tool == "TaskStop" and cc_flowstate.running(state):
+        # Refused from doing the work itself, a session decided the guard was a sandbox, killed the
+        # stage it had just launched on the grounds that it looked stuck, and went back to doing the
+        # work itself. Waiting is what it is for; killing the stage is not clerical.
+        deny("The %s stage is running. Let it report -- read its output and wait. A stage that has "
+             "not answered yet is working, not stuck, and stopping it leaves the flow with nothing "
+             "to judge." % ", ".join(cc_flowstate.running(state)))
     if cc_flowstate.running(state):
         allow()             # a stage is in flight, and this is that stage working
     nxt = cc_flowstate.next_stage(state)
     if nxt is None:
         allow()             # flow complete: the session is writing its summary
-    deny("You are running a %s flow, and %s has not run yet. Do not do its work here: launch a "
-         "subagent whose prompt begins with `STAGE: %s` and wait for it to report. Its stance is "
-         "supplied for you. Reading and running here would answer the question without any of the "
-         "stances the flow exists to apply, and the answer would not be gated."
-         % (state["flow"], nxt, nxt))
+    # Said at length, this got read as a sandbox to be worked around: the session tried a script in
+    # /tmp, then a bare python -c, then answered from memory. The instruction now comes first and
+    # the reasoning after, because only the first sentence reliably survives.
+    deny("Launch the %s stage now: call the Agent tool with a prompt whose first line is exactly "
+         "`STAGE: %s`. Its stance is filled in for you, so the rest of the prompt hardly matters. "
+         "This is not a sandbox to work around -- doing the reading here would answer without any "
+         "of the stances the %s flow exists to apply, and the answer would reach nobody, because "
+         "only what a stage reports is gated." % (nxt, nxt, state["flow"]))
 
 
 def main() -> int:

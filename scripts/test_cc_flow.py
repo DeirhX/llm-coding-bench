@@ -409,3 +409,16 @@ def test_a_stage_already_running_is_not_launched_twice() -> None:
     assert not ok, state
     assert "already running" in why, why
     assert cc_flowstate.running(state) == ["survey"], state
+
+
+def test_a_running_stage_may_not_be_killed() -> None:
+    """Refused from doing the work itself, a session decided the guard was a sandbox, killed the
+    stage it had just launched on the grounds that it looked stuck, and went back to doing the
+    work itself -- a script in /tmp, then a bare python -c, then an answer from memory."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.save(state, "s1", root)
+        decision, why, _ = run("", root, tool="TaskStop")
+    assert decision == "deny", why
+    assert "working, not stuck" in why, why
