@@ -30,6 +30,17 @@ if ! curl -fsS -m 5 -o /dev/null "$BASE/v1/models"; then
   exit 1
 fi
 
+# The window the client is allowed to believe in. Unset, Claude Code assumes 200k, never compacts,
+# and hands the server a prompt it must refuse: run 18 died at 98,342 tokens against a window of
+# 98,304 -- 38 tokens over, after 135 turns and an hour of work -- and the refusal arrives as a 502
+# the client treats as fatal. Asked for rather than assumed, because the answer is whatever
+# llama-server was started with, and headroom because the two of them count tokens differently.
+CTX=${FLOW_CTX:-$(curl -fsS -m 5 http://127.0.0.1:8098/props 2>/dev/null |
+  "$ROOT/.venv/bin/python" -c 'import json,sys; d=json.load(sys.stdin); print(d.get("n_ctx") or 0)' \
+  2>/dev/null)}
+[[ -n "$CTX" && "$CTX" -gt 8192 ]] || CTX=98304
+DECLARED=$(( CTX - 8192 ))
+
 mkdir -p "$OUT"
 SETTINGS="$OUT/settings.json"
 GUARD="$ROOT/scripts/cc-context-guard.py --stop-advice answer"
@@ -46,7 +57,9 @@ cat > "$SETTINGS" <<JSON
     "ANTHROPIC_BASE_URL": "$BASE",
     "ANTHROPIC_AUTH_TOKEN": "local",
     "ANTHROPIC_MODEL": "$MODEL",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "$DECLARED",
+    "API_TIMEOUT_MS": "1800000"
   },
   "hooks": {
     "SessionStart": [ { "hooks": [ { "type": "command", "command": "$CONTRACT" } ] } ],

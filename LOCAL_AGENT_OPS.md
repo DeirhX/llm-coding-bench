@@ -1285,6 +1285,115 @@ is.** Three fixes in a row went in behind matchers that never routed the tool th
 `claude-gemma.sh --print-settings` now prints what a launch would register, and a test reads it.
 
 
+### A refusal is charged to the context it protects
+
+The call budget refuses a stage that keeps reading instead of answering, and the refusal says why at
+length: three sentences on what to do with what it already has. Run 18's second claims round read
+that refusal 220 times. It had spent 361 calls against a budget of 140, and every denial after the
+140th cost it another eighty tokens of its own window.
+
+What that does is not obvious until you see the answer it left behind:
+
+```
+[This answer was cut off at 2 tokens by the proxy, so what is above is incomplete]
+```
+
+Two tokens. Claude Code sizes `max_tokens` by what is left of the window after the prompt, so a stage
+whose context has been filled with refusals is told to answer at a point where it cannot: there is no
+room left to answer in. The stage was not stubborn at the end. It was starved, by the mechanism that
+was telling it to stop.
+
+The refusal now shortens to one line -- `Refused. Answer now, in CLAIM/EVIDENCE/QUOTE blocks.` --
+after the sixth repeat. The same escalation the orchestrator got, for the same reason, arrived at
+twice independently: **any message a hook repeats is a message that has to get shorter.** Measure a
+deny message by the count times its length, not its length.
+
+### Nobody told the client how big the window was
+
+Run 18 ended like this, after 135 turns and an hour of work:
+
+```
+API Error: 502 {"code":400,"message":"request (98342 tokens) exceeds the available
+context size (98304 tokens), try increasing it"}
+```
+
+Thirty-eight tokens over. Claude Code compacts against `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, and where
+that is unset it assumes 200k: the run reported `contextWindow: 200000` while talking to a server
+started with `-c 98304`. So it never compacted, walked calmly past the real limit, and llama-server
+refused the request. The refusal reaches the client as a 502, which it treats as fatal, so the whole
+session dies at the first overshoot -- one turn of a stage that would otherwise have been refused and
+retried.
+
+`claude-gemma.sh` had declared the window since the first week. `flow_smoke.sh` -- where every long
+unattended run happens -- never did. **Check the environment of the launcher you actually use**, not
+the one you read. The headless path now asks llama-server for `n_ctx` at `/props` and declares it
+short by 8k, because the client and the server do not count tokens the same way.
+
+And note what the two failures of run 18 have in common: a stage was starved of output room by
+refusals, and the session was killed by a prompt nobody was compacting. Both are the context window
+being consumed by the harness rather than by the work, and neither shows up as a harness error.
+
+### Two models resident is a memory failure with no error message
+
+Mid-run, `state.py` said this:
+
+```
+gemma4-31b-mtp-64k:latest     62.3 GB  ctx=65536  expires 478 min
+memory                        21.9 GB available (0.9 free), 45 GB wired
+swap                          7.91 GB used of a 9.4 GB file
+```
+
+The 62 GB model had not processed a prompt in 23 hours and had 8 hours of keep-alive left, because
+`OLLAMA_KEEP_ALIVE=8h` is set at the machine level and something had re-armed it -- irregular 43 ms
+`POST /api/chat` calls, a minute or two apart, which load and re-arm without generating anything.
+Meanwhile the actual work was going to a separate `llama-server` holding 46 GB. Nothing was using the
+resident model; nothing reported that it was there.
+
+`ollama stop` on the idle model, and:
+
+```
+memory                        98.0 GB available (56.1 free), 5 GB wired
+swap                          2.30 GB used of a 3.1 GB file
+```
+
+Available memory went from 21.9 GB to 98.0 GB and macOS shrank the swap file to a third. **Check
+residency before blaming the run for being slow**: a `keep_alive` of 8 hours means one stray request
+costs you two thirds of the machine until you notice, and the only symptom is that prefill runs at a
+third of its rate.
+
+### The heading says the word once, for all of them
+
+Every parser fix so far has been about a shape the model writes and the verifier does not read. Run
+18's first round wrote the plainest one yet:
+
+```
+CLAIM
+
+The Bash tamper rule catches 4 of 6 classes of command-based tamper. ...
+
+The Write/Edit/MultiEdit deny branch checks `Path(...).name == s.name`. ...
+```
+
+The word once, as a heading, and then one finding to a paragraph. Nothing on any line says CLAIM, so
+the answer scored no claims at all and was refused for stating none -- with eight findings in it,
+five of which had run a probe and reported what it printed.
+
+Two rules came out of that, and the second matters more than the first:
+
+- Under a claims heading, a paragraph is the claim it reads as, and a citation in its last sentence
+  is evidence -- **including a probe.** The inline rule accepted a file citation there and not a
+  command, which is how five findings that had each run their probe were told they cited nothing.
+- The paragraph rule fires only where the answer marks *none* of its findings. In an answer that
+  marks some, the paragraphs around them are prose, and reading those as claims refuses a stage for
+  a sentence about what it had just read.
+
+The same round also lost its probes to a word: `... produced no output (ALLOW)` split at `output`
+rather than `produced`, so the recorded command kept the words `produced no` and did not match the
+probe the transcript had it running. Replayed against today's code, that round lands five verified
+findings and three unsupported assertions. It is still refused -- three assertions do cite nothing --
+but the hand-back now asks for the three, instead of telling a stage with eight findings that it made
+none.
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.

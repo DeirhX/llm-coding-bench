@@ -844,3 +844,14 @@ def test_the_budget_refusal_gets_shorter_as_it_repeats() -> None:
         assert "You have spent" in first[1], first
         assert len(seen[-1]) < 80, seen[-1]
         assert "Answer now" in seen[-1], seen[-1]
+
+
+def test_both_launchers_tell_the_client_how_big_the_window_is() -> None:
+    """Unset, Claude Code assumes 200k, never compacts, and hands the server a prompt it must refuse.
+    Run 18 died at 98,342 tokens against a window of 98,304 after 135 turns: 38 tokens over, and the
+    refusal arrives as a 502 the client treats as fatal. The interactive launcher declared it; the
+    headless one, where the long runs happen, did not."""
+    for name in ("claude-gemma.sh", "flow_smoke.sh"):
+        text = (pathlib.Path(__file__).resolve().parent / name).read_text()
+        assert "CLAUDE_CODE_MAX_CONTEXT_TOKENS" in text, name
+        assert "API_TIMEOUT_MS" in text, name
