@@ -736,7 +736,7 @@ def _classify(body: str) -> dict | None:
                 "end": int(m.group("end") or m.group("start"))}
     m = COMMAND_EV.match(body)
     if m:
-        return {"kind": "command_result", "command": m.group("command").strip(),
+        return {"kind": "command_result", "command": m.group("command").strip().strip("`").strip(),
                 "expect": (m.group("expect") or "").strip()}
     m = ABSENCE_EV.match(body)
     if m:
@@ -770,7 +770,13 @@ _EMPHASIS = re.compile(r"(\*\*|__|\*|_)")
 # `**Finding 1: the rule is broader than its intent.**` -- what a review stage calls a claim when
 # nobody has told it the word. A seven-finding report with a path and a line range under every one
 # parsed as nought claims because of this word, and was refused for stating none.
-_SYNONYM = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?:finding|issue|claim)\s*#?\s*\d*\s*:", re.I)
+_SYNONYM = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?:finding\s*#?\s*\d+|(?:issue|claim)\s*#?\s*\d*)"
+                      r"\s*:", re.I)
+# A numbered finding is a heading. A bare `FINDING:` under an EVIDENCE block is the conclusion drawn
+# from it -- the same claim said again, in the stage's own words. Read as a claim of its own it had
+# no evidence under it, so a report of four findings scored eight claims, half of them citing
+# nothing, and the arithmetic made an accurate report look like a half-empty one.
+_CONCLUSION = re.compile(r"^[\s>*_#-]{0,6}(?:finding|conclusion|verdict)s?\s*:", re.I)
 
 
 def _starts_with_citation(line: str) -> bool:
@@ -797,6 +803,9 @@ def normalise(text: str) -> str:
     out: list[str] = []
     claimed = False                 # the last header emitted was a CLAIM, so a citation is its own
     for line in text.split("\n"):
+        if _CONCLUSION.match(line) and not HEADER_RE.match(line) and not _SYNONYM.match(line):
+            out.append(line)
+            continue
         synonym = _SYNONYM.match(line)
         if synonym and not HEADER_RE.match(line):
             line = "%sCLAIM:%s" % (synonym.group("lead"), line[synonym.end():])
@@ -818,6 +827,13 @@ def normalise(text: str) -> str:
             closing = body.find(mark.group(1))
             if closing != -1:
                 body, extra = body[:closing], body[closing + len(mark.group(1)):]
+            if not body.strip() and extra.strip():
+                # `**CLAIM 1:** the rule is broader than its intent.` -- the emphasis closing on the
+                # colon rather than after the sentence, which is how anyone writing markdown would
+                # bold a heading. Split at the mark, the claim is the empty string and the sentence
+                # is trailing prose, so it was dropped: eight findings arrived as `claim 1 ()` and
+                # were refused for citing nothing, the citations having gone the same way.
+                body, extra = extra, ""
         out.append("%s: %s" % (seen.group("name"), body.strip()))
         claimed = seen.group("name") == "CLAIM"
         if extra.strip() and _classify_all(extra.strip()):
@@ -921,6 +937,39 @@ _AFTERWARDS = re.compile(r"\s*\((?:[Ll]ines?\s+)(?P<start>\d{1,6})"
                          r"(?:\s*[-\u2013]\s*(?P<end>\d{1,6}))?\)\s*$")
 
 
+# `Ran four hooks. `touch /tmp/cc-guard-off` -- denied. `rm /tmp/cc-guard-off` -- allowed.` A stage
+# that has run four probes and is reporting them one to a sentence. Every one is checkable -- the
+# command has to be in the transcript and the outcome has to be borne out by what it printed -- and
+# every one was read as prose, so eight findings established by running the hook cited nothing.
+_PROBED = re.compile(r"`(?P<command>[^`]{4,400})`\s*(?:--|\u2014|->|:|,)?\s*"
+                     r"(?P<outcome>[^.;`]{2,120})")
+_LIKE_A_COMMAND = re.compile(r"^(?:\./)?[\w/~$]")
+# `denied (line 307-310)` -- the outcome and, in the same breath, where in the file the denial comes
+# from. The bracket is a citation, not part of what the command printed, and comparing it against the
+# output failed a probe that had run and said exactly what the stage reported.
+_OUTCOME_ASIDE = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def _probes(body: str) -> list[dict]:
+    """The commands a stage reported running in prose, with what it says each one did."""
+    out: list[dict] = []
+    for found in _PROBED.finditer(body):
+        command = found.group("command").strip()
+        outcome = _OUTCOME_ASIDE.sub("", found.group("outcome")).strip(" -\u2014:,")
+        if not outcome or "/" not in command and " " not in command:
+            # A backticked identifier with a word after it is prose about the code, not a command
+            # somebody ran. `tampers()` is not a probe and neither is `rm`.
+            continue
+        if not _LIKE_A_COMMAND.match(command):
+            # Backticks alternate, so a scan that pairs them wrongly reads the prose between two
+            # snippets as a command: `OFF_SWITCH`. Only checks `DEPTH_OFF` yielded ". Only checks"
+            # as something the stage had run, and four such phantoms were reported as unverified
+            # commands against a stage that had cited nothing of the kind.
+            continue
+        out.append({"kind": "command_result", "command": command, "expect": outcome})
+    return out
+
+
 def _spread(body: str) -> list[tuple[str, dict | None]]:
     """Split a QUOTES body into its quotes, each with the citation written after it.
 
@@ -1001,6 +1050,17 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
                 evidence["start"], evidence["end"] = min(numbers), max(numbers)
                 evidence.setdefault("kind", "file_quote")
                 body = _untrailed(body)
+        if evidence is not None and not evidence.get("start"):
+            # `QUOTE: Line 246: `name = ...`` -- the label in front of the code rather than after it.
+            # The label was stripped for the comparison and never read as the citation, so a ledger
+            # of nine quoted lines, each with its own line number, was refused nine times for
+            # missing a file and a line range.
+            labelled = [_LABEL.match(l) for l in body.split("\n") if l.strip()]
+            if labelled and all(labelled):
+                numbers = [int(m.group("n")) for m in labelled]
+                evidence["start"], evidence["end"] = min(numbers), max(numbers)
+                evidence.setdefault("kind", "file_quote")
+                body = "\n".join(m.group("code") for m in labelled)
         if evidence is not None and not evidence.get("path") and claim_path:
             evidence["path"] = claim_path
             evidence.setdefault("kind", "file_quote")
@@ -1053,7 +1113,7 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
             body = line[seen.end():].strip()
             found = _classify_all(body)
             if not found:
-                found = [{"kind": None, "raw": body}]
+                found = _probes(body) or [{"kind": None, "raw": body}]
             current["evidence"].extend(found)
             cited = found
             # A QUOTE that follows attaches to the last citation named, which is the one it is
@@ -1110,7 +1170,7 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
         elif header == "RUN:":
             body = line[seen.end():].strip()
             command, expect = _ran(body)
-            evidence = {"kind": "command", "command": command, "expect": expect}
+            evidence = {"kind": "command_result", "command": command, "expect": expect}
             current["evidence"].append(evidence)
             cited = [evidence]
         elif header is None and evidence is not None and _classify_all(line.strip()):
@@ -1228,7 +1288,7 @@ def resolve_path(root: str, start: int, end: int, quote: str) -> str | None:
     # while "reindented by -4" is a sentence it can act on. Only retouching is looked for, and still
     # only when one file answers.
     near = [path for path in _tracked(root)
-            if file_quote(root, path, start, end, quote).kind == RETOUCHED]
+            if file_quote(root, path, start, end, quote).kind in (RETOUCHED, WRONG_LINES)]
     return near[0] if len(near) == 1 else None
 
 

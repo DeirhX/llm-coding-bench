@@ -680,7 +680,7 @@ def test_a_command_written_under_run_is_read_as_a_command() -> None:
     ran, _ = vf.parse_ledger('CLAIM: the hook allows it\n'
                              'RUN: echo x | python3 guard.py returns "allow"\n')
     piece = ran[0]["evidence"][0]
-    assert piece["kind"] == "command", piece
+    assert piece["kind"] == "command_result", piece
     assert piece["command"] == "echo x | python3 guard.py", piece
     assert piece["expect"] == '"allow"', piece
 
@@ -733,3 +733,130 @@ def _tracked_repo(root: str) -> None:
     """resolve_path asks git what the tree holds, so a bare directory answers nothing."""
     for command in (["git", "init", "-q"], ["git", "add", "-A"]):
         subprocess.run(command, cwd=root, check=True, capture_output=True)
+
+
+def test_a_header_bolded_through_its_colon_keeps_its_sentence() -> None:
+    """`**CLAIM 1:** text` is how anyone writing markdown bolds a heading. Split at the closing mark
+    the claim was empty and the sentence was trailing prose, so eight findings arrived as
+    `claim 1 ()` and were refused for citing nothing."""
+    text = ("**CLAIM 1:** tampers() denies creation but not removal.\n"
+            "**EVIDENCE:** scripts/g.py:247-249\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, claims
+    assert claims[0]["claim"].startswith("tampers() denies creation"), claims[0]
+    assert claims[0]["evidence"][0]["start"] == 247, claims[0]["evidence"]
+
+
+def test_a_header_bolded_after_its_sentence_still_splits_there() -> None:
+    text = "**CLAIM: the rule is broader than its intent.** scripts/g.py:12-14\n"
+    claims, _ = vf.parse_ledger(text)
+    assert claims[0]["claim"] == "the rule is broader than its intent.", claims
+    assert claims[0]["evidence"][0]["start"] == 12, claims[0]["evidence"]
+
+
+def test_a_conclusion_under_the_evidence_is_not_a_second_claim() -> None:
+    """A report of four findings scored eight claims, half citing nothing, because each FINDING line
+    -- the conclusion drawn from the evidence above it -- was read as a claim of its own."""
+    text = ("**CLAIM 1:** the rule denies creation.\n"
+            "**EVIDENCE:** scripts/g.py:247-249\n"
+            "**FINDING:** creation is denied and removal is not.\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, [c["claim"] for c in claims]
+
+
+def test_a_numbered_finding_is_still_a_heading() -> None:
+    text = ("**Finding 1:** the rule denies creation.\n"
+            "**EVIDENCE:** scripts/g.py:247-249\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, claims
+    assert claims[0]["claim"].startswith("the rule denies creation"), claims[0]
+
+
+def test_probes_reported_in_prose_are_read_as_the_commands_they_were() -> None:
+    """Eight findings established by running the hook cited nothing, because the stage reported each
+    run in a sentence instead of under the header the contract names."""
+    text = ("**CLAIM 1:** creation is denied and removal is not.\n"
+            "**EVIDENCE:** Ran two hooks. `touch /tmp/cc-guard-off` -- denied. "
+            "`rm /tmp/cc-guard-off` -- allowed.\n")
+    claims, _ = vf.parse_ledger(text)
+    pieces = [p for p in claims[0]["evidence"] if p.get("kind") == "command_result"]
+    assert len(pieces) == 2, claims[0]["evidence"]
+    assert pieces[0]["command"] == "touch /tmp/cc-guard-off", pieces
+    assert pieces[0]["expect"] == "denied", pieces
+
+
+def test_a_probe_reported_in_prose_still_has_to_have_been_run() -> None:
+    piece = [p for p in vf.parse_ledger(
+        "**CLAIM 1:** it is denied.\n"
+        "**EVIDENCE:** `touch /tmp/cc-guard-off` -- denied.\n")[0][0]["evidence"]
+        if p.get("kind") == "command_result"][0]
+    assert not vf.command_result([], piece["command"], piece["expect"]).ok
+
+
+def test_backticked_code_in_prose_is_not_mistaken_for_a_probe() -> None:
+    claims, _ = vf.parse_ledger("**CLAIM 1:** the rule is narrow.\n"
+                                "**EVIDENCE:** `tampers()` returns False here.\n")
+    assert not [p for p in claims[0]["evidence"] if p.get("kind") == "command_result"], claims[0]
+
+
+def test_prose_between_two_snippets_is_not_a_command() -> None:
+    """Backticks alternate, so a scan that pairs them wrongly reads the words between two snippets as
+    something the stage ran: `OFF_SWITCH`. Only checks `DEPTH_OFF` produced ". Only checks"."""
+    claims, _ = vf.parse_ledger(
+        "**CLAIM 1:** the check is narrow.\n"
+        "**EVIDENCE:** `OFF_SWITCH`. Only checks `DEPTH_OFF`. Does not mention the other.\n")
+    phantoms = [p for p in claims[0]["evidence"] if p.get("kind") == "command_result"]
+    assert not phantoms, phantoms
+
+
+def test_the_line_a_denial_comes_from_is_not_part_of_what_it_printed() -> None:
+    claims, _ = vf.parse_ledger("**CLAIM 1:** creation is denied.\n"
+                                "**EVIDENCE:** `touch /tmp/cc-guard-off` -- denied (line 307-310).\n")
+    piece = [p for p in claims[0]["evidence"] if p.get("kind") == "command_result"][0]
+    assert piece["expect"] == "denied", piece
+
+
+def test_a_label_in_front_of_the_code_is_read_as_the_citation() -> None:
+    """`QUOTE: Line 246: `code`` -- the label before the line rather than after it. It was stripped
+    for the comparison and never read as the citation, so a ledger of nine quoted lines, each
+    carrying its own number, was refused nine times for missing a file and a line range."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("import re\nVERBS = 1\nCALLS = 2\n")
+        _tracked_repo(root)
+        claims, _ = vf.parse_ledger("CLAIM: two names\nQUOTE: Line 2: `VERBS = 1`\n", root=root)
+        piece = claims[0]["evidence"][0]
+        assert piece["start"] == 2, piece
+        assert piece["path"] == "g.py", piece
+        assert vf.file_quote(root, piece["path"], piece["start"], piece["end"], piece["quote"]).ok
+
+
+def test_a_labelled_quote_still_has_to_be_at_that_line() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("import re\nVERBS = 1\nCALLS = 2\n")
+        _tracked_repo(root)
+        claims, _ = vf.parse_ledger("CLAIM: two names\nQUOTE: Line 3: `VERBS = 1`\n", root=root)
+        piece = claims[0]["evidence"][0]
+        assert not vf.file_quote(root, "g.py", piece["start"], piece["end"], piece["quote"]).ok
+
+
+def test_a_command_keeps_none_of_the_backticks_it_arrived_in() -> None:
+    piece = vf.parse_ledger("CLAIM: it is denied\n"
+                            "EVIDENCE: command: `echo hi | guard.py` -> deny\n")[0][0]["evidence"][0]
+    assert piece["command"] == "echo hi | guard.py", piece
+
+
+def test_a_quote_off_by_a_line_is_told_which_line_it_is_at() -> None:
+    """Cited one line out, a quote resolved to no file at all, so the stage was told its citation was
+    missing a file and a line range -- of a citation that named both."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("import re\nVERBS = 1\nCALLS = 2\nMORE = 3\n")
+        _tracked_repo(root)
+        assert vf.resolve_path(root, 3, 3, "VERBS = 1") == "g.py"
+        assert vf.file_quote(root, "g.py", 3, 3, "VERBS = 1").kind == vf.WRONG_LINES
+
+
+def test_a_quote_in_no_file_resolves_to_no_file() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("import re\nVERBS = 1\n")
+        _tracked_repo(root)
+        assert vf.resolve_path(root, 2, 2, "NOTHING_LIKE_THIS = 9") is None
