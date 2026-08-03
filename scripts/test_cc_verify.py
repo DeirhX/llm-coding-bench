@@ -1165,3 +1165,23 @@ def test_a_quote_with_no_newline_either_way_is_judged_once() -> None:
     assert vf._other_reading("width = 0") is None
     assert vf._other_reading("a\nb") == "a\\nb"
     assert vf._other_reading("a\\nb") == "a\nb"
+
+
+def test_a_numbered_claim_with_the_colon_outside_the_emphasis_is_still_a_claim() -> None:
+    """`**CLAIM 1**: ...` is the same header as `**CLAIM 1:** ...`, and only the second was read.
+    Run 22's claims stage wrote eight findings the first way, spending 138 tool calls to get them, and
+    was told it had stated no claims -- a refusal that describes the parser rather than the report."""
+    eight = "\n\n".join("**CLAIM %d**: finding number %d.\n\nEvidence: guard.py:%d \"line %d\""
+                        % (n, n, n, n) for n in range(1, 9))
+    with tempfile.TemporaryDirectory() as tmp:
+        pathlib.Path(tmp, "guard.py").write_text("".join("line %d\n" % n for n in range(1, 9)))
+        claims, _ = vf.parse_ledger(eight, root=tmp)
+        assert len(claims) == 8, [c.get("claim") for c in claims]
+        assert all(c.get("evidence") for c in claims), claims
+
+
+def test_the_emphasis_rule_does_not_swallow_a_sentence_that_merely_starts_with_a_word() -> None:
+    """The two asterisks are optional, not the colon: prose about a claim is not a claim."""
+    prose = "Claim inspection showed nothing. The evidence header, however, was absent.\n"
+    claims, _ = vf.parse_ledger(prose, root=".")
+    assert not claims, claims

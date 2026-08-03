@@ -866,14 +866,18 @@ def _elided(body: str) -> list[str]:
     return [p for p in pieces if p.strip()]
 
 
-_MARKED = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?P<name>%s)\s*(?:\([^)]*\))?\s*:(?P<body>.*)$"
-                     % "|".join(h.rstrip(":") for h in HEADERS), re.I)
+# The closing emphasis before the colon is optional because `**CLAIM 1**: ...` puts it there, and
+# `**CLAIM 1:** ...` does not. Eight findings written the first way parsed as none, and the stage was
+# told it had stated no claims after 138 tool calls -- the most misleading refusal this can produce,
+# because the work was done and written down in the shape the contract asks for, bar two asterisks.
+_MARKED = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?P<name>%s)\s*(?:\([^)]*\))?\s*[*_]{0,2}\s*"
+                     r":(?P<body>.*)$" % "|".join(h.rstrip(":") for h in HEADERS), re.I)
 _EMPHASIS = re.compile(r"(\*\*|__|\*|_)")
 # `**Finding 1: the rule is broader than its intent.**` -- what a review stage calls a claim when
 # nobody has told it the word. A seven-finding report with a path and a line range under every one
 # parsed as nought claims because of this word, and was refused for stating none.
 _SYNONYM = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?:finding\s*#?\s*\d+|(?:issue|claim)\s*#?\s*\d*)"
-                      r"\s*:", re.I)
+                      r"\s*[*_]{0,2}\s*:", re.I)
 # A numbered finding is a heading. A bare `FINDING:` under an EVIDENCE block is the conclusion drawn
 # from it -- the same claim said again, in the stage's own words. Read as a claim of its own it had
 # no evidence under it, so a report of four findings scored eight claims, half of them citing
