@@ -53,6 +53,9 @@ cat > "$SETTINGS" <<JSON
       { "matcher": "Read|Bash|WebFetch|WebSearch", "hooks": [ { "type": "command", "command": "$GUARD" } ] },
       { "hooks": [ { "type": "command", "command": "$FLOW" } ] }
     ],
+    "PostToolUse": [
+      { "matcher": "Task|Agent", "hooks": [ { "type": "command", "command": "$FLOW" } ] }
+    ],
     "Stop": [ { "hooks": [ { "type": "command", "command": "$GATE" } ] } ],
     "SubagentStop": [ { "hooks": [ { "type": "command", "command": "$GATE" } ] } ]
   }

@@ -40,6 +40,11 @@ def deny(reason: str) -> None:
     sys.exit(0)
 
 
+# The subagent types this client will accept. Anything else is refused by the client itself, after
+# the hook has already committed the launch to the flow.
+AGENT_TYPES = ("general-purpose", "Explore", "Plan", "claude", "statusline-setup")
+
+
 def amend(tool_input: dict, prompt: str, reason: str) -> None:
     """Let the call through with a prompt of our own, and everything else it came with.
 
@@ -52,6 +57,12 @@ def amend(tool_input: dict, prompt: str, reason: str) -> None:
     merged["prompt"] = prompt
     # A backgrounded stage reports to nobody and the flow waits for a result that never arrives.
     merged.pop("run_in_background", None)
+    # The stage name belongs in the prompt, not here. A session put it here instead -- reasonably
+    # enough -- and the client answered "Agent type 'survey' not found", by which time this hook had
+    # already recorded the launch. The flow then held a stage open that did not exist and refused
+    # every retry as a duplicate, until the context ran out.
+    if merged.get("subagent_type") not in AGENT_TYPES:
+        merged["subagent_type"] = "general-purpose"
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
@@ -131,6 +142,33 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
          "only what a stage reports is gated." % (nxt, nxt, state["flow"]))
 
 
+def _launched(payload: dict) -> int:
+    """After the fact: did the launch this hook admitted actually start?
+
+    PreToolUse runs before the call, so a launch is recorded on the strength of being permitted. One
+    was then refused by the client -- the session had put the stage name in `subagent_type` -- and
+    the flow held open a stage that did not exist, refusing every retry as a duplicate. A failed
+    launch is only visible here, in the result.
+    """
+    if (payload.get("tool_name") or "") not in ("Task", "Agent"):
+        allow()
+    answer = payload.get("tool_response")
+    failed = False
+    if isinstance(answer, dict):
+        failed = bool(answer.get("is_error")) or "not found" in str(answer.get("error") or "")
+    elif isinstance(answer, str):
+        failed = "not found" in answer or answer.startswith("Error")
+    if not failed:
+        allow()
+    root = payload.get("cwd") or os.getcwd()
+    session = cc_flowstate.session_of(payload)
+    state = cc_flowstate.load(session, root)
+    if state.get("flow") and cc_flowstate.running(state):
+        cc_flowstate.forget_running(state, every=True)
+        cc_flowstate.save(state, session, root)
+    allow()
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -146,6 +184,9 @@ def main() -> int:
                                      for k, v in payload.items()}) + "\n")
         except OSError:
             pass
+
+    if payload.get("hook_event_name") == "PostToolUse":
+        return _launched(payload)
 
     tool = payload.get("tool_name") or ""
     root = payload.get("cwd") or os.getcwd()

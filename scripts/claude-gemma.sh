@@ -678,6 +678,9 @@ if (( FLOWS )); then
   # No matcher: while a flow is running, a tool call that does a stage's work outside a stage is
   # refused, and that is not a question about which tool it was.
   PRE_TOOL+=("{ \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] }")
+  # And afterwards, because a launch this hook permits can still be refused by the client -- which
+  # left the flow holding a stage that never existed, and refusing every retry as a duplicate.
+  HOOK_EVENTS+=("\"PostToolUse\": [ { \"matcher\": \"Task|Agent\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] } ]")
 fi
 
 # One PreToolUse key holding every matcher. Two keys of the same name in the same object is not two

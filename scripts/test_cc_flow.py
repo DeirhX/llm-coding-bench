@@ -20,9 +20,11 @@ import cc_flowstate     # noqa: E402
 GUARD = HERE / "cc-flow-guard.py"
 
 
-def run(prompt: str, root: str, session: str = "s1", tool: str = "Task") -> tuple[str, str, dict]:
+def run(prompt: str, root: str, session: str = "s1", tool: str = "Task",
+        kind: str = "general-purpose") -> tuple[str, str, dict]:
     payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": session,
-               "cwd": root, "tool_input": {"prompt": prompt, "description": "a stage"}}
+               "cwd": root, "tool_input": {"prompt": prompt, "description": "a stage",
+                                           "subagent_type": kind}}
     proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
                           capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
@@ -529,3 +531,34 @@ def test_a_stage_still_reading_is_not_given_up_on() -> None:
         ok, why = cc_flowstate.admits(state, "survey")
     assert not ok, state
     assert "already running" in why, why
+
+
+def test_a_launch_never_asks_for_a_subagent_type_the_client_lacks() -> None:
+    """A session put the stage name in subagent_type. The client answered "Agent type 'survey' not
+    found" -- after this hook had recorded the launch -- so the flow held open a stage that did not
+    exist and refused every retry as a duplicate, until the context ran out."""
+    with tempfile.TemporaryDirectory() as root:
+        cc_flowstate.save(cc_flowstate.begin("review", "t", "s1", root), "s1", root)
+        decision, _, amended = run("STAGE: survey\n", root, kind="survey")
+    assert decision == "allow"
+    assert amended["subagent_type"] == "general-purpose", amended
+
+
+def test_a_launch_the_client_refused_does_not_hold_the_stage() -> None:
+    """PreToolUse runs before the call, so a launch is recorded on the strength of being
+    permitted. One was then refused by the client and the flow held open a stage that did not
+    exist, refusing every retry as a duplicate until the context ran out. The result is the only
+    place that failure is visible."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.save(state, "s1", root)
+        payload = {"hook_event_name": "PostToolUse", "tool_name": "Agent", "session_id": "s1",
+                   "cwd": root, "tool_input": {},
+                   "tool_response": "Agent type 'survey' not found. Available agents: ..."}
+        proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                              capture_output=True, text=True, timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        after = cc_flowstate.load("s1", root)
+    assert cc_flowstate.running(after) == [], after
+    assert cc_flowstate.next_stage(after) == "survey", after

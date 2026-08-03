@@ -201,7 +201,7 @@ def admits(state: dict, stage: str) -> tuple[bool, str]:
     return True, ""
 
 
-def forget_running(state: dict) -> list[str]:
+def forget_running(state: dict, every: bool = False) -> list[str]:
     """Drop stages whose subagent went away, returning their names.
 
     This used to drop every stage in flight, on the reasoning that a parent cannot be finishing its
@@ -212,7 +212,8 @@ def forget_running(state: dict) -> list[str]:
     life for STALE_AFTER is treated as gone, which is the subagent that died without its stop ever
     firing.
     """
-    gone = [e for e in state.get("stages", []) if e.get("verdict") is None and _silent(e)]
+    gone = [e for e in state.get("stages", [])
+            if e.get("verdict") is None and (every or _silent(e))]
     state["stages"] = [e for e in state.get("stages", []) if e not in gone]
     return [e["stage"] for e in gone]
 
