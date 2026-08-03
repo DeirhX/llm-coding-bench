@@ -73,6 +73,12 @@ def record_verdict(state: dict, stage: str, gaps: list, agent: str = "") -> dict
         entry["agent"] = agent or entry.get("agent", "")
         entry["finished"] = time.time()
         entry["rounds"] = int(entry.get("rounds", 1)) + (0 if pending else 1)
+        if gaps:
+            # A refusal is not the end of the subagent, so the stage is still in flight and must
+            # still look it. Closing it here told the flow guard that nothing was running, and the
+            # guard then read the working stage as an idle orchestrator and ordered it to delegate
+            # its own work to a subagent. It obliged, reported nothing, and was refused again.
+            record_launch(state, stage, entry.get("agent", ""))
     return state
 
 

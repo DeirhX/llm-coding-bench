@@ -378,4 +378,19 @@ def test_a_stage_that_answers_the_refusal_stops_being_refused() -> None:
         assert cc_flowstate.refused(state), state
         cc_flowstate.record_verdict(state, "plan", [], agent="a1")
     assert cc_flowstate.done(state) == ["plan"], state
-    assert state["stages"][-1]["rounds"] == 2, state
+    assert not cc_flowstate.running(state), state
+
+
+def test_a_refused_stage_is_still_in_flight() -> None:
+    """A refusal does not end the subagent. Closing the stage told the flow guard nothing was
+    running, so the guard read the working stage as an idle orchestrator and ordered it to
+    delegate its own work to a subagent -- which it did, reporting nothing, and was refused
+    again. Five denials into that loop the stage gave up."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "claims", agent="a1")
+        cc_flowstate.record_verdict(state, "claims", ["no claims were stated"], agent="a1")
+        assert cc_flowstate.running(state) == ["claims"], state
+        cc_flowstate.record_verdict(state, "claims", [], agent="a1")
+        assert cc_flowstate.running(state) == [], state
+    assert cc_flowstate.done(state) == ["claims"], state

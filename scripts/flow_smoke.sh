@@ -17,6 +17,17 @@ MODEL=${FLOW_MODEL:-qwopus}
 OUT=${FLOW_OUT:-/tmp/flow-smoke}
 TASK=${1:-"review: the long-sleep rule in scripts/cc-context-guard.py. Is it correct, and can a stage that needs to wait for something legitimately get past it?"}
 
+# A run against a dead proxy does not fail, it hangs: the client waits on a connection nobody will
+# answer and the log stays at the last thing that worked. Worse, the proxy dies quietly -- it is
+# killed with the process group of whatever spawned it, which is why it belongs in its own screen
+# and why this asks before spending an hour finding out.
+if ! curl -fsS -m 5 -o /dev/null "$BASE/v1/models"; then
+  print -u2 "no model server answering at $BASE -- start the proxy first, detached:"
+  print -u2 "  screen -dmS proxy $ROOT/.venv/bin/python $ROOT/scripts/anthropic_proxy.py --port 8099 \\"
+  print -u2 "    --upstream http://127.0.0.1:8098/v1/chat/completions --force-model $MODEL"
+  exit 1
+fi
+
 mkdir -p "$OUT"
 SETTINGS="$OUT/settings.json"
 GUARD="$ROOT/scripts/cc-context-guard.py --stop-advice answer"
