@@ -157,8 +157,13 @@ def record_launch(state: dict, stage: str, agent: str = "") -> dict:
 # eighteen-claim ledgers this produces, short enough not to crowd out the file it is about.
 LEDGER_KEPT = 12_000
 
+# How many verified findings are carried out of a round. The claim cap is twelve, so this keeps every
+# finding a round could legally have made.
+STOOD_KEPT = 12
 
-def record_verdict(state: dict, stage: str, gaps: list, agent: str = "", answer: str = "") -> dict:
+
+def record_verdict(state: dict, stage: str, gaps: list, agent: str = "", answer: str = "",
+                   stood: list | None = None) -> dict:
     """Attach a gate verdict to the most recent launch of `stage`.
 
     A refusal does not end a subagent, it sends it round again, so the same launch reports twice --
@@ -182,6 +187,8 @@ def record_verdict(state: dict, stage: str, gaps: list, agent: str = "", answer:
         entry["finished"] = time.time()
         if gaps and answer:
             entry["answer"] = answer[-LEDGER_KEPT:]
+        if stood:
+            entry["stood"] = list(stood)[:STOOD_KEPT]
         entry["rounds"] = int(entry.get("rounds", 1)) + (0 if pending else 1)
         if gaps:
             # A refusal is not the end of the subagent, so the stage is still in flight and must
@@ -191,6 +198,42 @@ def record_verdict(state: dict, stage: str, gaps: list, agent: str = "", answer:
             record_launch(state, stage, entry.get("agent", ""))
             state["stages"][-1]["reopened"] = True
     return state
+
+
+# Findings restated between rounds are not merged by how alike they read, and the numbers are why.
+# Measured on run 21's own ledgers plus two claims that differ only in which way round they are:
+#
+#   the same finding reworded    raw 0.55-0.60   sorted-token 0.55-0.88
+#   "blocks touch but not rm" /
+#   "blocks rm but not touch"    raw 0.82        sorted-token 1.00
+#
+# A paraphrase shares less text with its original than a logical inverse shares with it, so every
+# threshold that merges the duplicates merges the opposites first. Only identical text is merged,
+# which means a restatement can appear twice -- cosmetic, where quietly dropping a finding would be
+# the disease this harness exists to treat.
+def salvage(state: dict, stage: str) -> list[dict]:
+    """The findings of `stage` that passed the gate, gathered across every round it was given.
+
+    Being given up on is a verdict about a stage, not about each thing it said. Run 21's claims stage
+    was refused three times and abandoned, having proved six findings along the way -- and the flow
+    delivered none of them, because nothing looked below the level of the stage. Deduplicated on the
+    claim text with the latest round winning, since a reopened round restates what it already had.
+    """
+    kept: list[dict] = []
+    for entry in state.get("stages", []):
+        if entry.get("stage") != stage:
+            continue
+        for finding in entry.get("stood") or []:
+            text = (finding.get("claim") or "").strip()
+            if not text:
+                continue
+            twin = next((k for k in kept if k.get("claim", "").strip() == text), None)
+            if twin is None:
+                kept.append(dict(finding))
+            elif len(finding.get("cites") or []) >= len(twin.get("cites") or []):
+                # A later round said it again, better cited. Keep that one.
+                kept[kept.index(twin)] = dict(finding)
+    return kept
 
 
 def done(state: dict) -> list[str]:

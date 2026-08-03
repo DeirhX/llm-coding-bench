@@ -246,15 +246,28 @@ the stage under review spent 11 of its calls collecting exactly that.
 client's `agent_id` distinguishes a subagent's calls from its parent's. Flow state is serialised with
 an `flock`, so concurrent hooks no longer overwrite each other.
 
+**An abandoned stage now hands over what it proved.** The gate records each claim that survives every
+check, with its citation, and the end of a flow makes the session write those out beside what it failed
+to establish. Replaying run 21's four refused rounds through the gate as it now stands recovers **12
+verified findings** — five from round 2, seven from round 4 — of which the run delivered none. They are
+real defects in this repo's own tamper rule: the switch name can be built indirectly (`X=cc-guard;
+touch /tmp/$X-off`, `touch /tmp/cc-$(echo guard)-off`), and the rule fires on any name ending in the
+switch name. Verified by replay against the run's own transcript; not yet seen in a live run.
+
 **The budget ends a runaway stage in one turn.** Run 20's survey hit 141 calls, received one refusal,
 and answered immediately. The same mechanism in run 18 produced 220 refusals.
 
 ### What does not work
 
-**A stage that verifies six findings still delivers nothing.** `claims` is blocking, so when it is
-given up on the flow ends and the adversary never runs. Run 21 established six verified findings about
-a real rule and shipped none of them: they exist only in a refused round's ledger. This is the single
-biggest gap between the harness and the thing a user wants.
+**A stage that is given up on still fails as a stage.** `claims` is blocking, so the adversary never
+runs and nobody attacks the findings. What no longer happens is losing them: see below.
+
+**Findings can be delivered twice.** A round that is sent back reworders what it already proved, and
+restatements are merged only when the text is identical — because it cannot be done safely by
+similarity. Measured on run 21's own ledgers, a paraphrase scores 0.55–0.60 against its original while
+*"blocks touch but not rm"* scores 0.82 against *"blocks rm but not touch"*, and 1.00 once word order
+is discarded. Every threshold that merges the duplicates merges the opposites first, so a duplicate in
+an answer is the price of never quietly dropping a finding.
 
 **The review adapter demands a file quote and this stage never produced one.** Four rounds, 25
 citations, all of them commands. Every round was refused partly for `requires file_quote evidence and

@@ -719,3 +719,45 @@ def test_the_contract_states_the_cap_it_will_be_enforced_against() -> None:
     text = cc_ledger.contract_markdown(contract)
     assert "At most %d claims" % contract.claim_cap in text, text
     assert "one claim per instance" in text, text
+
+
+def test_a_claim_that_holds_is_written_down_though_its_neighbours_fail() -> None:
+    """The gate used to record only what went wrong, so a round refused for one bad citation threw
+    away every good one with it. Run 21 lost six verified findings that way. What passes is now
+    recorded per claim, with the citation, so a stage that is given up on can still be quoted."""
+    gate = _load_gate()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "widen.py").write_text("def widen(rows):\n    width = 0\n    return width\n")
+        ledger = ("CLAIM: widen starts the width at zero.\n"
+                  "EVIDENCE: widen.py:2-2\n"
+                  "QUOTE:\n"
+                  "    width = 0\n"
+                  "CLAIM: widen raises on an empty list.\n"
+                  "EVIDENCE: widen.py:3-3\n"
+                  "QUOTE:\n"
+                  "    raise ValueError('empty')\n")
+        claims, unknowns = cc_ledger.claims_from_text(ledger, str(root))
+        gaps, report = gate.evaluate(cc_ledger.contract_for("review"), claims, unknowns, [],
+                                     str(root), check_coverage=False, answer=ledger)
+        assert gaps, "the fabricated quote must still be refused"
+        assert [f["claim"] for f in report["stood"]] == ["widen starts the width at zero."], report
+        assert report["stood"][0]["cites"] == ["widen.py:2"], report["stood"]
+
+
+def test_a_finding_whose_file_moved_is_not_reported_as_proved() -> None:
+    """A quote the file no longer bears is excused when the transcript shows the stage was shown it,
+    because it quoted what it saw. Excused is not verified: nobody has checked it against the tree as
+    it stands, so it must not be carried into an answer as something the run established."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "g.py"
+        target.write_text("def guard():\n    return 'new text'\n")
+        call = cc_evidence.ToolCall(agent="claims", tool="Read", call_id="1",
+                                    args={"file_path": str(target)},
+                                    text="  1  def guard():\n  2      return 'old text'\n")
+        answer = "CLAIM: the guard returns the old text\nQUOTE: g.py:2 `    return 'old text'`\n"
+        claims, unknowns = cc_ledger.claims_from_text(answer, tmp)
+        gaps, report = _load_gate().evaluate(cc_ledger.contract_for("review"), claims, unknowns,
+                                             [call], tmp, check_coverage=False, answer=answer)
+        assert not gaps, gaps
+        assert report["stood"] == [], "an excused citation is not a proved one: %s" % report["stood"]

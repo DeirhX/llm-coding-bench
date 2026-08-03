@@ -139,6 +139,19 @@ def _session_asserted_something(calls: list, text: str) -> bool:
     return len(text.split()) > 120
 
 
+def _cite_of(ev) -> str:
+    """How a citation that held up is written down for whoever reads the finding later."""
+    if ev.kind == cc_ledger.FILE_QUOTE and ev.path:
+        if ev.start and ev.end and ev.end != ev.start:
+            return "%s:%s-%s" % (ev.path, ev.start, ev.end)
+        return "%s:%s" % (ev.path, ev.start) if ev.start else ev.path
+    if ev.kind == cc_ledger.COMMAND_RESULT and ev.command:
+        return "command: %s" % ev.command[:120]
+    if ev.pattern:
+        return "%s: %s" % (ev.kind.replace("_", " "), ev.pattern[:80])
+    return ev.kind.replace("_", " ")
+
+
 def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
              calls: list, root: str, check_coverage: bool = True,
              answer: str = "", predicted: tuple = ()) -> tuple[list[str], dict]:
@@ -158,6 +171,7 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
         "unknowns": unknowns,
         "probes_run": len(probes),
         "verdicts": [],
+        "stood": [],
     }
 
     if len(claims) > contract.claim_cap:
@@ -168,6 +182,7 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
     kinds_seen: set[str] = set()
     for i, claim in enumerate(claims, 1):
         label = "claim %d (%s)" % (i, claim.claim[:70])
+        before, uncheckable = len(gaps), False
         if not claim.evidence:
             claim.verdict = "no-evidence"
             # Seven claims came back established by actually running the guard and reporting what
@@ -192,6 +207,7 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
                 # against the stage, which quoted what it was shown.
                 report["verdicts"][-1]["verdict"] = "moved"
                 report.setdefault("moved", []).append(ev.path)
+                uncheckable = True
             elif not verdict.ok:
                 gaps.append("%s: %s -- %s" % (label, verdict.kind, verdict.detail))
             elif (check_coverage and ev.kind == cc_ledger.FILE_QUOTE and ev.path and ev.start
@@ -227,6 +243,14 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
                             "session did not run%s. Run it and report what it printed, or lower "
                             "the severity."
                             % (label, "" if probes else " -- no command was run at all"))
+
+        if len(gaps) == before and claim.evidence and not uncheckable:
+            # A claim that survived every check is the one thing in a refused round worth keeping.
+            # The stage can still be given up on for its neighbours: run 21's claims stage proved
+            # six findings across the rounds that refused it for a seventh, and every one was
+            # discarded because the stage as a whole never passed.
+            report["stood"].append({"claim": claim.claim,
+                                    "cites": [_cite_of(ev) for ev in claim.evidence]})
 
     # Length is what separates the two failures. A stage that stopped mid-thought writes one line
     # about what it is going to do next; a stage that answered in the wrong shape writes pages. The
@@ -746,12 +770,27 @@ def main() -> int:
             state["disclosed"] = True
             cc_flowstate.save(state, session, root)
             gaps = [g for e in cc_flowstate.refused(state) for g in e.get("gaps", [])]
+            stood = [f for st in given_up for f in cc_flowstate.salvage(state, st)]
+            unestablished = " | ".join(g[:160] for g in gaps[:6]) or "nothing was recorded"
+            if not stood:
+                return block(
+                    "The %s stage was refused %d times and the flow has given up on it, so your "
+                    "answer must say so rather than reading like a finished review. Say which stage "
+                    "it was, and state plainly what was never established: %s. Then finish."
+                    % (", ".join(given_up), cc_flowstate.ROUND_CAP, unestablished))
+            # Everything the run proved goes into the answer, or the run was worth nothing to whoever
+            # asked for it. Run 21 abandoned its claims stage having verified six findings, disclosed
+            # only the failures, and delivered a review that named no defect it had actually caught.
             return block(
-                "The %s stage was refused %d times and the flow has given up on it, so your answer "
-                "must say so rather than reading like a finished review. Say which stage it was, "
-                "and state plainly what was never established: %s. Then finish."
-                % (", ".join(given_up), cc_flowstate.ROUND_CAP,
-                   " | ".join(g[:160] for g in gaps[:6]) or "nothing was recorded"))
+                "The %s stage was refused %d times and the flow has given up on it. %d of its "
+                "findings did pass the gate, and they are the answer: write each one out with the "
+                "citation beside it, as given here -- %s. Then say plainly, and separately, that the "
+                "stage was abandoned and what was never established: %s. Then finish."
+                % (", ".join(given_up), cc_flowstate.ROUND_CAP, len(stood),
+                   " | ".join("%s [%s]" % ((f.get("claim") or "")[:200],
+                                           "; ".join(f.get("cites") or [])[:120])
+                              for f in stood[:cc_flowstate.STOOD_KEPT]),
+                   unestablished))
         if left and nudges < NUDGE_LIMIT:
             done = cc_flowstate.done(state)
             state["nudges"] = nudges + 1
@@ -809,7 +848,7 @@ def main() -> int:
     if stage:
         # What the next stage may do turns on this verdict, so it is written where the hook that
         # admits the next launch can read it rather than left in the conversation.
-        cc_flowstate.record_verdict(state, stage, gaps, agent, text)
+        cc_flowstate.record_verdict(state, stage, gaps, agent, text, report.get("stood"))
         state["nudges"] = 0     # a stage reported, so the budget for pushing is not being spent
         for entry in reversed(state.get("stages", [])):
             if entry.get("stage") == stage and not entry.get("summary"):

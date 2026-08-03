@@ -1410,6 +1410,36 @@ And note what the two failures of run 18 have in common: a stage was starved of 
 refusals, and the session was killed by a prompt nobody was compacting. Both are the context window
 being consumed by the harness rather than by the work, and neither shows up as a harness error.
 
+### The stage failed; the findings did not
+
+A stage is refused as a whole, and until now it was discarded as a whole. Replaying run 21's four
+refused claims rounds through the gate shows what that cost: **12 findings that pass every check**,
+five from the second round and seven from the fourth, none of which reached the answer. The run read
+as a failure and was mostly a success nobody collected. Two of the twelve are real holes in the very
+rule under review -- the switch file name can be assembled out of shell (`X=cc-guard; touch
+/tmp/$X-off`) so the literal never appears, and any path ending in the switch name is refused because
+the pattern has no left-hand boundary.
+
+The gate now records each claim that survives on its own account, and the end of a flow makes the
+session write those out. The lesson generalises past this harness: **when a judge rejects work, record
+the granularity it judged at, not the granularity it reported at.** Everything below the verdict was
+computed and thrown away.
+
+One thing that cannot be done here, with numbers, because it looks obvious and is wrong. A round sent
+back rewords what it already proved, so the same finding arrives twice and the temptation is to merge
+by similarity. Measured on those ledgers:
+
+| pair | raw ratio | word order discarded |
+|---|---|---|
+| a finding and its own paraphrase | 0.55-0.60 | 0.55-0.88 |
+| "blocks touch but not rm" vs "blocks rm but not touch" | **0.82** | **1.00** |
+
+A paraphrase shares less text with its original than a logical inverse shares with it, and sorting the
+words -- the usual trick for reordered phrasing -- makes the inverse a perfect match. Every threshold
+that merges the restatements merges the opposites first, so only identical text is merged. A duplicate
+in an answer is cosmetic; silently dropping one of two contradictory findings is the failure this whole
+apparatus exists to prevent.
+
 ### 128k buys room for four minutes, once -- and 2.2x on decode
 
 We widened the runner from `-c 98304` to `-c 131072`, because a harness whose refusals are charged to

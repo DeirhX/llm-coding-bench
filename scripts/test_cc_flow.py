@@ -963,3 +963,68 @@ def test_the_widest_window_is_declared_with_the_margin_the_counts_need() -> None
     printed = done.stdout[done.stdout.index("{"):]
     declared = int(json.loads(printed)["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"])
     assert declared <= 131072 * 3 // 4, declared
+
+
+def test_findings_that_held_are_gathered_across_the_rounds_that_were_refused() -> None:
+    """A refused round is not a worthless one. Run 21's claims stage was refused three times and
+    proved six findings on the way, and the flow kept none of them because nothing looked below the
+    verdict on the stage. Rounds restate what they already had, so the text deduplicates."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.record_verdict(state, "claims", ["claim 3: unverified"], "a1", "ledger",
+                                    [{"claim": "rm is not in _VERBS", "cites": ["g.py:229"]}])
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.record_verdict(state, "claims", ["claim 2: unverified"], "a1", "ledger",
+                                    [{"claim": "rm is not in _VERBS", "cites": ["g.py:229-230"]},
+                                     {"claim": "the probe is exempt", "cites": ["command: touch x"]}])
+        kept = cc_flowstate.salvage(state, "claims")
+        assert [f["claim"] for f in kept] == ["rm is not in _VERBS", "the probe is exempt"], kept
+        assert kept[0]["cites"] == ["g.py:229-230"], "the later round's citation should win"
+        assert cc_flowstate.salvage(state, "survey") == []
+
+
+def test_a_stage_given_up_on_hands_over_what_it_proved() -> None:
+    """The failure this fixes: run 21 verified six findings about a real rule, was refused a seventh
+    time, and its final answer listed only what it had failed to establish -- a review that named no
+    defect it had actually caught. The findings are now part of what the session is made to say."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey", "a0")
+        cc_flowstate.record_verdict(state, "survey", [], "a0")
+        for _ in range(3):
+            cc_flowstate.record_launch(state, "claims", "a1")
+            cc_flowstate.record_verdict(
+                state, "claims", ["claim 7 (a seventh thing): unverified"], "a1", "ledger",
+                [{"claim": "rm is not in the _VERBS regex", "cites": ["guard.py:229"]}])
+        # Each refusal reopens the stage on the assumption the worker goes round again. Headless it
+        # exits instead, and the entries age out by the time the session stops; without that the hook
+        # is waiting for a ghost rather than answering.
+        for entry in state["stages"]:
+            if entry.get("verdict") is None:
+                entry["launched"] = time.time() - cc_flowstate.STALE_AFTER - 5
+        cc_flowstate.save(state, "s1", root)
+        decision, reason = _stop("Here is the review.", root)
+        assert decision == "block", reason
+        assert "rm is not in the _VERBS regex" in reason, reason
+        assert "guard.py:229" in reason, reason
+        assert "abandoned" in reason and "a seventh thing" in reason, reason
+
+
+def test_a_finding_restated_is_kept_twice_rather_than_risk_losing_one() -> None:
+    """Merging findings by how alike they read cannot be done safely. Measured on run 21's ledgers,
+    a paraphrase of a finding scores 0.55-0.60 against its original while "blocks touch but not rm"
+    scores 0.82 against "blocks rm but not touch" -- so every threshold that merges the restatements
+    merges the opposites first. Only identical text is merged, and a duplicate in an answer is the
+    price of never dropping a finding."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.record_verdict(state, "claims", ["g"], "a1", "ledger", [
+            {"claim": "The rule blocks touch but not rm.", "cites": ["g.py:229"]},
+            {"claim": "The rule blocks rm but not touch.", "cites": ["g.py:230"]},
+            {"claim": "The rule blocks touch but not rm.", "cites": ["g.py:229", "g.py:231"]},
+        ])
+        kept = cc_flowstate.salvage(state, "claims")
+        assert len(kept) == 2, kept
+        assert kept[0]["cites"] == ["g.py:229", "g.py:231"], "the better-cited wording wins"
