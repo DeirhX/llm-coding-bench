@@ -568,3 +568,31 @@ def test_prose_after_a_quote_cannot_smuggle_in_a_fabricated_one() -> None:
         text = "CLAIM: it deletes the database\nQUOTE: g.py:1-2 'drop_all_tables()' -- as shown.\n"
         claims, _ = vf.parse_ledger(text, root)
         assert not vf.file_quote(root, "g.py", 1, 2, claims[0]["evidence"][0]["quote"]).ok
+
+
+def test_a_claim_that_names_the_file_supplies_it_to_the_quotes_under_it() -> None:
+    """Verbatim shape from run 7: the path in the claim's own sentence, the line after the quote.
+    Eleven citations of one file came back as "missing a file and a line range" -- every one of them
+    said where, twice, in the two places a person would look."""
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "g.py").write_text("import os\nOFF = Path('/tmp/off')\nSWITCHES = (OFF,)\n")
+        text = ("CLAIM: The switches are defined at lines 2-3 of `g.py`.\n\n"
+                "QUOTE: `OFF = Path('/tmp/off')` (line 2)\n"
+                "QUOTE: `SWITCHES = (OFF,)` (line 3)\n")
+        claims, _ = vf.parse_ledger(text, root)
+        pieces = claims[0]["evidence"]
+        assert len(pieces) == 2, pieces
+        for piece in pieces:
+            assert piece["path"] == "g.py"
+            assert vf.file_quote(root, piece["path"], piece["start"], piece["end"],
+                                 piece["quote"]).ok, piece
+
+
+def test_an_inherited_path_does_not_excuse_the_wrong_line() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "g.py").write_text("import os\nOFF = Path('/tmp/off')\n")
+        text = "CLAIM: about g.py.\n\nQUOTE: `OFF = Path('/tmp/off')` (line 9)\n"
+        claims, _ = vf.parse_ledger(text, root)
+        piece = claims[0]["evidence"][0]
+        assert (piece["path"], piece["start"]) == ("g.py", 9)
+        assert not vf.file_quote(root, "g.py", 9, 9, piece["quote"]).ok

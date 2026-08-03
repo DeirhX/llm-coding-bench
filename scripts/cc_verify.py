@@ -495,6 +495,11 @@ LOG_EV = re.compile(r"^log:\s*(?P<path>\S+)\s*~\s*(?P<pattern>.+)$", re.I)
 # `cc-context-guard.py lines 174, 188-189, 212-213` -- the path and the lines, with everything but
 # the colon. Written this way by every stage that has run here, and refused by a parser that wanted
 # `path:174`, which is a quarrel about punctuation rather than about evidence.
+# Any path-looking word: `scripts/guard.py`, `/private/tmp/r7tree/scripts/guard.py`, `guard.py`.
+# Used only to find the file a CLAIM sentence is about, never to invent a citation.
+ANY_PATH = re.compile(r"(?P<path>[^\s`*'\",()]+\.[A-Za-z0-9_]{1,6})\b")
+
+
 PATH_LINES = re.compile(r"(?P<path>[^\s`*'\",]+\.[A-Za-z0-9_]+)\s*,?\s+lines?\s+"
                         r"(?P<ranges>\d{1,6}(?:\s*[-\u2013]\s*\d{1,6})?"
                         r"(?:\s*,\s*\d{1,6}(?:\s*[-\u2013]\s*\d{1,6})?)*)")
@@ -781,9 +786,10 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
     evidence: dict | None = None
     cited: list[dict] = []
     quote: list[str] | None = None
+    claim_path: str | None = None
 
     def close_quote() -> None:
-        nonlocal quote, evidence
+        nonlocal quote, evidence, claim_path
         if quote is None:
             quote = None
             return
@@ -798,6 +804,27 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
                 if key != "quote" and not evidence.get(key):
                     evidence[key] = value
             body = spoken
+        if evidence is not None and not evidence.get("start"):
+            trailing = [_TRAILING_LINE.match(l) for l in body.split("\n") if l.strip()]
+            if trailing and all(trailing):
+                numbers = [int(m.group("n")) for m in trailing]
+                evidence["start"], evidence["end"] = min(numbers), max(numbers)
+                evidence.setdefault("kind", "file_quote")
+                body = _untrailed(body)
+        if evidence is not None and not evidence.get("path") and claim_path:
+            evidence["path"] = claim_path
+            evidence.setdefault("kind", "file_quote")
+        if (root and evidence is not None and not evidence.get("path")
+                and evidence.get("start") and body.strip()):
+            # Lines and the text, and no file named anywhere: a ledger about one file says which
+            # file once, in the first claim, and a person reading the fifth one knows what it is
+            # about. Ask the tree instead of guessing -- the answer is only taken when exactly one
+            # file holds that text at those lines, which is a stricter test than a typed path.
+            where = resolve_path(root, evidence["start"],
+                                 evidence.get("end") or evidence["start"], _untrailed(body))
+            if where:
+                evidence["path"] = where
+                evidence.setdefault("kind", "file_quote")
         pieces = _elided(body)
         if len(cited) > 1 and len(pieces) == len(cited):
             # One EVIDENCE line naming two ranges, quoted with an elision between them: the
@@ -822,6 +849,12 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
                        "severity": None, "falsification": None}
             claims.append(current)
             evidence = None
+            # A claim that says which file it is about, quoting underneath with only line numbers,
+            # is how a stage writes a review of one file: naming the path again on every quote is
+            # repetition a person would not write either. Eleven citations of one file were reported
+            # as "missing a file and a line range" when the file was named in the sentence above.
+            named = ANY_PATH.search(DECORATION.sub("", current["claim"]))
+            claim_path = named.group("path") if named else None
         elif current is None:
             continue
         elif header == "EVIDENCE:":
