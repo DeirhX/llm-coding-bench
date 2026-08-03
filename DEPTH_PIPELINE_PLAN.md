@@ -276,6 +276,9 @@ rather than mysterious — it does not stop it happening.
 and run 20 at 98,950 — the second *with* a declared budget of 90,112, because Claude Code estimates
 tokens and llama-server tokenises them, and the two disagree by about 10% at that size. A quarter of
 the window is now held back and run 21 survived. This is a margin chosen by measurement, not a fix.
+The runner has since been widened to `-c 131072`, which restores 98,304 usable tokens — what the
+server had before the margin was taken — for a measured 237 s to fill the window cold and 43 t/s
+rather than 93 t/s on decode at that depth (`LOCAL_AGENT_OPS.md` §8).
 
 **Two `Write` attempts per stage, refused.** Stages that only read keep trying to write their ledger
 to a file. The rule catches it every time; the instinct does not go away.
