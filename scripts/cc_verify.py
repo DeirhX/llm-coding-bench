@@ -987,6 +987,35 @@ _LEADING_CITE = re.compile(r'^(?P<cite>[^"\']{0,240}?)\s*(?P<q>["\'])')
 # then fails and the quote keeps the stray backslash, so an eleven-line citation that was correct to
 # the character came back as "quote not present in" -- over one character it had added, not moved.
 _BAD_ESCAPE = re.compile(r"(?<!\\)\\'")
+# `\b` and `\f` are escapes in JSON and word-boundaries in a regex, and this repo's code is mostly
+# regex. Decoding them turned a correct quote of `_VERBS = r"(?:touch|mv|...)\b[^;|&\n]*"` into a
+# line carrying a backspace, which is in no file. The pair is protected across the decode and put
+# back as the two characters that were written -- unlike `\n`, which a model does mean as a line
+# break when it hands over a multi-line quote. Only an even number of backslashes counts, so an
+# intentional `\\b` still decodes to a literal one.
+_REGEXY = re.compile(r"(?<!\\)((?:\\\\)*)\\([bf])")
+_ALSO_NEWLINES = re.compile(r"(?<!\\)((?:\\\\)*)\\([bfn])")
+# A private-use character, not a control one: JSON refuses a raw NUL in a string, so the decode this
+# was meant to protect failed outright and the fallback path did the work instead -- silently, and
+# with the newline it was there to prevent.
+_KEPT = "\ue000"
+
+
+def _protect(text: str, newlines: bool = False) -> str:
+    pattern = _ALSO_NEWLINES if newlines else _REGEXY
+    return pattern.sub(lambda m: m.group(1) + _KEPT + m.group(2), text)
+
+
+def _restore(text: str) -> str:
+    for letter in "bfn":
+        text = text.replace(_KEPT + letter, "\\" + letter)
+    return text
+
+
+def _one_line(found: list[dict]) -> bool:
+    """Does every citation here name a single line?"""
+    spans = [(c.get("start"), c.get("end")) for c in found if c.get("start")]
+    return bool(spans) and all(end in (None, start) for start, end in spans)
 
 
 def _quote_carrying_citation(body: str) -> tuple[list[dict], str]:
@@ -1006,10 +1035,20 @@ def _quote_carrying_citation(body: str) -> tuple[list[dict], str]:
     if rest.startswith('"'):
         for candidate in (rest, _BAD_ESCAPE.sub("'", rest)):
             try:
-                text, _ = json.JSONDecoder().raw_decode(candidate)
-                return found, text
+                text, _ = json.JSONDecoder().raw_decode(_protect(candidate))
             except ValueError:
                 continue
+            text = _restore(text)
+            if "\n" in text and _one_line(found):
+                # One line cited, several lines quoted: the citation and the text disagree, and the
+                # citation is the thing the model had in front of it. So the `\n` was inside
+                # something it quoted -- a character class, most often -- and not a break it meant.
+                try:
+                    flat, _ = json.JSONDecoder().raw_decode(_protect(candidate, newlines=True))
+                    text = _restore(flat)
+                except ValueError:
+                    pass
+            return found, text
     span = _first_span(rest)
     if span is None:
         return found, rest

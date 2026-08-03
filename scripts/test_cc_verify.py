@@ -1111,3 +1111,39 @@ def test_a_variable_inside_the_payload_is_not_a_condition_of_the_run() -> None:
     payload = '{"tool_name": "Bash", "tool_input": {"command": "X=cc-guard; touch /tmp/$X-off"}}'
     ran = _bash("echo '%s' | python3 guard.py" % payload, "(no output)")
     assert vf._same_command("echo '%s' | python3 guard.py" % payload, ran.args["command"])
+
+
+def test_a_quoted_regex_keeps_the_escapes_that_make_it_one() -> None:
+    """`\\b` and `\\n` are escapes in JSON and word-boundaries and character classes in a regex, and
+    this repo is mostly regex. Decoded as JSON, a correct one-line quote of `_VERBS` arrived carrying
+    a backspace and a line break, matched nothing, and was reported as not present in the file it had
+    been copied out of. The citation settles it: one line cited cannot be several lines quoted."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = pathlib.Path(tmp) / "guard.py"
+        source = '_VERBS = r"(?:touch|mv|cp)\\b[^;|&\\n]*"\n'
+        target.write_text(source)
+        body = 'guard.py:1 "%s"' % source.rstrip().replace('"', '\\"')
+        found, text = vf._quote_carrying_citation(body)
+        assert len(text.splitlines()) == 1, repr(text)
+        assert "\\b" in text and "\x08" not in text, repr(text)
+        verdict = vf.file_quote(tmp, found[0]["path"], found[0]["start"], found[0]["end"], text)
+        assert verdict.ok, verdict
+
+
+def test_a_multi_line_quote_still_arrives_as_several_lines() -> None:
+    """The escape a model means as a line break, when it hands over a run of lines as one string,
+    still has to become one -- so the rule above is bounded to citations of a single line."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = pathlib.Path(tmp) / "widen.py"
+        target.write_text("def widen(rows):\n    width = 0\n    return width\n")
+        body = 'widen.py:1-2 "def widen(rows):\\n    width = 0"'
+        found, text = vf._quote_carrying_citation(body)
+        assert len(text.splitlines()) == 2, repr(text)
+        assert vf.file_quote(tmp, found[0]["path"], found[0]["start"], found[0]["end"], text).ok
+
+
+def test_an_intentionally_escaped_backslash_still_decodes_to_one() -> None:
+    """Only an even number of backslashes is left alone, or a quote that really did contain `\\\\b`
+    would come back with a backslash it never had."""
+    assert vf._protect(r'"a\\b"') == r'"a\\b"', vf._protect(r'"a\\b"')
+    assert vf._protect(r'"a\b"') != r'"a\b"'
