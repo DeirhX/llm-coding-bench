@@ -299,3 +299,32 @@ def test_an_unclosed_fence_still_gives_up_its_content(tmp_path) -> None:
     (tmp_path / "m.py").write_text("def add(a, b):\n    return a + b\n")
     verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, "```\ndef add(a, b):\n    return a + b")
     assert verdict.ok, verdict
+
+
+def test_a_citation_that_names_lines_but_no_file_is_resolved() -> None:
+    """A stage wrote sixteen claims, each carrying real quoted source and a line number, and every
+    one was refused for citing nothing: it had written "line 212 checks" rather than naming the
+    file. Asking the tree which file holds that text at that line is stricter than believing a
+    path the model typed."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("BARE_LINES = re.compile"))
+    text = "CLAIM: the bare-line pattern exists.\nEVIDENCE: line %d defines it.\nQUOTE:\n%s\n" % (
+        n, body[n - 1])
+    claims, _ = vf.parse_ledger(text, ROOT)
+    assert claims[0]["path"] == "scripts/cc_verify.py", claims[0]
+    assert vf.verify_ledger(ROOT, text)[0][1].ok, vf.verify_ledger(ROOT, text)[0][1].detail
+
+
+def test_a_quote_that_matches_two_files_stays_uncited() -> None:
+    """Resolution is only honest while it is unambiguous: one line of `import os` is in every
+    file, and guessing which would accept a claim nobody can check."""
+    assert vf.resolve_path(ROOT, 1, 1, "") is None
+
+
+def test_the_written_out_line_label_is_not_a_fabrication() -> None:
+    """`QUOTE: Line 174: `code`` is the gutter written out in words. Compared literally it fails
+    as "quote not present", the verdict reserved for invention."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("BARE_LINES = re.compile"))
+    quoted = "Line %d: `%s`" % (n, body[n - 1])
+    assert vf.file_quote(ROOT, "scripts/cc_verify.py", n, n, quoted).ok

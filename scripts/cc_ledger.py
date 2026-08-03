@@ -287,10 +287,10 @@ def load_claims(path: str | os.PathLike[str]) -> list[Claim]:
 
 # The block form the model actually produces when refused. Kept in step with cc_verify's parser,
 # which owns the regexes so there is one definition of a well-formed claim.
-def claims_from_text(text: str) -> tuple[list[Claim], list[str]]:
+def claims_from_text(text: str, root: str = "") -> tuple[list[Claim], list[str]]:
     import cc_verify
 
-    parsed, unknowns = cc_verify.parse_ledger(text)
+    parsed, unknowns = cc_verify.parse_ledger(text, root)
     claims: list[Claim] = []
     for i, c in enumerate(parsed, 1):
         ev: list[Evidence] = []

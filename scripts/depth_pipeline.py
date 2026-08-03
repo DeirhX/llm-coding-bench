@@ -251,7 +251,7 @@ def check(answer: str, contract: cc_ledger.Contract, session: str, cwd: Path,
           predicted: tuple = ()):
     """The interactive gate's arithmetic, reused verbatim so both paths agree."""
     gate = load_gate()
-    claims, unknowns = cc_ledger.claims_from_text(answer)
+    claims, unknowns = cc_ledger.claims_from_text(answer, str(cwd))
     transcript = transcript_for(session, str(cwd))
     calls = cc_evidence.collect(str(transcript)) if transcript.is_file() else []
     if not transcript.is_file():

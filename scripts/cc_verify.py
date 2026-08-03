@@ -77,7 +77,8 @@ def _significant(text: str, first: int = 0) -> list[str]:
     the line the citation names is not a coincidence.
     """
     return [line.rstrip()
-            for line in _ungutted(_unfenced(text), first).strip("\n").split("\n") if line.strip()]
+            for line in _unlabelled(_ungutted(_unfenced(text), first), first)
+            .strip("\n").split("\n") if line.strip()]
 
 
 # One separator only: a bar-style gutter puts the code straight after the bar, and a space-style one
@@ -119,6 +120,39 @@ def _ungutted(text: str, first: int = 0) -> str:
             return text
         numbers.append(int(found.group("n")))
         stripped[line] = found.group("code")
+    if any(b - a != 1 for a, b in zip(numbers, numbers[1:])):
+        return text
+    return "\n".join(stripped.get(l, l) for l in lines)
+
+
+# `Line 174: `code`` -- the gutter written out in words, with the code in backticks after it. It is
+# what the model produces when it quotes from a file it read with line numbers showing and wants to
+# be helpful about where the line came from, and it is indistinguishable from a fabricated quote to
+# a comparison that does not know the label is a label.
+_LABEL = re.compile(r"^\s*[Ll]ines?\s+(?P<n>\d{1,6})(?:\s*[-\u2013]\s*\d{1,6})?\s*:\s*"
+                    r"(?P<code>.*)$")
+
+
+def _unlabelled(text: str, first: int = 0) -> str:
+    """Drop a written-out line label the model put in front of each quoted line.
+
+    Held to the same rule as the numeric gutter: a label is only a label if the citation vouches
+    for it, either by naming the line it claims or by counting up from there. Otherwise a line of
+    prose that happens to begin "Line 3:" would be silently rewritten.
+    """
+    lines = text.split("\n")
+    content = [l for l in lines if l.strip()]
+    if not content:
+        return text
+    numbers, stripped = [], {}
+    for line in content:
+        found = _LABEL.match(line)
+        if not found or not found.group("code").strip():
+            return text
+        numbers.append(int(found.group("n")))
+        stripped[line] = found.group("code").strip("`")
+    if first and numbers[0] != first:
+        return text
     if any(b - a != 1 for a, b in zip(numbers, numbers[1:])):
         return text
     return "\n".join(stripped.get(l, l) for l in lines)
@@ -341,7 +375,7 @@ def _elided(body: str) -> list[str]:
     return [p for p in pieces if p.strip()]
 
 
-def parse_ledger(text: str) -> tuple[list[dict], list[str]]:
+def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
     """Split an answer into claims and declared unknowns.
 
     Scanned line by line rather than matched with one regex, because a QUOTE runs until the next
@@ -406,6 +440,19 @@ def parse_ledger(text: str) -> tuple[list[dict], list[str]]:
             current["falsification"] = {"command": line[len("FALSIFICATION:"):].strip()}
     close_quote()
 
+    for claim in claims:
+        for piece in claim["evidence"]:
+            if piece.get("kind") is not None or not root or not piece.get("quote"):
+                continue
+            where = BARE_LINES.search(piece.get("raw", ""))
+            if not where:
+                continue
+            start = int(where.group("start"))
+            end = int(where.group("end") or start)
+            path = resolve_path(root, start, end, piece["quote"])
+            if path:
+                piece.update(kind="file_quote", path=path, start=start, end=end)
+
     # The single-file_quote view the verifier and its tests were written against.
     for claim in claims:
         first = next((e for e in claim["evidence"] if e.get("kind") == "file_quote"), {})
@@ -433,9 +480,35 @@ def predictions(text: str) -> list[dict]:
     return out
 
 
+# "line 174", "lines 208-211" -- a citation that names where it read but not what it read.
+BARE_LINES = re.compile(r"\b[Ll]ines?\s+(?P<start>\d{1,6})(?:\s*[-\u2013]\s*(?P<end>\d{1,6}))?")
+
+
+def _tracked(root: str) -> list[str]:
+    try:
+        out = subprocess.run(["git", "-C", root, "ls-files"], capture_output=True, text=True,
+                             timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [l for l in out.stdout.splitlines() if l.strip()] if out.returncode == 0 else []
+
+
+def resolve_path(root: str, start: int, end: int, quote: str) -> str | None:
+    """Which file the quote came from, when the citation named lines but no file.
+
+    A stage wrote sixteen claims, every one of them carrying real quoted source and a line number,
+    and every one was refused for citing nothing -- it had written "line 212 checks" instead of
+    naming the file. Asking the tree which file holds that text at that line is a stricter test
+    than believing a path the model typed, and it is the same comparison either way: the answer is
+    only accepted when exactly one file matches, so an ambiguous quote is still uncited.
+    """
+    hits = [path for path in _tracked(root) if file_quote(root, path, start, end, quote).ok]
+    return hits[0] if len(hits) == 1 else None
+
+
 def verify_ledger(root: str, text: str) -> list[tuple[dict, Verdict]]:
     out = []
-    for claim in parse_ledger(text)[0]:
+    for claim in parse_ledger(text, root)[0]:
         if not claim["path"] or claim["quote"] is None:
             out.append((claim, Verdict(UNVERIFIED, "claim has no EVIDENCE/QUOTE block")))
             continue

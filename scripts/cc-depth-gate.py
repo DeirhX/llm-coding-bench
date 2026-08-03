@@ -659,7 +659,7 @@ def main() -> int:
     if claims:
         unknowns = [u for c in claims for u in c.unknowns]
     else:
-        claims, unknowns = cc_ledger.claims_from_text(text)
+        claims, unknowns = cc_ledger.claims_from_text(text, root)
 
     if not claims and not _session_asserted_something(calls, text):
         return allow()          # a short factual answer is not a ledger-bearing one
