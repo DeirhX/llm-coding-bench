@@ -709,3 +709,13 @@ def test_a_quote_nothing_read_is_still_a_gap() -> None:
         gaps, _ = _load_gate().evaluate(cc_ledger.contract_for("review"), claims, unknowns,
                                         [faked], tmp, check_coverage=False, answer=answer)
         assert gaps, "a quote only Bash showed is not evidence the file moved"
+
+
+def test_the_contract_states_the_cap_it_will_be_enforced_against() -> None:
+    """The cap was enforced and never stated. A stage that found one class of bypass wrote 188
+    numbered variants of it, and refusing that against an unstated limit would have been the gate's
+    fault rather than the stage's."""
+    contract = cc_ledger.contract_for("review")
+    text = cc_ledger.contract_markdown(contract)
+    assert "At most %d claims" % contract.claim_cap in text, text
+    assert "one claim per instance" in text, text

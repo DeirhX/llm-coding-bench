@@ -61,7 +61,11 @@ class Contract:
     high_severity_needs_falsification: bool = True
     # Keeps the refusal finite. A gate that lists forty gaps is a gate nobody reads, and at ~12
     # tok/s the reading is charged to the session.
-    claim_cap: int = 25
+    # Twelve, because the cap is what stops an enumeration rather than what trims a long report. A
+    # stage that found one class of bypass wrote 188 numbered variants of it, was cut off mid-word at
+    # 16,384 tokens with nothing delivered, and had misspelt its own identifier by the 180th. Set at
+    # 25 the cap said nothing until the answer was already too long to arrive.
+    claim_cap: int = 12
     # Some task types are only meaningful as a comparison: an ops claim needs a before and an after.
     min_measurements: int = 0
     # Whether the session must show the same command failing and then passing. Only an adapter whose
@@ -353,6 +357,13 @@ def contract_markdown(contract: Contract) -> str:
         "header -- not inside the EVIDENCE sentence, not in a file you write, and never described "
         "in prose. Begin with the first CLAIM: a sentence about what you are going to do is not an "
         "answer, and the gate will read it as one.",
+        "",
+        # The cap was enforced and never stated, which is the one thing this contract exists to
+        # prevent. A stage that found a class of bypass wrote 188 numbered variants of it and was cut
+        # off mid-word with nothing delivered; refusing that against a limit it was never told would
+        # have been the gate's fault, not its own.
+        "At most %d claims. Where a rule misses a whole class of things, that is one claim, stated "
+        "once, with the clearest instances under it -- not one claim per instance." % contract.claim_cap,
     ]
     extra = {
         COMMAND_RESULT: ("EVIDENCE: command: <the command you ran> -> <text it printed>",),

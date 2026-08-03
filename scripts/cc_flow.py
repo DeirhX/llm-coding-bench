@@ -74,7 +74,12 @@ DEFAULT_STAGES = [
                 "| python3 <the hook> `. That is evidence. Describing what it would print is not, "
                 "however obvious the reasoning looks, and a claim that a rule can be walked around "
                 "is the one most worth actually walking around -- against the hook itself, not "
-                "against the machine, so nothing is left behind."),
+                "against the machine, so nothing is left behind.\n"
+                "Twelve findings at the most. Where a rule misses a whole class of things -- every "
+                "way of naming a file indirectly, say -- that is one finding, stated once, with the "
+                "two clearest instances under it. A stage given no limit wrote 188 numbered "
+                "findings, each a variant of the one before, and was cut off mid-sentence at the "
+                "188th with the ledger never delivered and its own identifier misspelt by then."),
     ),
     Stage(
         name="adversary",
