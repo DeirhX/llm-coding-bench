@@ -84,7 +84,7 @@ CLERICAL = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "Tas
             "AskUserQuestion", "ExitPlanMode", "SlashCommand"}
 
 
-def _orchestrator_only(state: dict, tool: str) -> None:
+def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = "") -> None:
     """While a flow is running with no stage in flight, the session is an orchestrator.
 
     Told to run its stages as subagents, the first real session read the file itself and answered
@@ -101,8 +101,19 @@ def _orchestrator_only(state: dict, tool: str) -> None:
         deny("The %s stage is running. Let it report -- read its output and wait. A stage that has "
              "not answered yet is working, not stuck, and stopping it leaves the flow with nothing "
              "to judge." % ", ".join(cc_flowstate.running(state)))
-    if cc_flowstate.running(state):
-        allow()             # a stage is in flight, and this is that stage working
+    in_flight = cc_flowstate.running(state)
+    if in_flight:
+        # A stage is in flight, so this is that stage working -- but only up to a point. Reading is
+        # charged against a budget because a claims stage once spent 387 calls re-reading the files
+        # it was about to cite, announcing each time that it needed to re-read them first.
+        spent = cc_flowstate.spend(state, in_flight[0])
+        cc_flowstate.save(state, session, root)
+        if spent > cc_flowstate.CALL_BUDGET:
+            deny("You have spent %d tool calls on the %s stage. Stop reading and write your answer "
+                 "now from what you have already seen. Anything you could not establish is an "
+                 "UNKNOWN, which is a complete answer here -- going round the files again is not."
+                 % (spent, in_flight[0]))
+        allow()
     nxt = cc_flowstate.next_stage(state)
     if nxt is None:
         allow()             # flow complete: the session is writing its summary
@@ -140,7 +151,7 @@ def main() -> int:
         allow()             # no flow running: ordinary delegation is none of our business
 
     if tool not in ("Task", "Agent"):
-        return _orchestrator_only(state, tool)
+        return _orchestrator_only(state, tool, session, root)
 
     tool_input = payload.get("tool_input") or {}
     prompt = str(tool_input.get("prompt") or "")

@@ -435,3 +435,28 @@ def test_a_running_stage_may_not_be_killed() -> None:
         decision, why, _ = run("", root, tool="TaskStop")
     assert decision == "deny", why
     assert "working, not stuck" in why, why
+
+
+def test_a_stage_that_will_not_stop_reading_is_made_to_answer() -> None:
+    """A claims stage reached 387 tool calls, re-reading the files it was about to cite and
+    announcing each time that it needed to re-read them first. Capping one answer's tokens does
+    nothing about this: the loop is in the reading, not the writing."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        state["stages"][-1]["calls"] = cc_flowstate.CALL_BUDGET
+        cc_flowstate.save(state, "s1", root)
+        decision, why, _ = run("", root, tool="Read")
+    assert decision == "deny", why
+    assert "Stop reading and write your answer" in why, why
+
+
+def test_a_stage_reading_within_its_budget_is_left_alone() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.save(state, "s1", root)
+        decision, why, _ = run("", root, tool="Read")
+        after = cc_flowstate.load("s1", root)
+    assert decision == "allow", why
+    assert after["stages"][-1]["calls"] == 1, after

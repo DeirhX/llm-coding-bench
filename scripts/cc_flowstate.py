@@ -102,6 +102,22 @@ def refused(state: dict) -> list[dict]:
     return [e for e in state.get("stages", []) if e.get("verdict") == "refused"]
 
 
+# How many tool calls one round of a stage may spend before it must answer. A thorough review of a
+# three-hundred-line file runs to forty or fifty. The number exists because a claims stage reached
+# 387, re-reading the same files and saying "I need to re-read the files I'm citing before quoting
+# them" each time: the token cap bounds one answer, and nothing bounded the reading.
+CALL_BUDGET = 140
+
+
+def spend(state: dict, stage: str) -> int:
+    """Charge one tool call to the round of `stage` now in flight, and say what it has spent."""
+    for entry in reversed(state.get("stages", [])):
+        if entry.get("stage") == stage and entry.get("verdict") is None:
+            entry["calls"] = int(entry.get("calls", 0)) + 1
+            return entry["calls"]
+    return 0
+
+
 def running(state: dict) -> list[str]:
     return [e["stage"] for e in state.get("stages", []) if e.get("verdict") is None]
 
