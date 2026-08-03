@@ -109,7 +109,12 @@ def compose(stage, flow: str, task: str, prior: list[str], refused: str = "",
               "",
               "Your report is the message you finish with, in full. Nothing you write to a file is "
               "read here: a stage that put its ledger in claims.jsonl and summarised it in prose "
-              "had four findings judged as citing nothing, with the citations sitting in the file."]
+              "had four findings judged as citing nothing, with the citations sitting in the file.",
+              "",
+              "Keep it under three hundred lines. The transport cuts a reply at 16,384 tokens and "
+              "the cut takes the end, which is where the conclusions are: one survey here ran to "
+              "16,384 tokens, arrived truncated, and cost the stage after it two minutes of "
+              "reading. Quote the lines that carry a finding, not the file around them."]
     return "\n".join(parts)
 
 

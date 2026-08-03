@@ -50,7 +50,9 @@ DEFAULT_STAGES = [
                 "longer than one read allows, so say which part of it you saw and let the next "
                 "stage search for the rest. Draw no conclusions and name no defects -- a later "
                 "stage does that, and anything you assert here it will have to re-derive. If "
-                "something looks wrong, note the location only."),
+                "something looks wrong, note the location only. One line per entry and no more "
+                "than forty entries: this is an index, and the stage that reads it needs to be "
+                "able to hold it in mind while it works."),
     ),
     Stage(
         name="claims",

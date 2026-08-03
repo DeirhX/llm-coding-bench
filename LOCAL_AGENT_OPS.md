@@ -1127,6 +1127,99 @@ rules contributed zero gaps across every review stage replayed, and a test now f
 becomes reachable from another adapter.
 
 
+### A stage turned the read guard off, and nothing said so for a day
+
+Run 6's survey stage ran `touch /tmp/cc-guard-off` -- description, verbatim, "Temporarily disable
+guard for reading" -- and never removed it. Every stage after it in that run, and **every session
+started on this machine for the next day**, ran with no read discipline at all: no line cap, no
+re-read refusal, no window brake. Nothing in any artifact records it. The switch was documented in
+the guard's own refusal text, `(To lift this: touch /tmp/cc-guard-off)`, which is where the stage
+learned it.
+
+The first fix was a pattern rule refusing commands that write the switch. It is worth knowing how
+badly that works on its own. Measured against the rule as written:
+
+| Attempt | Refused? |
+|---|---|
+| `touch /tmp/cc-guard-off` | yes |
+| `echo x > /tmp/cc-guard-off` | yes |
+| `F=/tmp/cc-guard-off; touch $F` | yes |
+| `python3 -c "open('/tmp/cc-guard'+'-off','w')"` | **no** |
+| `touch /tmp/cc-guard-of?` | **no** |
+| `printf "" > /tmp/cc-$(echo guard)-off` | **no** |
+
+A shell has too many ways to say a name for matching the name to be a defence. What a stage cannot
+reach is the environment a hook is spawned into -- the client starts each hook fresh from its own
+environment, and a stage's `export` dies with its subshell -- so both switches are now honoured only
+when the session was launched to honour them (`claude-gemma.sh --liftable`, `CC_DEPTH_LIFTABLE=1`).
+The pattern rule stays as a tripwire, so the obvious attempt costs a turn and is told what to do
+instead of appearing to work, and both switches are cleared at launch.
+
+**The rule then refused the only experiment that could establish anything about it.** A payload that
+asks a hook what it would do has to contain the command being asked about, so run 8's survey was
+denied when it tested the rule, wrote "the guard itself ran on me", deleted its test file and fell
+back to reasoning it could not cite. It also refused `grep -rn cc-guard-off scripts/ > notes.txt`,
+which reads the rule and writes somewhere else entirely. Written as *what the command would do to
+that path* -- a write verb whose target is the switch, a redirect into it, `open()` on it -- with
+probes of a hook exempt, all six honest attempts above are still caught and the review of it can
+proceed.
+
+### The gate refused twenty-four correct citations in one ledger
+
+Told how to test a hook, run 8's claims stage fed the guard twenty payloads and reported what each
+decided. The gate rejected twenty-four of its citations, every one for a mechanical reason:
+
+- **Five probes run in one labelled loop, cited one at a time.** The citation named the payload; the
+  recorded call was the loop. Reported as five commands nobody ran.
+- **"DENIED (permissionDecision: deny)"** as a description of output that says exactly that in JSON.
+  Verbatim substring was the whole test, so a description was never going to pass.
+- **"ALLOWED (no deny output, exit code 0)"** of a probe that printed nothing but the `EXIT:0` the
+  stage had appended itself.
+- **The file named once, in the claim's sentence, with `(line 217)` after each quote.** Eleven
+  citations of one file, each saying where twice, reported as "missing a file and a line range".
+
+The same ledger now passes with none. The leniency is bounded by tests that fail if it goes further:
+a probe described as the opposite of what it printed, a command nobody ran, a loop case judged on
+another case's output, and silence claimed of a command that spoke. That last one caught a real
+hole while being written -- "no failures, nothing printed" scored a match against `3 failed, 40
+passed`, because word overlap cannot see a negation and *failures* matches *failed*.
+
+**Two of that ledger's findings were true and are fixed**: `dd` and `ln` were not write verbs though
+both create the file, and the `Write` branch compared the switch name as a substring, so a `.bak`
+beside it was refused as tampering. One was cited perfectly and is wrong -- `rsync /tmp/cc-guard-off
+/dev/null` reads the switch, it does not create it -- which is the honest summary of what this
+machinery buys: **the gate certifies that a claim's evidence is real, never that the claim is
+true.** The adversary stage is the only thing aimed at that, and it is much the weaker half.
+
+### A refused round used to arrive without the ledger it was refusing
+
+Run 7's claims stage spent 252 tool calls and produced seven cited findings, two short of what the
+gate wanted. The next round was a fresh subagent with no memory of any of it: **16 tool calls, six
+claims, not one citation.** The round after that ended mid-sentence, and the stage was given up on
+having been judged on its evidence exactly once. A refusal was being used as a reset.
+
+A reopened round is now handed the refused ledger and the gate's objections, and told to keep what
+was not objected to word for word. Rounds that never wrote a ledger are counted against their own
+smaller budget, so a stage that cannot produce the shape does not spend the rounds meant for its
+evidence. And `claims` is blocking: giving up on it and running the adversary anyway sends it at
+nothing to attack -- it said so, and was refused for saying it.
+
+### Review the tree you are not editing
+
+Twice in one afternoon a stage quoted a file verbatim, the file was edited while it worked, and the
+gate answered "quote not present in" -- an accusation of fabrication against a stage that had done
+nothing wrong. Reviews here now run in a detached worktree (`git worktree add -f --detach /tmp/rN
+HEAD`, `FLOW_CWD=/tmp/rN`) so the subject cannot move while it is being read, while the hooks stay
+in the working repository and can be fixed mid-run.
+
+Where a tree still moves, the transcript settles it: a failing quote is excused only when the
+session's own `Read` displayed that text *and* the file no longer holds what that `Read` showed.
+Both halves matter. Without the second, real text cited at the wrong line -- the thing line numbers
+exist to catch -- would be excused too, and the planted-fabrication rate drops from 100 % to 80 %.
+`Read` results are written by the client; `Bash` output is not accepted for this, because `echo`
+prints whatever it is given.
+
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
