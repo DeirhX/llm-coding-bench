@@ -74,7 +74,11 @@ def compose(stage, flow: str, task: str, prior: list[str]) -> str:
     parts += ["",
               "Answer in the ledger format the session contract describes. Your answer is read by a "
               "gate that checks every claim against what you actually ran and read, so cite as you "
-              "go rather than reconstructing citations at the end."]
+              "go rather than reconstructing citations at the end.",
+              "",
+              "Your report is the message you finish with, in full. Nothing you write to a file is "
+              "read here: a stage that put its ledger in claims.jsonl and summarised it in prose "
+              "had four findings judged as citing nothing, with the citations sitting in the file."]
     return "\n".join(parts)
 
 

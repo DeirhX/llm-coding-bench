@@ -494,3 +494,12 @@ def test_the_stop_hook_waits_rather_than_asking_the_session_to() -> None:
     assert decision == "block", decision
     assert waited >= 1.0, waited
     assert "STAGE: claims" in why, why
+
+
+def test_a_stage_is_told_that_its_report_is_the_message() -> None:
+    """One wrote its ledger to claims.jsonl and finished with a prose summary. The gate reads the
+    last message, so four well-cited findings were judged as citing nothing."""
+    with tempfile.TemporaryDirectory() as root:
+        cc_flowstate.save(cc_flowstate.begin("review", "t", "s1", root), "s1", root)
+        _, _, amended = run("STAGE: survey\n", root)
+    assert "Nothing you write to a file is read here" in amended["prompt"], amended["prompt"]
