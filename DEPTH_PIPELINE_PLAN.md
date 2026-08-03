@@ -233,8 +233,11 @@ that cannot meet its contract — an honest non-answer rather than a plausible o
 given budgets of their own; the survey's is 60 and it now finishes well inside it.
 
 **Claims are parsed, and judged one at a time.** Run 21 round 4 produced 7 claims and 1 declared
-unknown, carrying 14 command citations; 6 claims stood and 1 was reported unverified, by name and with
-the reason. Compare run 18, where a stage with eight findings was told it had made none. The verifier
+unknown, carrying 14 command citations, each judged separately and named in the refusal. What the gate
+said about them was wrong, and finding that out is what §8's "a blank expectation is a substring of
+everything" records: it reported 6 of the 7 as standing, where the corrected gate stands none of them
+up, because their citations named a command without saying what it printed. The parsing was the part
+that worked. Compare run 18, where a stage with eight findings was told it had made none. The verifier
 now reads bold headers, numbered findings under a heading, paragraphs under a bare `CLAIM` heading,
 citations in a claim's own last sentence, probes reported in prose, quotes carrying gutters, and a
 dozen other shapes models actually write.
@@ -248,11 +251,16 @@ an `flock`, so concurrent hooks no longer overwrite each other.
 
 **An abandoned stage now hands over what it proved.** The gate records each claim that survives every
 check, with its citation, and the end of a flow makes the session write those out beside what it failed
-to establish. Replaying run 21's four refused rounds through the gate as it now stands recovers **12
-verified findings** — five from round 2, seven from round 4 — of which the run delivered none. They are
-real defects in this repo's own tamper rule: the switch name can be built indirectly (`X=cc-guard;
-touch /tmp/$X-off`, `touch /tmp/cc-$(echo guard)-off`), and the rule fires on any name ending in the
-switch name. Verified by replay against the run's own transcript; not yet seen in a live run.
+to establish. Replaying run 21's four refused rounds recovers **2 findings** the run delivered none of,
+both real defects in this repo's own tamper rule: the switch name can be built out of shell so the
+literal never appears (`X=cc-guard; touch /tmp/$X-off`), and any path *ending* in the switch name is
+refused because the pattern has no left-hand boundary.
+
+Two rather than the twelve this first measured, and the difference is the more useful result. Those ten
+rested on citations naming a command with no output stated, which passed every check because `""` is a
+substring of anything — so the salvage's first honest count was inflated by the verifier it was
+measuring. Both are fixed and tested; the lesson is in §8. Verified by replay against the run's own
+transcript, not yet by a live run.
 
 **The budget ends a runaway stage in one turn.** Run 20's survey hit 141 calls, received one refusal,
 and answered immediately. The same mechanism in run 18 produced 220 refusals.

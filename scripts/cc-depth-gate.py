@@ -269,12 +269,12 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
         gaps.append("No claims were stated. Write each finding as a CLAIM/EVIDENCE/QUOTE block, or "
                     "state UNKNOWN for what you could not establish.")
 
-    missing = [k for k in contract.required_evidence if k not in kinds_seen]
+    missing = [g for g in cc_ledger.wants(contract) if not (set(g) & kinds_seen)]
     if missing and claims:
         gaps.append("This task type requires %s evidence and none was given. %s"
-                    % (" and ".join(missing),
+                    % (" and ".join(cc_ledger.kinds_named(g) for g in missing),
                        "An absence claim needs a search that returns nothing."
-                       if cc_ledger.ABSENCE in missing else ""))
+                       if any(cc_ledger.ABSENCE in g for g in missing) else ""))
         if not unknowns:
             gaps.append("Nothing was listed as UNKNOWN either. If a required check was not run, "
                         "say so explicitly -- that is a legal answer.")
@@ -602,7 +602,17 @@ def _check(ev, root: str, calls: list):
             return cc_verify.Verdict(cc_verify.UNVERIFIED, "this citation is missing " + missing)
         return cc_verify.file_quote(root, ev.path, ev.start, ev.end or ev.start, ev.quote)
     if ev.kind == cc_ledger.COMMAND_RESULT:
-        return cc_verify.command_result(calls, ev.command or "", ev.expect or "")
+        expected = ev.expect or ""
+        if not expected.strip() and ev.quote:
+            # A QUOTE under a command citation is ambiguous: sometimes it is the output, written
+            # under its own header instead of after an arrow, and sometimes it is a quote of the code
+            # the same claim rests on. So it is tried as output and only kept if the recorded run
+            # bears it out. Assuming it was the output reported two claims as having printed a regex
+            # from the file under review, which is a refusal nobody could act on.
+            spoken = cc_verify.command_result(calls, ev.command or "", ev.quote)
+            if spoken.ok:
+                return spoken
+        return cc_verify.command_result(calls, ev.command or "", expected)
     if ev.kind == cc_ledger.LOG_MATCH:
         return cc_verify.log_match(ev.path or "", ev.pattern or "")
     if ev.kind == cc_ledger.ABSENCE:

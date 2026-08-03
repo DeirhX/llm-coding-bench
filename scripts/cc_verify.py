@@ -465,7 +465,7 @@ def _supports(printed: str, expected: str) -> bool:
     are held to their content words instead, most of which must appear in the output, and a
     description of silence is held to the output being silent.
     """
-    if expected in printed:
+    if expected.strip() and expected in printed:
         return True
     body = _said(printed)
     wanted = _tokens(expected)
@@ -495,6 +495,16 @@ def _supports(printed: str, expected: str) -> bool:
 _PAYLOAD = re.compile(r'"(?:command|file_path|new_string|content)"\s*:\s*"(?P<value>[^"]{3,})"')
 
 
+# An environment assignment in the shell around a probe. Three characters at least, so that the
+# throwaway `X=cc-guard` inside a payload under test is not read as the condition of the experiment.
+_ASSIGNED = re.compile(r"(?<![\w.-])[A-Z_][A-Z0-9_]{2,}=[^\s;&|)'\"]*")
+
+
+def _settings(text: str) -> set[str]:
+    """Environment assignments in the shell around a probe, which its payload does not carry."""
+    return set(_ASSIGNED.findall(_PAYLOAD.sub("", text)))
+
+
 def _same_command(wanted: str, ran: str) -> bool:
     """Is the cited command one of the things this call ran?
 
@@ -506,7 +516,13 @@ def _same_command(wanted: str, ran: str) -> bool:
     """
     payloads = [m.group("value") for m in _PAYLOAD.finditer(wanted)]
     if payloads:
-        return all(" ".join(v.split()) in ran for v in payloads)
+        if not all(" ".join(v.split()) in ran for v in payloads):
+            return False
+        # The payload is what the hook was asked about; the shell around it can be the entire claim.
+        # Run 21 cited `(touch /tmp/cc-guard-off; export CC_GUARD_LIFTABLE=1) && echo <payload>` and
+        # was matched to twelve recorded probes carrying that payload, none of which set the
+        # variable -- the one condition the claim was about. It passed, on a command nobody ran.
+        return _settings(wanted) <= _settings(ran)
     words = set(_tokens(wanted))
     if len(words) < 4:
         return False
@@ -554,6 +570,12 @@ def command_result(calls, command_fragment: str, expected: str) -> Verdict:
     them in one call, joined by semicolons or wrapped in a loop, and then cites them one at a time
     -- which is the right way round to report it and was reported as five commands nobody ran.
     """
+    if not expected.strip():
+        # `EVIDENCE: command: <cmd>` with no `-> <output>` asserts nothing a session can be held to,
+        # and the blank sailed through every check because "" is a substring of anything. Run 21's
+        # sixth claim passed that way, against a command that was never run.
+        return Verdict(UNVERIFIED, "the citation says what was run and not what it printed; add "
+                                   "-> <text it printed> so there is something to check")
     seen = 0
     wanted = " ".join(command_fragment.split())
     for call in calls:
@@ -561,6 +583,12 @@ def command_result(calls, command_fragment: str, expected: str) -> Verdict:
             continue
         ran = " ".join(str(call.args.get("command", "")).split())
         if wanted not in ran and ran not in wanted and not _same_command(wanted, ran):
+            continue
+        if not _settings(wanted) <= _settings(ran):
+            # `ran in wanted` admits a recorded call that is part of the cited one, which is how a
+            # citation gets credit for a command nobody ran: run 21 cited
+            # `export CC_GUARD_LIFTABLE=1; echo <payload> | guard` and the recorded call was the
+            # `echo` alone. The variable was the experiment.
             continue
         seen += 1
         # A probe of a rule that stops things is reported by being stopped: the refusal is the result,

@@ -1410,15 +1410,52 @@ And note what the two failures of run 18 have in common: a stage was starved of 
 refusals, and the session was killed by a prompt nobody was compacting. Both are the context window
 being consumed by the harness rather than by the work, and neither shows up as a harness error.
 
+### A blank expectation is a substring of everything
+
+The first replay of run 21 said the salvage would recover twelve findings. It recovers two. The other
+ten were citations of this shape:
+
+```
+EVIDENCE: command: echo '{"tool_name": "Bash", ...}' | python3 scripts/cc-context-guard.py
+```
+
+A command, and no statement of what it printed. `command_result` compared the claimed output against
+the recorded output with `if expected in printed`, and an empty string is a substring of every string,
+so **every citation that asserted nothing passed against anything** -- including, in one case, against
+a command that was never run at all. The live gate did this too: it reported six of round 4's seven
+claims as standing, where the corrected gate stands up none of them.
+
+Two more holes were open beside it, both found by asking why a claim passed rather than why one failed:
+
+- **A recorded call that is *part* of the cited one was accepted as the cited one.** The match tested
+  `wanted in ran or ran in wanted`, so citing `export CC_GUARD_LIFTABLE=1; echo <payload> | guard`
+  matched a recorded run of the `echo` alone. The variable was the entire experiment. Environment
+  assignments in a citation must now appear in what ran, on every matching path.
+- **Payload equality was treated as sufficient.** Probes of one hook are nearly the same string, so
+  matching on the JSON payload was introduced to tell them apart -- and it ignored the shell around
+  the payload, which is where the condition of the experiment lives. Twelve different recorded probes
+  matched one citation.
+
+The general lesson is about which direction you audit in. Every earlier pass over this verifier asked
+*why was correct work refused*, because false refusals are loud: a stage argues back, a round is spent,
+the transcript fills with it. A false acceptance is silent, and its only symptom is a number that looks
+good -- six of seven claims standing, twelve findings recovered. **Audit the passes, and prefer a check
+that cannot be satisfied by an empty string.** One that can will report the flattering answer forever.
+
+A smaller trap in the same family, now handled by checking rather than guessing: a `QUOTE` under a
+command citation is sometimes the output written under its own header and sometimes a quote of the code
+the same claim rests on. Assuming the first told two of run 21's claims that their command had printed
+a regex out of the file under review, which is a refusal nobody could act on. It is tried as output and
+kept only if the recorded run bears it out.
+
 ### The stage failed; the findings did not
 
 A stage is refused as a whole, and until now it was discarded as a whole. Replaying run 21's four
-refused claims rounds through the gate shows what that cost: **12 findings that pass every check**,
-five from the second round and seven from the fourth, none of which reached the answer. The run read
-as a failure and was mostly a success nobody collected. Two of the twelve are real holes in the very
-rule under review -- the switch file name can be assembled out of shell (`X=cc-guard; touch
-/tmp/$X-off`) so the literal never appears, and any path ending in the switch name is refused because
-the pattern has no left-hand boundary.
+refused claims rounds through the gate shows what that cost: **2 findings that pass every check**,
+neither of which reached the answer, and both real holes in the very rule under review -- the switch
+file name can be assembled out of shell (`X=cc-guard; touch /tmp/$X-off`) so the literal never
+appears, and any path ending in the switch name is refused because the pattern has no left-hand
+boundary. The run read as a total failure and was not one.
 
 The gate now records each claim that survives on its own account, and the end of a flow makes the
 session write those out. The lesson generalises past this harness: **when a judge rejects work, record

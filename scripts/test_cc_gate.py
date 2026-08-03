@@ -761,3 +761,88 @@ def test_a_finding_whose_file_moved_is_not_reported_as_proved() -> None:
                                              [call], tmp, check_coverage=False, answer=answer)
         assert not gaps, gaps
         assert report["stood"] == [], "an excused citation is not a proved one: %s" % report["stood"]
+
+
+def _probe(command: str, printed: str, ok: bool = True):
+    return cc_evidence.ToolCall(agent="claims", tool="Bash", call_id="p1",
+                               args={"command": command}, ok=ok, text=printed)
+
+
+def test_a_review_proved_by_running_the_thing_is_not_refused_for_lacking_quotes() -> None:
+    """A rule whose job is to refuse things is best established by being refused by it. Run 21's
+    claims stage did exactly that, cited 25 commands and no file quotes, and was refused in all four
+    rounds for the kind of its evidence rather than the truth of it -- which is why the stage was
+    abandoned and the adversary never ran."""
+    calls = [_probe("python3 guard.py --check rm", "ALLOWED: rm is not blocked")]
+    answer = ("CLAIM: rm is not blocked by the tamper rule.\n"
+              "EVIDENCE: command: python3 guard.py --check rm -> ALLOWED: rm is not blocked\n")
+    claims, unknowns = cc_ledger.claims_from_text(answer, ".")
+    gaps, report = _load_gate().evaluate(cc_ledger.contract_for("review"), claims, unknowns, calls,
+                                        ".", check_coverage=False, answer=answer)
+    assert not any("requires" in g for g in gaps), gaps
+    assert [f["claim"] for f in report["stood"]] == ["rm is not blocked by the tamper rule."], report
+
+
+def test_a_review_that_checked_nothing_is_still_refused() -> None:
+    """The requirement became an alternative, not an absence: a ledger resting on neither a quote
+    nor a command it ran has nothing the gate can check, whatever kind it claims to be."""
+    answer = "CLAIM: the guard is sound.\nEVIDENCE: command: python3 guard.py -> it was fine\n"
+    claims, unknowns = cc_ledger.claims_from_text(answer, ".")
+    gaps, _ = _load_gate().evaluate(cc_ledger.contract_for("review"), claims, unknowns, [], ".",
+                                    check_coverage=False, answer=answer)
+    assert any("no recorded command" in g for g in gaps), gaps
+
+
+def test_an_adapter_that_wants_two_kinds_still_wants_both() -> None:
+    """Alternatives are per requirement, not a general loosening. A refactor proposal must show the
+    lines it would change and a search proving what is not there; one of the two is not the pair."""
+    answer = ("CLAIM: the helper is unused.\n"
+              "EVIDENCE: widen.py:1-1\n"
+              "QUOTE:\n"
+              "def widen(rows):\n")
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "widen.py").write_text("def widen(rows):\n    return 0\n")
+        claims, unknowns = cc_ledger.claims_from_text(answer, tmp)
+        gaps, _ = _load_gate().evaluate(cc_ledger.contract_for("refactor-proposal"), claims,
+                                        unknowns, [], tmp, check_coverage=False, answer=answer)
+        assert any(cc_ledger.ABSENCE in g for g in gaps), gaps
+
+
+def test_a_code_quote_under_a_command_is_not_reported_as_its_output() -> None:
+    """A QUOTE under a command citation is sometimes the output and sometimes the code the claim
+    rests on. Reading it as the output told two of run 21's claims that their command had printed a
+    regex out of the file under review, which is a refusal nobody could act on."""
+    calls = [_probe("python3 guard.py --check unlink", "")]
+    answer = ("CLAIM: unlink is missing from the verbs.\n"
+              "EVIDENCE: command: python3 guard.py --check unlink\n"
+              "QUOTE:\n"
+              "_VERBS = re.compile(r\"touch|mv|cp\")\n")
+    claims, unknowns = cc_ledger.claims_from_text(answer, ".")
+    gaps, _ = _load_gate().evaluate(cc_ledger.contract_for("review"), claims, unknowns, calls, ".",
+                                    check_coverage=False, answer=answer)
+    assert any("not what it printed" in g for g in gaps), gaps
+    assert not any("printed anything like" in g for g in gaps), gaps
+
+
+def test_output_written_under_a_quote_header_is_still_the_output() -> None:
+    """The arrow is punctuation. A stage that put what the command printed under its own header has
+    said what it printed, and is held to it rather than refused for the shape."""
+    calls = [_probe("pytest -q", "294 passed in 78s")]
+    answer = ("CLAIM: the suite passes.\n"
+              "EVIDENCE: command: pytest -q\n"
+              "QUOTE:\n"
+              "294 passed in 78s\n")
+    claims, unknowns = cc_ledger.claims_from_text(answer, ".")
+    gaps, report = _load_gate().evaluate(cc_ledger.contract_for("review"), claims, unknowns, calls,
+                                        ".", check_coverage=False, answer=answer)
+    assert not gaps, gaps
+    assert report["stood"], report
+
+
+def test_a_contract_read_back_from_disk_keeps_its_alternatives() -> None:
+    """The contract crosses a process boundary as JSON, and a group that arrives as a list is a
+    requirement for a kind named `['file_quote', 'command_result']`, which nothing can satisfy."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cc_ledger.write_contract(cc_ledger.contract_for("review"), "s1", tmp)
+        back = cc_ledger.load_contract("s1", tmp)
+        assert cc_ledger.wants(back) == [(cc_ledger.FILE_QUOTE, cc_ledger.COMMAND_RESULT)], back

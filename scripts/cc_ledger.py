@@ -48,7 +48,12 @@ class Contract:
 
     adapter: str
     summary: str
-    required_evidence: tuple[str, ...] = (FILE_QUOTE,)
+    # Each element is either a kind that must appear, or a tuple of kinds of which one must. The
+    # group exists because a claim about what code *does* is better proved by running it than by
+    # quoting it: run 21 reviewed a rule whose whole job is to refuse things, established its
+    # findings by invoking the hook and reporting what it printed, and was refused in all four of
+    # its rounds for citing no file quote -- while every other claim in two of those rounds held.
+    required_evidence: tuple[str | tuple[str, ...], ...] = (FILE_QUOTE,)
     # Commands the session must actually have run -- not described, run. 0 means the task type is
     # legitimately read-only (a review of code that does not execute).
     min_probes: int = 0
@@ -87,7 +92,7 @@ ADAPTERS: dict[str, Contract] = {
     "review": Contract(
         adapter="review",
         summary="Claims about defects in code that already exists.",
-        required_evidence=(FILE_QUOTE,),
+        required_evidence=((FILE_QUOTE, COMMAND_RESULT),),
         min_probes=0,
         defects_only=True,
         high_severity_needs_falsification=True,
@@ -246,8 +251,18 @@ def load_contract(session_id: str, root: str = ".") -> Contract | None:
     raw = {k: v for k, v in raw.items() if k in known}
     for key in ("required_evidence", "notes"):
         if key in raw:
-            raw[key] = tuple(raw[key])
+            raw[key] = tuple(tuple(v) if isinstance(v, list) else v for v in raw[key])
     return Contract(**raw)
+
+
+def wants(contract: Contract) -> list[tuple[str, ...]]:
+    """The evidence requirements as groups: each group is satisfied by any one kind in it."""
+    return [tuple(req) if isinstance(req, (tuple, list)) else (req,)
+            for req in contract.required_evidence]
+
+
+def kinds_named(group: tuple[str, ...]) -> str:
+    return " or ".join(group)
 
 
 def contract_for(adapter: str) -> Contract:
@@ -370,11 +385,14 @@ def contract_markdown(contract: Contract) -> str:
         ABSENCE: ("EVIDENCE: absence: <pattern that must not be found> in <glob>",),
         LOG_MATCH: ("EVIDENCE: log: <path> ~ <regex that matches a real line>",),
     }
-    wanted = [form for kind in contract.required_evidence for form in extra.get(kind, ())]
+    # Only a requirement that admits one kind can be stated as a thing the answer must contain. A
+    # group is an alternative, and is described below as one.
+    singles = [kind for group in wants(contract) if len(group) == 1 for kind in group]
+    wanted = [form for kind in singles for form in extra.get(kind, ())]
     if wanted:
         lines += ["", "This task also needs evidence of these kinds, one per EVIDENCE line:"]
         lines += wanted
-    elif COMMAND_RESULT not in contract.required_evidence:
+    if COMMAND_RESULT not in singles:
         # A stage established seven findings by running the guard and reporting what it printed,
         # and had no admissible way to say so: the command form was shown only to adapters that
         # require it. A claim about what the code does is checked against the commands this session

@@ -1072,3 +1072,42 @@ def test_a_refused_command_claimed_to_have_been_allowed_still_fails() -> None:
                    "The guards' off-switches are the operator's, not yours.", ok=False)]
     verdict = vf.command_result(calls, "touch /tmp/cc-guard-off", "no output, allowed")
     assert not verdict.ok, (verdict.kind, verdict.detail)
+
+
+def _bash(command: str, printed: str, ok: bool = True):
+    return ev.ToolCall(agent="claims", tool="Bash", call_id="c1",
+                                args={"command": command}, ok=ok, text=printed)
+
+
+def test_a_command_cited_without_saying_what_it_printed_is_not_evidence() -> None:
+    """The blank sailed through every check, because "" is a substring of anything: an EVIDENCE line
+    naming a command and no output passed against any call that looked like it, and against calls
+    that were never made. Run 21's fourth round had eight citations of that shape and the gate
+    reported seven of its claims as standing."""
+    calls = [_bash("pytest -q", "291 passed")]
+    verdict = vf.command_result(calls, "pytest -q", "")
+    assert not verdict.ok, verdict
+    assert "not what it printed" in verdict.detail, verdict.detail
+
+
+def test_a_probe_that_set_a_variable_is_not_matched_to_one_that_did_not() -> None:
+    """Probes of one hook are nearly the same string, so the payload decides which is which -- but
+    the shell around the payload can be the entire claim. Run 21 cited a run that exported
+    CC_GUARD_LIFTABLE and was matched to twelve recorded probes with the same payload and no
+    variable, which is the one condition the claim was about."""
+    payload = '{"tool_name": "Bash", "tool_input": {"command": "touch /tmp/cc-guard-off"}}'
+    plain = _bash("echo '%s' | python3 guard.py" % payload, "DENY")
+    cited = "export CC_GUARD_LIFTABLE=1; echo '%s' | python3 guard.py" % payload
+    assert not vf._same_command(cited, plain.args["command"])
+    assert vf.command_result([plain], cited, "allowed").kind == vf.UNVERIFIED
+    lifted = _bash("export CC_GUARD_LIFTABLE=1; echo '%s' | python3 guard.py" % payload, "allowed")
+    assert vf.command_result([lifted], cited, "allowed").ok
+
+
+def test_a_variable_inside_the_payload_is_not_a_condition_of_the_run() -> None:
+    """The bypass under review builds the name out of shell, so `X=cc-guard` appears inside the
+    payload being tested. That is the thing the probe is about, not a setting of the probe, and
+    holding the recorded call to it would refuse the citation that reports it."""
+    payload = '{"tool_name": "Bash", "tool_input": {"command": "X=cc-guard; touch /tmp/$X-off"}}'
+    ran = _bash("echo '%s' | python3 guard.py" % payload, "(no output)")
+    assert vf._same_command("echo '%s' | python3 guard.py" % payload, ran.args["command"])
