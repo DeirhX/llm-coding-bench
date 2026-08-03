@@ -40,6 +40,7 @@ from typing import Iterable
 PASS = "pass"
 INDENT_DRIFT = "indent-drift"
 RETOUCHED = "retouched"
+REWRAPPED = "rewrapped"
 WRONG_LINES = "wrong-lines"
 FAIL = "fail"
 UNVERIFIED = "unverified"
@@ -53,7 +54,13 @@ UNVERIFIED = "unverified"
 # "quote not present" would send the gate hunting for an invented citation. It is still an edited
 # quote, and per-line whitespace changes are the exact defect behind this model's failed edits, so
 # it has to be re-read rather than waved through.
-ACCEPTABLE = {PASS, INDENT_DRIFT}
+# REWRAPPED is accepted for the same reason as INDENT_DRIFT and not for the reason RETOUCHED is
+# refused. A wrapped call quoted as the one line it reads as has every token of the cited range in
+# order; nothing has been tidied away, only the wrapping the file happened to use. RETOUCHED is
+# refused because one line's indent differs from its neighbours', which in Python can change what
+# the code means -- here the whole range is compared as a single run of text, so there is no line
+# whose indent could be quietly wrong.
+ACCEPTABLE = {PASS, INDENT_DRIFT, REWRAPPED}
 
 
 @dataclass
@@ -77,7 +84,8 @@ def _significant(text: str, first: int = 0) -> list[str]:
     the line the citation names is not a coincidence.
     """
     return [line.rstrip()
-            for line in _untrailed(_unlabelled(_ungutted(_unfenced(text), first), first), first)
+            for line in _unticked(
+                _untrailed(_unlabelled(_ungutted(_unfenced(text), first), first), first))
             .strip("\n").split("\n") if line.strip()]
 
 
@@ -182,6 +190,22 @@ def _untrailed(text: str, first: int = 0) -> str:
     return "\n".join(stripped.get(l, l) for l in lines)
 
 
+def _unticked(text: str) -> str:
+    """Drop the inline backticks a quote is wrapped in, line by line.
+
+    The same habit as the triple fence and no more meaningful: a stage quoted line 174 of the guard
+    perfectly and had it refused as not present in the file, the two differing by one backtick at
+    each end. Only a pair wrapping a whole line goes; a backtick inside the code stays, since there
+    it is content.
+    """
+    lines = text.split("\n")
+    content = [l for l in lines if l.strip()]
+    if not content or not all(l.strip().startswith("`") and l.strip().endswith("`")
+                              and len(l.strip()) > 1 for l in content):
+        return text
+    return "\n".join(l.strip().strip("`") if l.strip() else l for l in lines)
+
+
 def _unfenced(text: str) -> str:
     """Drop a markdown code fence wrapped around a quote.
 
@@ -241,6 +265,14 @@ def file_quote(root: str, path: str, start: int, end: int, quote: str) -> Verdic
                                           "file, %d in the quote)"
                                % (path, start, end, start + n, _indent(was), _indent(now)))
 
+    # A quote reflowed onto one line: `ap.add_argument("--max-sleep", type=int, default=30, help=
+    # "...")` for two lines of the file that say exactly that, wrapped. The model read the right
+    # place and tidied it, which is not the same as inventing it, and refusing it as absent sends a
+    # stage back to re-read a file it had already read correctly.
+    if _flat(cited) == _flat(quoted) and _flat(cited):
+        return Verdict(REWRAPPED, "%s:%d-%d, quote rewrapped onto %d line%s"
+                       % (path, start, end, len(quoted), "" if len(quoted) == 1 else "s"))
+
     # Right text, wrong address: worth distinguishing, because it means the model read the file and
     # mis-remembered where, rather than inventing the content.
     haystack = _significant("\n".join(lines))
@@ -250,6 +282,11 @@ def file_quote(root: str, path: str, start: int, end: int, quote: str) -> Verdic
             return Verdict(WRONG_LINES, "cited %s:%d-%d, text is near line %d"
                            % (path, start, end, i + 1))
     return Verdict(FAIL, "quote not present in %s" % path)
+
+
+def _flat(lines: list[str]) -> str:
+    """One line of it, with every run of whitespace squeezed to a single space."""
+    return re.sub(r"\s+", " ", " ".join(lines)).strip()
 
 
 def _indent(line: str) -> int:

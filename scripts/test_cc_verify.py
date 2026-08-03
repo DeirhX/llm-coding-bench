@@ -343,3 +343,26 @@ def test_a_snippet_labelled_with_its_line_is_not_a_fabrication() -> None:
     body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
     n = next(i for i, l in enumerate(body, 1) if l.startswith("PATH_LINES = re.compile"))
     assert vf.file_quote(ROOT, "scripts/cc_verify.py", n, n, "`%s` (line %d)" % (body[n - 1], n)).ok
+
+
+def test_a_quote_wrapped_in_backticks_is_not_a_fabrication() -> None:
+    """A stage quoted a line perfectly and was told it was not present in the file. The two
+    differed by one backtick at each end."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("PATH_LINES = re.compile"))
+    assert vf.file_quote(ROOT, "scripts/cc_verify.py", n, n, "`%s`" % body[n - 1]).ok
+
+
+def test_a_quote_rewrapped_onto_one_line_is_not_a_fabrication() -> None:
+    """Two lines of a wrapped call, quoted as the one line they read as. The model read the right
+    place and tidied it, which is not inventing it."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("def _flat("))
+    joined = " ".join(l.strip() for l in body[n - 1:n + 1])
+    verdict = vf.file_quote(ROOT, "scripts/cc_verify.py", n, n + 1, joined)
+    assert verdict.ok, verdict.detail
+    assert "rewrapped" in verdict.detail, verdict.detail
+
+
+def test_rewrapping_does_not_excuse_the_wrong_text() -> None:
+    assert not vf.file_quote(ROOT, "scripts/cc_verify.py", 1, 2, "def nothing_of_the_sort():").ok
