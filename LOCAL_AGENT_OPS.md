@@ -1308,6 +1308,24 @@ after the sixth repeat. The same escalation the orchestrator got, for the same r
 twice independently: **any message a hook repeats is a message that has to get shorter.** Measure a
 deny message by the count times its length, not its length.
 
+Stopping the model is not the fix, because something kept loading it back: a 10-second
+`POST /api/chat` -- which is a weights load -- about three minutes after each `ollama stop`, preceded
+by irregular 43 ms pings a minute or two apart. Nothing in this repo makes them. `watch.py` and
+`state.py` only ever call `/api/ps`, which cannot load anything; the harness scripts and hooks name
+Ollama nowhere; neither the user settings nor the run's settings route traffic to it. The server
+records requests on completion and never records who made them, so the caller can only be caught
+before the fact, by polling `lsof -nP -iTCP:11434` for a client socket.
+
+The durable fix, once you look at what is actually serving: **the llama-server path does not need
+Ollama at all.** The qwopus server is a child of `implement_via_llamacpp.sh` and only borrows the
+binary out of `Ollama.app/Contents/Resources`, so quitting Ollama leaves it running -- verified by
+`ppid`, and again afterwards on `/health`. Two notes for when you do it:
+
+- `osascript -e 'quit app "Ollama"'` can come back `User canceled (-128)` and leave everything
+  running: the app puts up a dialog nobody is there to answer.
+- Terminate the app process, not `ollama serve`. The server is the app's child and the app respawns
+  it; kill the parent and both go.
+
 ### Nobody told the client how big the window was
 
 Run 18 ended like this, after 135 turns and an hour of work:
