@@ -1575,6 +1575,61 @@ findings and three unsupported assertions. It is still refused -- three assertio
 but the hand-back now asks for the three, instead of telling a stage with eight findings that it made
 none.
 
+### A background job from a tool call dies with the tool call
+
+Run 22 was started with `nohup ... &` from an agent's shell, slept 20 seconds so the launch could be
+checked, and reported a session id and a live client. It was already dead. `nohup` ignores `SIGHUP`;
+it does nothing about a process group being killed, which is what happens when the tool call that
+spawned the job returns. The proxy log records a `client_gone` after 1,000 ms and the runner logged
+`cancel task, id_task = 502` -- one second into the first request, at the second the tool call ended.
+
+Nothing said so. `flow_smoke.sh` prints `claude exited N` when the client stops; that line was absent,
+because the shell running it was killed too. What was left was a zero-byte `answer.json`, a zero-byte
+`stderr.log`, and a flow state saying `next: survey` -- indistinguishable, for nine minutes, from a
+session thinking about its first delegation. The tell is the proxy log's last timestamp, not the state.
+
+This file already documents the hazard for the proxy, in the script's own comments, and the remedy is
+the same: `screen -dmS r22 zsh -c '...'`. Relaunched that way the client survived tool-call boundaries.
+Check a run by its last proxy timestamp; a flow state cannot report a session that is no longer there.
+
+### The escape that is a word boundary in one language and a backspace in another
+
+A quote arrives as a JSON string when it looks like one, so that a line break the model meant can be
+told from a `\n` inside something it quoted. In a repo that is mostly regex that reading is usually
+wrong. A correct one-line quote of
+
+```
+_VERBS = r"(?:touch|mv|cp|dd|tee|install|ln|shred|truncate)\b[^;|&\n]*"
+```
+
+decodes to a line carrying a backspace where the word boundary was and a line break where the
+character class was. It matches nothing, and the verifier reports it as not present in the file it had
+just been copied out of -- the most expensive verdict this harness can produce, because the stage did
+everything right and is told it invented the line.
+
+`\b` and `\f` are now held back across the decode and restored as the two characters written. For
+`\n` the citation decides: a citation of one line cannot be right about several lines of text, so the
+escape was inside something quoted. Only an even number of backslashes is protected, so a quote that
+really contained `\\b` still decodes to one.
+
+The first attempt at this failed in the way worth recording. It carried the escapes through the decode
+as `\x00b`, and JSON refuses a raw control character inside a string -- so the decode it existed to
+protect raised, both candidates fell through to the fallback path, and that path preserved `\b` by
+accident while still turning `\n` into a break. The test passed on the half that mattered least and the
+symptom was unchanged. A sentinel has to be legal in the format it travels through; `\ue000` is.
+
+### The rule caught a file it does not name
+
+`touch /tmp/my-cc-guard-off` was refused as tampering with the guard's off-switch. The name was
+bounded on the right, `(?![\w.-])`, and not on the left, and the verb pattern it is appended to ends in
+`[^;|&\n]*` -- a run of anything. So the switch name matched inside a longer one, and a file whose name
+merely ends with it was protected as though it were the switch.
+
+It is a small defect with a large provenance: it was found by a review stage probing this very rule,
+in the same round that was later refused and abandoned. It is the concrete argument for salvaging
+findings out of a refused stage, and the reason the fix carries a test named after the false positive
+rather than after the pattern.
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
