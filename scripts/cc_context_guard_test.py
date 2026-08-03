@@ -219,9 +219,16 @@ def main():
 
     OFF.touch()
     got, _ = run("Read", {"file_path": str(big)}, empty)
+    ok = got == "deny"
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'off-switch without the flag':<42} expected deny  got {got}")
+
+    os.environ["CC_GUARD_LIFTABLE"] = "1"
+    got, _ = run("Read", {"file_path": str(big)}, empty)
     ok = got == "allow"
     failures += not ok
-    print(f"  {'ok  ' if ok else 'FAIL'}  {'off-switch present':<42} expected allow got {got}")
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'off-switch in a liftable session':<42} expected allow got {got}")
+    del os.environ["CC_GUARD_LIFTABLE"]
     OFF.unlink(missing_ok=True)
 
     failures += failures_in_wording
@@ -232,6 +239,17 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_a_switch_the_model_made_itself_does_not_lift_the_guard():
+    """The rule that matters, because the pattern rule below it can be walked around by a shell and
+    this cannot: an off-switch is honoured only in a session launched to honour it."""
+    big, _ = setup()
+    OFF.touch()
+    try:
+        assert run("Read", {"file_path": str(big)}, TMP / "none.jsonl")[0] == "deny"
+    finally:
+        OFF.unlink(missing_ok=True)
 
 
 def test_the_model_may_not_turn_the_guard_off():

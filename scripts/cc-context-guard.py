@@ -24,8 +24,9 @@ Failure is always open: any unexpected condition allows the call. A hook that bl
 crashed would be worse than no hook.
 
 Verified end to end against a fake endpoint: the refusal text arrives as the tool_result even under
---dangerously-skip-permissions, so the model sees it and can act on it. Lift it for one session with
-`touch /tmp/cc-guard-off`.
+--dangerously-skip-permissions, so the model sees it and can act on it. Lift it mid-session with
+`touch /tmp/cc-guard-off`, which works only in a session launched --liftable: the switch is a file
+and a model can make files, so on its own it is not a switch, it is a suggestion.
 """
 
 import argparse
@@ -247,7 +248,14 @@ def main():
                     help="longest sleep a Bash command may contain, in seconds")
     args = ap.parse_args()
 
-    if OFF_SWITCH.exists():
+    # The file alone does nothing. A stage that wants past a refusal can create a file -- one did,
+    # and left the guard off for every session that followed -- and no amount of pattern-matching on
+    # shell commands closes that: `python3 -c "open('/tmp/cc-guard'+'-off','w')"` never says the
+    # name. What a stage cannot do is change the environment a hook is spawned into, because each
+    # hook is started fresh by the client from the client's environment, so the lever lives there.
+    # The pattern rule below stays as a tripwire: it costs the stage a turn and says what to do
+    # instead, rather than letting it believe it has succeeded.
+    if OFF_SWITCH.exists() and os.environ.get("CC_GUARD_LIFTABLE") == "1":
         allow()
 
     try:

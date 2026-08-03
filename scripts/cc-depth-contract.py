@@ -51,7 +51,10 @@ def main() -> int:
                     help="one of: %s" % ", ".join(sorted(cc_ledger.ADAPTERS)))
     args = ap.parse_args()
 
-    if OFF_SWITCH.exists():
+    # A file is not a switch when the thing being switched off can make files. Honoured only in a
+    # session launched to honour it; the environment of a hook is the one thing a stage cannot
+    # reach, because the client spawns each hook fresh from its own.
+    if OFF_SWITCH.exists() and os.environ.get("CC_DEPTH_LIFTABLE") == "1":
         return 0
     try:
         payload = json.load(sys.stdin)

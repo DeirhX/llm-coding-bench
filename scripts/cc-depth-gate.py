@@ -593,7 +593,10 @@ def _await_stage(session: str, root: str, state: dict) -> tuple[dict, list[str]]
 
 
 def main() -> int:
-    if OFF_SWITCH.exists():
+    # A file is not a switch when the thing being switched off can make files. Honoured only in a
+    # session launched to honour it; the environment of a hook is the one thing a stage cannot
+    # reach, because the client spawns each hook fresh from its own.
+    if OFF_SWITCH.exists() and os.environ.get("CC_DEPTH_LIFTABLE") == "1":
         return allow()
     try:
         payload = json.load(sys.stdin)

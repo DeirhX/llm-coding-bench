@@ -188,6 +188,7 @@ USAGE
 # as the tool result. Lift it for a session with `touch /tmp/cc-guard-off`, or launch --no-guard.
 PRE_TOOL=()
 GUARD=1
+LIFTABLE=0
 DEPTH=0
 DEPTH_ADAPTER="review"
 FLOWS=0
@@ -234,6 +235,7 @@ while [[ $# -gt 0 ]]; do
       ollama list 2>/dev/null | awk 'NR==1 || /^gemma4-(31b|26b)-(coding|mtp|mlx)-|^gemma4-coding:/ { print "  " $0 }'
       exit 0 ;;
     -h|--help) usage; exit 0 ;;
+    --liftable) LIFTABLE=1; shift ;;
     --) shift; CLAUDE_ARGS=("$@"); break ;;
     *) CLAUDE_ARGS+=("$1"); shift ;;
   esac
@@ -412,8 +414,14 @@ if (( GUARD )); then
   fi
   echo "guard:  unbounded reads over 500 lines are refused, so are re-reads of files that have"
   echo "        not changed, and past $(( CTX_TOKENS * ${CLAUDE_GEMMA_STOP_PCT:-80} / 100 )) tokens (${CLAUDE_GEMMA_STOP_PCT:-80}%) anything bulky is refused with"
-  echo "        an instruction to record findings and stop. touch /tmp/cc-guard-off to lift"
-  echo "        it yourself; the model is refused if it tries."
+  if (( LIFTABLE )); then
+    echo "        an instruction to record findings and stop. touch /tmp/cc-guard-off to lift it"
+    echo "        mid-session, which this session honours because you asked for --liftable."
+  else
+    echo "        an instruction to record findings and stop. Relaunch --liftable if you want"
+    echo "        touch /tmp/cc-guard-off to work: without it the file is ignored, because a"
+    echo "        model can make files and one did."
+  fi
 else
   echo "guard:  off. Unbounded reads and window overruns are permitted; a single task can"
   echo "        fill the window, and nothing here compacts by itself."
@@ -726,7 +734,8 @@ SESSION_SETTINGS=$(cat <<JSON
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "$CTX_DECLARED",
     "API_TIMEOUT_MS": "${CLAUDE_GEMMA_TIMEOUT_MS:-1800000}",
-    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "${CLAUDE_GEMMA_MAX_OUTPUT:-8192}"
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "${CLAUDE_GEMMA_MAX_OUTPUT:-8192}",
+    "CC_GUARD_LIFTABLE": "$LIFTABLE"
   },
 $GUARD_JSON
   "model": "$MODEL",

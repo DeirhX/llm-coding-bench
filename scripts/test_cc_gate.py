@@ -296,12 +296,18 @@ def test_second_pass_never_blocks() -> None:
 
 
 def test_kill_switch_and_missing_contract_allow() -> None:
+    """The switch is honoured only in a session launched to honour it. A stage that wanted past the
+    read guard made the guard's switch itself and left it there, and the same file would have
+    stopped this gate judging anything at all."""
     off = Path("/tmp/cc-depth-off")
     created = not off.exists()
     off.touch()
     try:
-        assert _blocks("CLAIM: unsupported\n") == "", "kill switch must disable the gate"
+        assert _blocks("CLAIM: unsupported\n"), "a switch the stage could have made is not a switch"
+        os.environ["CC_DEPTH_LIFTABLE"] = "1"
+        assert _blocks("CLAIM: unsupported\n") == "", "the operator's switch must disable the gate"
     finally:
+        os.environ.pop("CC_DEPTH_LIFTABLE", None)
         if created:
             off.unlink()
     with tempfile.TemporaryDirectory() as tmp:
