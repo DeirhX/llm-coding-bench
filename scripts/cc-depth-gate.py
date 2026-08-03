@@ -639,14 +639,17 @@ WAIT_FOR = float(os.environ.get("CC_FLOW_WAIT", "90"))
 
 def _await_stage(session: str, root: str, state: dict) -> tuple[dict, list[str]]:
     """Wait here for the stage in flight, and say what is still running when we give up."""
+    cc_flowstate.release()      # minutes of waiting is not a thing to hold a lock through
     deadline = time.time() + WAIT_FOR
     while time.time() < deadline:
         in_flight = cc_flowstate.running(state)
         if not in_flight:
             return state, []
         time.sleep(2.0)
-        state = cc_flowstate.load(session, root)
-    return state, cc_flowstate.running(state)
+        # peek, not load: this loop runs for minutes, and the lock load() holds would stop every
+        # other hook for the whole wait -- including the stage whose report we are waiting for.
+        state = cc_flowstate.peek(session, root)
+    return cc_flowstate.load(session, root), cc_flowstate.running(state)
 
 
 def main() -> int:

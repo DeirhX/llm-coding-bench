@@ -12,6 +12,8 @@ One file per session, next to everything else the gate writes.
 
 from __future__ import annotations
 
+import atexit
+import fcntl
 import json
 import os
 import time
@@ -25,7 +27,74 @@ def path_for(session: str, root: str) -> Path:
     return cc_ledger.run_dir(session, root) / "flow.json"
 
 
+# The flow file is read and written by separate hook processes, and a client that issues three tool
+# calls in one turn runs three of them at once. Unserialised, the slowest one saves what it read
+# before the others changed anything, and whatever they recorded is gone. Run 19 lost the launch of
+# its claims stage that way -- three refusals in the same second, the launch admitted and recorded
+# three seconds later, and a straggler from the refusals wrote the launch back out of existence. The
+# stage then ran 157 tool calls that the flow had no record of, so the guard read every one of them as
+# the orchestrator idling and told the working subagent to launch itself. 77 refusals, and a session
+# deadlocked against a stage it was already running.
+_HELD = None                    # the lock this process holds between load() and save()
+
+
+def _lock(session: str, root: str, wait: float = 5.0) -> None:
+    """Hold the flow file from load() until save(), so a read-modify-write is not interleaved."""
+    global _HELD
+    if _HELD is not None:
+        return
+    try:
+        out = path_for(session, root)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(str(out) + ".lock", "a+")
+    except OSError:
+        return
+    limit = time.time() + wait
+    while True:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _HELD = fh
+            return
+        except OSError:
+            if time.time() >= limit:
+                # A lost update is a bug; a hook that never returns is a hung session. Prefer the bug.
+                fh.close()
+                return
+            time.sleep(0.02)
+
+
+def _unlock() -> None:
+    global _HELD
+    if _HELD is None:
+        return
+    held, _HELD = _HELD, None
+    try:
+        fcntl.flock(held, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    held.close()
+
+
+def release() -> None:
+    """Let go before doing anything slow. Held across a wait, the lock stops the stage being waited
+    for from reporting: its hooks block, time out, and write unserialised after all."""
+    _unlock()
+
+
+def peek(session: str, root: str) -> dict:
+    """Read the flow without taking the lock, for anything that polls it in a loop.
+
+    The Stop hook waits minutes for a stage by reading this file over and over. Doing that under the
+    lock would stop every other hook for as long as the wait.
+    """
+    try:
+        return json.loads(path_for(session, root).read_text())
+    except (OSError, ValueError):
+        return {}
+
+
 def load(session: str, root: str) -> dict:
+    _lock(session, root)
     try:
         return json.loads(path_for(session, root).read_text())
     except (OSError, ValueError):
@@ -36,9 +105,13 @@ def save(state: dict, session: str, root: str) -> None:
     out = path_for(session, root)
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(state, indent=2) + "\n")
+        tmp = out.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, indent=2) + "\n")
+        os.replace(tmp, out)        # a reader never sees half a file
     except OSError:
         pass
+    finally:
+        _unlock()
 
 
 def begin(flow: str, task: str, session: str, root: str) -> dict:
@@ -287,3 +360,6 @@ def summary(state: dict) -> str:
 
 def session_of(payload: dict) -> str:
     return payload.get("session_id") or os.environ.get("CLAUDE_SESSION_ID") or "unknown"
+
+
+atexit.register(_unlock)   # a hook that read and decided to change nothing still lets go

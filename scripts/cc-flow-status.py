@@ -29,7 +29,7 @@ def main() -> int:
         print("no session id, so no flow to report on")
         return 0
 
-    state = cc_flowstate.load(args.session, args.root)
+    state = cc_flowstate.peek(args.session, args.root)
     if not state.get("flow"):
         print("no flow running")
         return 0

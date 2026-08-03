@@ -1285,6 +1285,40 @@ is.** Three fixes in a row went in behind matchers that never routed the tool th
 `claude-gemma.sh --print-settings` now prints what a launch would register, and a test reads it.
 
 
+### Three hooks at once, and a stage the flow forgot it had launched
+
+Run 19's claims stage ran 157 tool calls and 77 of them came back with this:
+
+```
+Refused. Call the Agent tool, prompt first line `STAGE: claims`.
+```
+
+Told to launch itself. The stage *was* the claims stage, working, and the flow had no record that it
+existed: `flow.json` held one entry, for the survey. With nothing running, the rule that stops the
+orchestrator from doing stage work applies to everything, and since **no hook payload carries any
+client identity**, a working subagent and an idle orchestrator are the same caller here.
+
+The record was written and then written back out of existence. Three refusals landed in the same
+second -- one assistant turn, three tool calls, three hook processes at once -- and the launch was
+admitted three seconds later. Each hook does load, change, save with no lock, so a straggler from
+those refusals saved the state it had read before the launch was recorded.
+
+What made it findable rather than a shrug: the survey's recorded count was 6 and the survey subagent
+had made exactly 6 calls, while claims had made 157 and was recorded nowhere. A counter that is right
+for a stage that ran alone and absent for a stage that ran alongside anything is a race, not a parser
+bug.
+
+`load()` now takes an exclusive `flock` that `save()` releases, so the whole read-modify-write is
+serialised, and `save()` writes through a temporary file so no reader sees half of one. Two things
+that fixing it taught, both worth more than the fix:
+
+- **A lock held across a wait is worse than no lock.** The Stop hook waits minutes for a stage to
+  report. Held through that, the lock blocks the hooks of the very stage being waited for, they time
+  out, and they write unserialised anyway. There is now `peek()` for reading in a loop and
+  `release()` for letting go before anything slow, and the Stop hook calls both.
+- **Prefer a bug to a hang.** The lock waits five seconds and then proceeds without it. A lost update
+  costs a record; a hook that never returns costs the session.
+
 ### A refusal is charged to the context it protects
 
 The call budget refuses a stage that keeps reading instead of answering, and the refusal says why at

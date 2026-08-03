@@ -855,3 +855,30 @@ def test_both_launchers_tell_the_client_how_big_the_window_is() -> None:
         text = (pathlib.Path(__file__).resolve().parent / name).read_text()
         assert "CLAUDE_CODE_MAX_CONTEXT_TOKENS" in text, name
         assert "API_TIMEOUT_MS" in text, name
+
+
+_RACER = """
+import sys, time
+sys.path.insert(0, %r)
+import cc_flowstate
+state = cc_flowstate.load("race", %r)
+time.sleep(0.15)                     # the window in which an unserialised writer loses the others
+state.setdefault("stages", []).append({"stage": "s" + sys.argv[1]})
+cc_flowstate.save(state, "race", %r)
+"""
+
+
+def test_hooks_writing_at_once_do_not_lose_each_others_records() -> None:
+    """A client that issues three tool calls in one turn runs three hooks at once. Unserialised, the
+    slowest saves what it read before the others changed anything and their records are gone: run 19
+    lost the launch of its claims stage that way, then read the stage's own 157 tool calls as the
+    orchestrator idling and told the working subagent to launch itself, 77 times."""
+    with tempfile.TemporaryDirectory() as root:
+        here = str(pathlib.Path(__file__).resolve().parent)
+        cc_flowstate.save({"flow": "review", "stages": []}, "race", root)
+        src = _RACER % (here, root, root)
+        running = [subprocess.Popen([sys.executable, "-c", src, str(i)]) for i in range(6)]
+        for proc in running:
+            proc.wait(timeout=60)
+        kept = {e["stage"] for e in cc_flowstate.peek("race", root).get("stages", [])}
+    assert kept == {"s%d" % i for i in range(6)}, kept

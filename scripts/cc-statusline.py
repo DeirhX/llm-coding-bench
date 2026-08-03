@@ -55,7 +55,7 @@ def _flow(payload: dict) -> str:
         import cc_flow
     except ImportError:
         return ""
-    state = cc_flowstate.load(session, root)
+    state = cc_flowstate.peek(session, root)
     if not state.get("flow"):
         return ""
     total = len(cc_flow.flow_for(state["flow"]) or ())
