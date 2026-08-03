@@ -540,6 +540,13 @@ def _section(printed: str, payloads: list[str]) -> str:
     return printed
 
 
+# What a claim looks like when the point of the probe was that it was not allowed to run.
+_CLAIMS_REFUSAL = re.compile(r"\b(denied|denies|deny|refused|refuses|refusal|blocked|blocks|"
+                             r"rejected|not permitted|forbidden)\b", re.I)
+# An ordinary non-zero exit, which is a command that ran and failed -- not a command that was stopped.
+_SHELL_FAILURE = re.compile(r"\bexit code\s+\d+|command not found|No such file or directory", re.I)
+
+
 def command_result(calls, command_fragment: str, expected: str) -> Verdict:
     """Did some command in this session run `command_fragment` and print `expected`?
 
@@ -556,6 +563,14 @@ def command_result(calls, command_fragment: str, expected: str) -> Verdict:
         if wanted not in ran and ran not in wanted and not _same_command(wanted, ran):
             continue
         seen += 1
+        # A probe of a rule that stops things is reported by being stopped: the refusal is the result,
+        # and the text on record is the hook's message, which does not contain the word `denied` the
+        # claim uses. Judged on word overlap it failed, and the verdict was FAIL regardless because
+        # the call did not succeed -- so a stage reviewing a deny rule could not cite the denial that
+        # proves it works. Run 20's claims stage was refused 19 times gathering exactly this.
+        text = call.text or ""
+        if not call.ok and _CLAIMS_REFUSAL.search(expected) and not _SHELL_FAILURE.search(text):
+            return Verdict(PASS, "%s -- stopped, as the claim says" % command_fragment[:60])
         payloads = [m.group("value") for m in _PAYLOAD.finditer(wanted)]
         if _supports(_section(call.text or "", payloads), expected):
             return Verdict(PASS if call.ok else FAIL,

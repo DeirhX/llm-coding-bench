@@ -1041,3 +1041,34 @@ def test_prose_in_an_answer_that_marks_its_claims_stays_prose() -> None:
     claims, _ = vf.parse_ledger(text)
     assert len(claims) == 1, [c["claim"] for c in claims]
     assert claims[0]["claim"].startswith("the rule matches"), claims[0]
+
+
+class _Call:
+    """A recorded tool call, as cc_evidence.collect returns them."""
+
+    def __init__(self, command: str, text: str, ok: bool = True) -> None:
+        self.tool, self.args, self.text, self.ok = "Bash", {"command": command}, text, ok
+
+
+def test_a_probe_that_was_stopped_is_evidence_that_it_was_stopped() -> None:
+    """A rule that denies things is probed by being denied: the result on record is the hook's own
+    message, which never contains the word the claim uses, and the verdict was FAIL anyway because
+    the call did not succeed. Run 20's claims stage was refused 19 times gathering exactly this."""
+    calls = [_Call("touch /tmp/cc-guard-off",
+                   "The guards' off-switches are the operator's, not yours.", ok=False)]
+    verdict = vf.command_result(calls, "touch /tmp/cc-guard-off", "denied")
+    assert verdict.ok, (verdict.kind, verdict.detail)
+
+
+def test_a_command_that_merely_failed_is_not_a_refusal() -> None:
+    calls = [_Call("ls /tmp/cc-guard-off",
+                   "Exit code 1\nls: /tmp/cc-guard-off: No such file or directory", ok=False)]
+    verdict = vf.command_result(calls, "ls /tmp/cc-guard-off", "denied")
+    assert not verdict.ok, (verdict.kind, verdict.detail)
+
+
+def test_a_refused_command_claimed_to_have_been_allowed_still_fails() -> None:
+    calls = [_Call("touch /tmp/cc-guard-off",
+                   "The guards' off-switches are the operator's, not yours.", ok=False)]
+    verdict = vf.command_result(calls, "touch /tmp/cc-guard-off", "no output, allowed")
+    assert not verdict.ok, (verdict.kind, verdict.detail)
