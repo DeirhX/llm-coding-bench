@@ -55,6 +55,17 @@ def begin(flow: str, task: str, session: str, root: str) -> dict:
 STALE_AFTER = 600.0
 
 
+def _silent(entry: dict) -> bool:
+    """Has this launch shown no sign of life for STALE_AFTER?
+
+    Measured from the last tool call charged to it rather than from the launch, because a stage that
+    is reading is plainly alive however long it has been at it. A round that had spent nine minutes
+    was given up on and relaunched under the older rule, which counted from the launch alone.
+    """
+    last = max(float(entry.get("active") or 0), float(entry.get("launched") or 0))
+    return time.time() - last >= STALE_AFTER
+
+
 def record_launch(state: dict, stage: str, agent: str = "") -> dict:
     state.setdefault("stages", []).append(
         {"stage": stage, "agent": agent, "launched": time.time(), "verdict": None, "gaps": []})
@@ -114,6 +125,7 @@ def spend(state: dict, stage: str) -> int:
     for entry in reversed(state.get("stages", [])):
         if entry.get("stage") == stage and entry.get("verdict") is None:
             entry["calls"] = int(entry.get("calls", 0)) + 1
+            entry["active"] = time.time()
             return entry["calls"]
     return 0
 
@@ -169,8 +181,7 @@ def admits(state: dict, stage: str) -> tuple[bool, str]:
                        "one is written to consume what the one before it established."
                        % (expected, stage, flow, ", ".join(known)))
     live = [e for e in state.get("stages", [])
-            if e.get("stage") == stage and e.get("verdict") is None
-            and time.time() - float(e.get("launched") or 0) < STALE_AFTER]
+            if e.get("stage") == stage and e.get("verdict") is None and not _silent(e)]
     if live and all(e.get("reopened") for e in live):
         # A refused stage is held open because its subagent carries on, but it may instead give up.
         # The session relaunching the stage is the sign that it did, and superseding the held-open
@@ -197,13 +208,11 @@ def forget_running(state: dict) -> list[str]:
     turn while one of its own Task calls is outstanding. It can: a stage is launched as a task and
     the session goes on without it, so the parent reaches its stop routinely while the stage is
     still reading. Deleting the entry then loses a stage that was working perfectly well, and the
-    flow forgets a run it is about to be told to repeat. Only a launch that has said nothing for
-    STALE_AFTER is treated as gone -- long enough that no working stage is caught by it, and the
-    only case that needs the escape is a subagent that died without its stop ever firing.
+    flow forgets a run it is about to be told to repeat. Only a launch that has shown no sign of
+    life for STALE_AFTER is treated as gone, which is the subagent that died without its stop ever
+    firing.
     """
-    now = time.time()
-    gone = [e for e in state.get("stages", []) if e.get("verdict") is None
-            and now - float(e.get("launched") or 0) >= STALE_AFTER]
+    gone = [e for e in state.get("stages", []) if e.get("verdict") is None and _silent(e)]
     state["stages"] = [e for e in state.get("stages", []) if e not in gone]
     return [e["stage"] for e in gone]
 

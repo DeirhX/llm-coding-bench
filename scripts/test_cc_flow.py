@@ -503,3 +503,29 @@ def test_a_stage_is_told_that_its_report_is_the_message() -> None:
         cc_flowstate.save(cc_flowstate.begin("review", "t", "s1", root), "s1", root)
         _, _, amended = run("STAGE: survey\n", root)
     assert "Nothing you write to a file is read here" in amended["prompt"], amended["prompt"]
+
+
+def test_a_stage_still_reading_is_not_given_up_on() -> None:
+    """A claims round that had been going nine minutes was dropped and relaunched, because
+    staleness counted from the launch alone. A stage that is reading is plainly alive."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        state["stages"][-1]["launched"] -= cc_flowstate.STALE_AFTER * 2
+        cc_flowstate.spend(state, "survey")
+        ok, why = cc_flowstate.admits(state, "survey")
+    assert not ok, state
+    assert "already running" in why, why
+
+
+def test_a_stage_still_reading_is_not_given_up_on() -> None:
+    """A claims round that had been going nine minutes was dropped and relaunched, because
+    staleness counted from the launch alone. A stage that is reading is plainly alive."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        state["stages"][-1]["launched"] -= cc_flowstate.STALE_AFTER * 2
+        cc_flowstate.spend(state, "survey")
+        ok, why = cc_flowstate.admits(state, "survey")
+    assert not ok, state
+    assert "already running" in why, why
