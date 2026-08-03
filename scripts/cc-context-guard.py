@@ -38,6 +38,8 @@ import time
 from pathlib import Path
 
 OFF_SWITCH = Path("/tmp/cc-guard-off")
+DEPTH_OFF = Path("/tmp/cc-depth-off")
+SWITCHES = (OFF_SWITCH, DEPTH_OFF)
 
 # Tools that can add thousands of tokens in one call. Write and Edit are deliberately absent: their
 # results are a line of confirmation, and forbidding them would leave the model unable to write down
@@ -47,6 +49,10 @@ BULKY = {"Read", "Bash", "WebFetch", "WebSearch", "Grep", "Glob", "NotebookRead"
 # A read that quotes no limit is unbounded, so the only question is how big the file is. 500 lines is
 # about 4k tokens of Python, which is a fifth of what one measured session spent re-reading two files.
 DEFAULT_MAX_LINES = 500
+# Lines are the wrong unit for some files and the only unit this guard used. A parent read a
+# subagent transcript of 231,800 bytes in 67 lines -- around 58,000 tokens, most of a window -- and
+# the 500-line rule waved it through, because JSONL puts a whole conversation on one line each.
+DEFAULT_MAX_BYTES = 60_000
 
 # Commands that dump a file into the transcript, bypassing the Read guard entirely.
 DUMP = re.compile(r"^\s*(?:cat|bat|less|more)\s+(?!.*\|)(\S+)")
@@ -171,7 +177,57 @@ def line_count(path: Path) -> int:
         return sum(1 for _ in fh)
 
 
-_SLEEP = re.compile(r"\bsleep\s+(\d+)")
+_SLEEP = re.compile(r"(?:^|[;&|(){}\n])\s*sleep\s+(\d+)")
+_HEREDOC = re.compile(r"<<-?\s*'?\"?(\w+)'?\"?.*?^\1$", re.S | re.M)
+_QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"", re.S)
+
+
+_LEDGER_HEAD = re.compile(r"^\W{0,4}(CLAIM|UNKNOWN|EVIDENCE|QUOTE)\b")
+
+
+def is_ledger(text: str) -> bool:
+    """True if this file is a ledger rather than code: it opens on a ledger header and cites.
+
+    A claims stage wrote a well-formed ledger of four findings to claims.jsonl and put a prose
+    summary in its reply. The gate reads the reply, so all four were judged as citing nothing, and
+    the stage was refused for work it had actually done. Saying so in the contract did not stop it
+    happening again the next run, so the write is refused where the model can still act on it.
+
+    Deliberately narrow: this repo's own sources quote ledger headers all over, and an implement
+    stage editing cc_ledger.py must not trip on them. Only a file that *begins* as a ledger counts.
+    """
+    body = text.lstrip()
+    return bool(body and _LEDGER_HEAD.match(body) and "EVIDENCE" in text)
+
+
+def naps_in(command: str) -> list[int]:
+    """Seconds the shell would actually spend sleeping, ignoring sleeps that are only text.
+
+    The first version of this matched the word sleep and a number anywhere in the command, and a
+    stage asked to review this very rule was denied three times for saying `sleep 180` in a heredoc
+    and inside `python3 -c`, where no shell was going to sleep. A rule that refuses the attempt to
+    test it is worse than no rule: it looks like the tool is broken, and the stage spends its budget
+    working around the guard instead of on the question.
+    """
+    bare = _QUOTED.sub(" ", _HEREDOC.sub(" ", command))
+    return [int(m.group(1)) for m in _SLEEP.finditer(bare)]
+
+
+_WRITES = re.compile(r"touch|>|tee\b|rm\b|unlink|mv\b|cp\b|install\b|open\s*\(|Path\s*\(|write")
+
+
+def tampers(command: str) -> bool:
+    """True if this command would create or remove a guard's off-switch.
+
+    A survey stage ran `touch /tmp/cc-guard-off`, described as "Temporarily disable guard for
+    reading", and never removed it. Every stage after it in that run, and every session started
+    afterwards, ran with no read discipline at all and nothing said so. The switch exists for the
+    person at the keyboard; a model that can turn off the thing judging it is not being judged.
+
+    Naming the file at all is not the offence -- a review of this guard has to grep for it -- so
+    inspection passes and only a command that could write the path is refused.
+    """
+    return (any(s.name in command for s in SWITCHES)) and bool(_WRITES.search(command))
 
 
 def main():
@@ -180,6 +236,8 @@ def main():
     ap.add_argument("--framing", type=int, default=4477, help="per-turn overhead the transcript omits")
     ap.add_argument("--stop-pct", type=float, default=80.0)
     ap.add_argument("--max-lines", type=int, default=DEFAULT_MAX_LINES)
+    ap.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES,
+                    help="largest file a single Read may take whole, in bytes")
     # An interactive session can write its findings down and be resumed. A pipeline stage has
     # read-only tools and one reply, so telling it to write NOTES.md names a tool it does not have,
     # and a model that cannot obey an instruction tends to ignore the sentence around it too.
@@ -209,12 +267,28 @@ def main():
     # and spent twenty minutes of a fifty-minute budget waiting for itself. The suite it was waiting
     # on takes under three seconds in the foreground. Nothing here needs to wait minutes for
     # anything, so a long sleep is always the wrong answer rather than sometimes.
-    naps = [int(m.group(1)) for m in _SLEEP.finditer(tool_input.get("command") or "")]
+    naps = naps_in(tool_input.get("command") or "")
     if tool == "Bash" and any(n > args.max_sleep for n in naps):
         deny("Do not sleep for %ds. Run the command in the foreground and wait for it there: "
              "polling a background job costs the whole wait and tells you nothing the exit status "
              "would not. If something really does take minutes, say so and answer without it."
              % max(naps))
+
+    if tool == "Bash" and tampers(tool_input.get("command") or ""):
+        deny("The guards' off-switches are the operator's, not yours. Turning one off to get past a "
+             "refusal is not a way round the refusal: the refusal is the instruction. Do what it "
+             "said, or say in your answer that you could not and why.")
+    if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit") and any(
+            s.name in (tool_input.get("file_path") or "") for s in SWITCHES):
+        deny("The guards' off-switches are the operator's, not yours. Do what the refusal said, or "
+             "say in your answer that you could not and why.")
+
+    written = tool_input.get("content") or tool_input.get("new_string") or ""
+    if tool in ("Write", "Edit", "MultiEdit") and is_ledger(written):
+        deny("Nothing you write to a file is read here -- your report is the message you finish "
+             "with. Put these CLAIM/EVIDENCE/QUOTE blocks in your reply instead, in full, and do "
+             "not summarise them in prose: the summary is what gets judged, and a summary cites "
+             "nothing.")
 
     denied = {t.strip() for t in args.deny.split(",") if t.strip()}
     if tool in denied:
@@ -240,8 +314,7 @@ def main():
         deny(
             f"Context guard: the conversation is at {used:,} tokens, {pct:.0f}% of the "
             f"{args.window:,}-token window, and nothing here compacts by itself. {advice} "
-            f"Overrunning the window costs minutes per turn, not seconds. "
-            f"(To lift this: touch {OFF_SWITCH})"
+            f"Overrunning the window costs minutes per turn, not seconds."
         )
 
     if tool == "Read":
@@ -255,6 +328,17 @@ def main():
         # and read the file whole -- which is precisely what a model does when told to use a limit.
         requested = tool_input.get("limit")
         wants_everything = not requested or int(requested) > args.max_lines
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        if wants_everything and size > args.max_bytes:
+            deny(
+                f"Context guard: {path.name} is {size:,} bytes in {line_count(path):,} lines, "
+                f"roughly {size // 4:,} tokens, and reading it whole would spend most of the "
+                f"window on one call. Long lines are why the line limit did not catch this. Use a "
+                f"search command to find what you need, or read a slice with offset and limit."
+            )
         if wants_everything:
             try:
                 lines = line_count(path)
@@ -268,7 +352,7 @@ def main():
                     f"{path.stat().st_size // 4:,} tokens, and {asked} of it stays in "
                     f"the conversation for the rest of the session. Read at most "
                     f"{args.max_lines} lines with offset and limit, or find what you need with a "
-                    f"search command and read around the hit. (To lift this: touch {OFF_SWITCH})"
+                    f"search command and read around the hit."
                 )
 
         offset = int(tool_input.get("offset") or 1)
@@ -285,8 +369,7 @@ def main():
                 deny(
                     f"Context guard: you already read {path.name} at {stamp} and it has not "
                     f"changed since. Its contents are still above in this conversation -- use "
-                    f"them. Reading it again would add the same tokens a second time. "
-                    f"(To lift this: touch {OFF_SWITCH})"
+                    f"them. Reading it again would add the same tokens a second time."
                 )
 
     if tool == "Bash":
@@ -308,8 +391,7 @@ def main():
                     deny(
                         f"Context guard: that dumps {target.name}, {lines:,} lines, into the "
                         f"conversation, which is what the Read limit exists to prevent. Use Read "
-                        f"with offset and limit, or a search command that prints only matches. "
-                        f"(To lift this: touch {OFF_SWITCH})"
+                        f"with offset and limit, or a search command that prints only matches."
                     )
 
     allow()

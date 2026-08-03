@@ -12,6 +12,8 @@
 # which weights answer.
 set -uo pipefail
 ROOT=${0:a:h:h}
+
+rm -f /tmp/cc-guard-off /tmp/cc-depth-off  # a stale one silently disables every guard
 BASE=${ANTHROPIC_BASE_URL:-http://127.0.0.1:8099}
 MODEL=${FLOW_MODEL:-qwopus}
 OUT=${FLOW_OUT:-/tmp/flow-smoke}
@@ -50,11 +52,11 @@ cat > "$SETTINGS" <<JSON
     "SessionStart": [ { "hooks": [ { "type": "command", "command": "$CONTRACT" } ] } ],
     "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "$CONTRACT" } ] } ],
     "PreToolUse": [
-      { "matcher": "Read|Bash|WebFetch|WebSearch", "hooks": [ { "type": "command", "command": "$GUARD" } ] },
+      { "matcher": "Read|Bash|WebFetch|WebSearch|Write|Edit|MultiEdit", "hooks": [ { "type": "command", "command": "$GUARD" } ] },
       { "hooks": [ { "type": "command", "command": "$FLOW" } ] }
     ],
     "PostToolUse": [
-      { "matcher": "Task|Agent", "hooks": [ { "type": "command", "command": "$FLOW" } ] }
+      { "matcher": "Task|Agent|TaskList|TaskOutput", "hooks": [ { "type": "command", "command": "$FLOW" } ] }
     ],
     "Stop": [ { "hooks": [ { "type": "command", "command": "$GATE" } ] } ],
     "SubagentStop": [ { "hooks": [ { "type": "command", "command": "$GATE" } ] } ]
@@ -66,10 +68,18 @@ SESSION=$(python3 -c 'import uuid; print(uuid.uuid4())')
 echo "session $SESSION, model $MODEL via $BASE"
 echo "$SESSION" > "$OUT/session"
 
-cd "$ROOT"
+# An implement flow writes, so it is pointed at a detached worktree rather than at somebody's
+# uncommitted work: FLOW_CWD is where the session runs, and the hooks take their root from it.
+cd "${FLOW_CWD:-$ROOT}"
+# The same lean tool list `claude-gemma.sh --flows` uses, minus the Task tools a flow needs. Without
+# it the client offers ReportFindings, and a session used it twice to file three findings into a
+# channel nothing here reads -- then finished on a prose summary the gate judged as citing nothing.
+DISALLOW="Workflow,ReportFindings,SendMessage,CronCreate,CronList,CronDelete,ScheduleWakeup"
+DISALLOW="$DISALLOW,EnterWorktree,ExitWorktree,AskUserQuestion,EnterPlanMode,ExitPlanMode,Skill"
+
 ANTHROPIC_BASE_URL="$BASE" ANTHROPIC_API_KEY=local \
   claude -p "$TASK" --model "$MODEL" --settings "$SETTINGS" \
-  --session-id "$SESSION" --output-format json \
+  --session-id "$SESSION" --output-format json --disallowed-tools "$DISALLOW" \
   --dangerously-skip-permissions > "$OUT/answer.json" 2> "$OUT/stderr.log"
 echo "claude exited $?"
 

@@ -55,15 +55,23 @@ def begin(flow: str, task: str, session: str, root: str) -> dict:
 STALE_AFTER = 600.0
 
 
+# A reopened round is given far less rope. It exists on the assumption that a refused subagent goes
+# round again; when it does not -- and headless it usually does not, it simply exits -- the entry
+# holds the flow open with nothing behind it. A real second round makes a tool call within seconds,
+# so silence here means the worker is gone rather than thinking.
+REOPENED_STALE = 120.0
+
+
 def _silent(entry: dict) -> bool:
-    """Has this launch shown no sign of life for STALE_AFTER?
+    """Has this launch shown no sign of life long enough to be treated as gone?
 
     Measured from the last tool call charged to it rather than from the launch, because a stage that
     is reading is plainly alive however long it has been at it. A round that had spent nine minutes
     was given up on and relaunched under the older rule, which counted from the launch alone.
     """
     last = max(float(entry.get("active") or 0), float(entry.get("launched") or 0))
-    return time.time() - last >= STALE_AFTER
+    limit = REOPENED_STALE if entry.get("reopened") and not entry.get("calls") else STALE_AFTER
+    return time.time() - last >= limit
 
 
 def record_launch(state: dict, stage: str, agent: str = "") -> dict:
@@ -134,13 +142,32 @@ def running(state: dict) -> list[str]:
     return [e["stage"] for e in state.get("stages", []) if e.get("verdict") is None]
 
 
+# How many times one stage may be refused before the flow stops asking it. Three, because the first
+# refusal is usually about shape and the second about evidence, and a stage that has not answered
+# either by the third is not going to. Without a cap a claims stage was refused, relaunched, and
+# refused again until the nudge limit ended the session with nothing judged at all.
+ROUND_CAP = 3
+
+
+def exhausted(state: dict, stage: str) -> bool:
+    return len([e for e in state.get("stages", [])
+                if e.get("stage") == stage and e.get("verdict") == "refused"]) >= ROUND_CAP
+
+
 def next_stage(state: dict) -> str | None:
-    """The stage that should run now, or None when the flow is complete."""
-    stages = cc_flow.flow_for(state.get("flow", "")) or []
+    """The stage that should run now, or None when the flow is over -- complete or given up on."""
+    flow = state.get("flow", "")
+    stages = cc_flow.flow_for(flow) or []
     finished = set(done(state))
     for stage in stages:
-        if stage.name not in finished:
+        if stage.name in finished:
+            continue
+        if not exhausted(state, stage.name):
             return stage.name
+        # A stage nobody could satisfy. If what follows depends on it there is nothing honest left
+        # to do, so the flow ends and its gaps are what the session has to report.
+        if stage.blocking:
+            return None
     return None
 
 
@@ -223,6 +250,8 @@ def summary(state: dict) -> str:
     if not state.get("flow"):
         return "no flow running"
     marks = {"accepted": "ok", "refused": "refused", None: "running"}
+    give_up = [s.name for s in cc_flow.flow_for(state["flow"]) or []
+               if exhausted(state, s.name) and s.name not in done(state)]
     rows = ["%s flow: %s" % (state["flow"], state.get("task", "")[:60])]
     for entry in state.get("stages", []):
         spent = entry.get("finished", time.time()) - entry.get("launched", time.time())
@@ -230,7 +259,10 @@ def summary(state: dict) -> str:
                     % (entry["stage"], marks[entry.get("verdict")], spent,
                        (" ".join(entry.get("gaps", []))[:70] if entry.get("gaps") else "")))
     left = next_stage(state)
-    rows.append("  next: %s" % (left or "nothing, the flow is complete"))
+    if give_up:
+        rows.append("  given up on: %s (refused %d times)" % (", ".join(give_up), ROUND_CAP))
+    rows.append("  next: %s" % (left or ("nothing, the flow is over" if give_up
+                                         else "nothing, the flow is complete")))
     return "\n".join(rows)
 
 

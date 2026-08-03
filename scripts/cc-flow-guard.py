@@ -99,7 +99,8 @@ CLERICAL = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "Tas
             "AskUserQuestion", "ExitPlanMode", "SlashCommand"}
 
 
-def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = "") -> None:
+def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = "",
+                       tool_input: dict | None = None) -> None:
     """While a flow is running with no stage in flight, the session is an orchestrator.
 
     Told to run its stages as subagents, the first real session read the file itself and answered
@@ -113,9 +114,13 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
         # Refused from doing the work itself, a session decided the guard was a sandbox, killed the
         # stage it had just launched on the grounds that it looked stuck, and went back to doing the
         # work itself. Waiting is what it is for; killing the stage is not clerical.
-        deny("The %s stage is running. Let it report -- read its output and wait. A stage that has "
-             "not answered yet is working, not stuck, and stopping it leaves the flow with nothing "
-             "to judge." % ", ".join(cc_flowstate.running(state)))
+        # Told only to wait, a session alternated TaskStop with TaskOutput four times in nine
+        # minutes, each refusal costing a full turn. So the refusal now names the call to make.
+        deny("The %s stage is running. Do not call TaskStop again -- it will be refused every time "
+             "until the stage reports, and each attempt costs you a turn. Call TaskOutput with "
+             "task_id \"%s\", block true and timeout 600000, and wait there. A stage that has not "
+             "answered yet is working, not stuck, and stopping it leaves the flow with nothing to "
+             "judge." % (", ".join(cc_flowstate.running(state)), (tool_input or {}).get("task_id") or ""))
     in_flight = cc_flowstate.running(state)
     if in_flight:
         # A stage is in flight, so this is that stage working -- but only up to a point. Reading is
@@ -135,11 +140,52 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
     # Said at length, this got read as a sandbox to be worked around: the session tried a script in
     # /tmp, then a bare python -c, then answered from memory. The instruction now comes first and
     # the reasoning after, because only the first sentence reliably survives.
+    #
+    # And after three of them, nothing at all but the order. A session took the paragraph as a
+    # puzzle -- "I'm encountering a persistent interception mechanism ... let me try a workaround" --
+    # and spent six turns on grep, python3 -c, a heredoc and a temp script, filling its window with
+    # identical refusals until it announced it was hitting the token limit. Explanation is what it
+    # was arguing with, so past a point it is not offered.
+    state["balked"] = int(state.get("balked", 0)) + 1
+    cc_flowstate.save(state, session, root)
+    if state["balked"] > 3:
+        deny("Refused. Call the Agent tool, prompt first line `STAGE: %s`. Nothing else is "
+             "permitted and no other phrasing will work." % nxt)
     deny("Launch the %s stage now: call the Agent tool with a prompt whose first line is exactly "
          "`STAGE: %s`. Its stance is filled in for you, so the rest of the prompt hardly matters. "
          "This is not a sandbox to work around -- doing the reading here would answer without any "
          "of the stances the %s flow exists to apply, and the answer would reach nobody, because "
-         "only what a stage reports is gated." % (nxt, nxt, state["flow"]))
+         "only what a stage reports is gated. Every other tool call will be refused exactly like "
+         "this one, however you phrase it: the refusal is not about the path, the tool or the "
+         "command, so grep, cat and python3 -c will each cost you a turn and return this text."
+         % (nxt, nxt, state["flow"]))
+
+
+# What the client says when the task a flow is waiting for no longer exists.
+_NO_TASKS = re.compile(r"No tasks found|task[^\n]{0,40}not found", re.I)
+_FINISHED = re.compile(r"<status>\s*(completed|failed|cancelled|error)\s*</status>", re.I)
+
+
+def _gone(payload: dict, tool: str) -> int:
+    """The client's own account of whether the stage in flight is still alive.
+
+    A refusal reopens a stage, because a refused subagent usually goes round again. When it does not
+    -- and in a headless session it often does not -- the flow held a stage open that had exited,
+    the Stop hook ordered the parent to wait for it, and the parent answered `TaskList`, was told
+    `No tasks found`, and said so; eleven times. Nothing else can see a subagent die, so what the
+    client prints about it is taken as evidence.
+    """
+    answer = payload.get("tool_response")
+    text = json.dumps(answer) if isinstance(answer, (dict, list)) else str(answer or "")
+    if not (_NO_TASKS.search(text) or (tool == "TaskOutput" and _FINISHED.search(text))):
+        allow()
+    root = payload.get("cwd") or os.getcwd()
+    session = cc_flowstate.session_of(payload)
+    state = cc_flowstate.load(session, root)
+    if state.get("flow") and cc_flowstate.running(state):
+        cc_flowstate.forget_running(state, every=True)
+        cc_flowstate.save(state, session, root)
+    allow()
 
 
 def _launched(payload: dict) -> int:
@@ -150,7 +196,10 @@ def _launched(payload: dict) -> int:
     the flow held open a stage that did not exist, refusing every retry as a duplicate. A failed
     launch is only visible here, in the result.
     """
-    if (payload.get("tool_name") or "") not in ("Task", "Agent"):
+    tool = payload.get("tool_name") or ""
+    if tool in ("TaskList", "TaskOutput"):
+        return _gone(payload, tool)
+    if tool not in ("Task", "Agent"):
         allow()
     answer = payload.get("tool_response")
     failed = False
@@ -195,10 +244,10 @@ def main() -> int:
     if not state.get("flow"):
         allow()             # no flow running: ordinary delegation is none of our business
 
-    if tool not in ("Task", "Agent"):
-        return _orchestrator_only(state, tool, session, root)
-
     tool_input = payload.get("tool_input") or {}
+    if tool not in ("Task", "Agent"):
+        return _orchestrator_only(state, tool, session, root, tool_input)
+
     prompt = str(tool_input.get("prompt") or "")
     found = STAGE_LINE.search(prompt)
     if not found:

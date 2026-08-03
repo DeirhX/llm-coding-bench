@@ -401,10 +401,19 @@ if (( LEAN_TOOLS )); then
 else
   echo "tools:  everything sent, costing 16,168 tokens of every request"
 fi
+# A survey stage ran `touch /tmp/cc-guard-off` to get past a refusal and left it there, so every
+# session started afterwards ran unguarded and nothing said so. The switch is cleared at launch and
+# the guard now refuses any tool call that would write it, which leaves it working for the person
+# here and unavailable to the model.
 if (( GUARD )); then
+  if [[ -e /tmp/cc-guard-off || -e /tmp/cc-depth-off ]]; then
+    rm -f /tmp/cc-guard-off /tmp/cc-depth-off
+    echo "note:   a stale off-switch was left in /tmp and has been cleared"
+  fi
   echo "guard:  unbounded reads over 500 lines are refused, so are re-reads of files that have"
   echo "        not changed, and past $(( CTX_TOKENS * ${CLAUDE_GEMMA_STOP_PCT:-80} / 100 )) tokens (${CLAUDE_GEMMA_STOP_PCT:-80}%) anything bulky is refused with"
-  echo "        an instruction to record findings and stop. touch /tmp/cc-guard-off to lift."
+  echo "        an instruction to record findings and stop. touch /tmp/cc-guard-off to lift"
+  echo "        it yourself; the model is refused if it tries."
 else
   echo "guard:  off. Unbounded reads and window overruns are permitted; a single task can"
   echo "        fill the window, and nothing here compacts by itself."
@@ -643,7 +652,7 @@ if (( GUARD )); then
   fi
   GUARD_CMD="$GUARD_SCRIPT --window $CTX_TOKENS --framing $CTX_RESERVE"
   GUARD_CMD="$GUARD_CMD --stop-pct ${CLAUDE_GEMMA_STOP_PCT:-80}"
-  PRE_TOOL+=("{ \"matcher\": \"Read|Bash|WebFetch|WebSearch\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$GUARD_CMD\" } ] }")
+  PRE_TOOL+=("{ \"matcher\": \"Read|Bash|WebFetch|WebSearch|Write|Edit|MultiEdit\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$GUARD_CMD\" } ] }")
 fi
 
 # The depth gate and the contract that makes it fair. Registering the gate without the contract
@@ -680,7 +689,7 @@ if (( FLOWS )); then
   PRE_TOOL+=("{ \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] }")
   # And afterwards, because a launch this hook permits can still be refused by the client -- which
   # left the flow holding a stage that never existed, and refusing every retry as a duplicate.
-  HOOK_EVENTS+=("\"PostToolUse\": [ { \"matcher\": \"Task|Agent\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] } ]")
+  HOOK_EVENTS+=("\"PostToolUse\": [ { \"matcher\": \"Task|Agent|TaskList|TaskOutput\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] } ]")
 fi
 
 # One PreToolUse key holding every matcher. Two keys of the same name in the same object is not two

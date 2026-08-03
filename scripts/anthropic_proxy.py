@@ -50,8 +50,17 @@ import uuid
 from typing import Any, Iterator
 
 DEFAULT_UPSTREAM = "http://127.0.0.1:8080/v1/chat/completions"
-STOP_REASON = {"stop": "end_turn", "length": "max_tokens", "tool_calls": "tool_use",
+# `length` is deliberately not mapped to `max_tokens`. Handed that, Claude Code ends the session
+# with "Claude's response exceeded the 32000 output token maximum" and there is no way back: the
+# flow it was in the middle of is simply over. A cut answer is a turn like any other, so it is
+# reported as one, with a note in place of the truncated tail.
+STOP_REASON = {"stop": "end_turn", "length": "end_turn", "tool_calls": "tool_use",
                "function_call": "tool_use", "content_filter": "end_turn"}
+
+CUT_NOTE = ("\n\n[This answer was cut off at %d tokens by the proxy, so what is above is "
+            "incomplete and any tool call it was about to make was dropped. Do not repeat it from "
+            "the start: write the short version now -- for a ledger, the CLAIM/EVIDENCE/QUOTE "
+            "blocks and nothing else.]")
 
 
 # --- request translation ---------------------------------------------------------------------
@@ -70,7 +79,11 @@ def _text_of(content: Any) -> str:
 # speculative acceptance looks like when the output has gone round in a circle. Nothing else bounds
 # it: the parent was blocked on the report, the gate only sees answers that finish, and the GPU was
 # busy the whole time. A ledger that needs more than this is not a ledger.
-MAX_OUTPUT = 8192
+# Raised from 8,192 after two live runs were cut mid-ledger: this model writes its reasoning into
+# the same budget, and a ten-claim ledger with quotes ran past it twice. Still far under the client's
+# 32,000, which is the number that matters -- a cut answer is recoverable, but only because the cut
+# is reported as an ordinary turn rather than as the max_tokens stop that ends a session.
+MAX_OUTPUT = 16384
 
 
 def to_openai(body: dict, ceiling: int = 0) -> dict:
@@ -154,6 +167,10 @@ def to_openai(body: dict, ceiling: int = 0) -> dict:
 
 # --- response translation --------------------------------------------------------------------
 
+def usage_of(reply: dict) -> dict:
+    return reply.get("usage") or {}
+
+
 def to_anthropic(reply: dict, model: str) -> dict:
     """A non-streamed OpenAI completion as an Anthropic message."""
     choice = (reply.get("choices") or [{}])[0]
@@ -168,14 +185,24 @@ def to_anthropic(reply: dict, model: str) -> dict:
         blocks.append({"type": "thinking", "thinking": thinking})
     if message.get("content"):
         blocks.append({"type": "text", "text": message["content"]})
+    cut = (choice.get("finish_reason") or "") == "length"
     for call in message.get("tool_calls") or []:
         fn = call.get("function") or {}
         try:
             args = json.loads(fn.get("arguments") or "{}")
         except ValueError:
+            # Unparseable because the answer was cut: a call in half is not a call. Passed through,
+            # the client answers "ReportFindings was called with input that could not be parsed as
+            # JSON" and the model sends the same oversized call again. Unparseable on a response
+            # that finished normally is a fact about the model and is still surfaced.
+            if cut:
+                continue
             args = {"_unparsed": fn.get("arguments", "")}
         blocks.append({"type": "tool_use", "id": call.get("id") or "toolu_%s" % uuid.uuid4().hex[:16],
                        "name": fn.get("name", ""), "input": args})
+    if cut:
+        blocks.append({"type": "text",
+                       "text": CUT_NOTE % (usage_of(reply).get("completion_tokens", 0))})
     usage = reply.get("usage") or {}
     return {
         "id": reply.get("id") or "msg_%s" % uuid.uuid4().hex[:24],
@@ -207,6 +234,7 @@ def stream_anthropic(chunks: Iterator[dict], model: str) -> Iterator[bytes]:
     index = -1
     open_kind: str | None = None
     tool_slot: dict[int, int] = {}          # upstream tool index -> our block index
+    pending: dict[int, dict] = {}           # upstream tool index -> the call being assembled
     finish, usage = "stop", {}
 
     def close() -> Iterator[bytes]:
@@ -248,25 +276,53 @@ def stream_anthropic(chunks: Iterator[dict], model: str) -> Iterator[bytes]:
         for call in delta.get("tool_calls") or []:
             slot = call.get("index", 0)
             fn = call.get("function") or {}
-            if slot not in tool_slot:
-                yield from close()
-                index += 1
-                open_kind = "tool"
-                tool_slot[slot] = index
-                yield _sse("content_block_start", {
-                    "type": "content_block_start", "index": index,
-                    "content_block": {"type": "tool_use",
-                                      "id": call.get("id") or "toolu_%s" % uuid.uuid4().hex[:16],
-                                      "name": fn.get("name", ""), "input": {}}})
-            if fn.get("arguments"):
-                yield _sse("content_block_delta", {
-                    "type": "content_block_delta", "index": tool_slot[slot],
-                    "delta": {"type": "input_json_delta", "partial_json": fn["arguments"]}})
+            held = pending.setdefault(slot, {"id": "", "name": "", "args": ""})
+            held["id"] = held["id"] or call.get("id") or "toolu_%s" % uuid.uuid4().hex[:16]
+            held["name"] = held["name"] or fn.get("name", "")
+            held["args"] += fn.get("arguments") or ""
 
     yield from close()
+
+    # Held back rather than streamed, so that a call the answer was cut in the middle of can be
+    # dropped instead of arriving as half a JSON object. Streamed straight through, one became
+    # `ReportFindings was called with input that could not be parsed as JSON` and the model sent the
+    # same oversized call again. The client concatenates argument fragments without parsing them, so
+    # one delta carrying the whole string is as good as many carrying pieces.
+    dropped = False
+    for slot in sorted(pending):
+        held = pending[slot]
+        try:
+            json.loads(held["args"] or "{}")
+        except ValueError:
+            dropped = True
+            continue
+        index += 1
+        tool_slot[slot] = index
+        yield _sse("content_block_start", {
+            "type": "content_block_start", "index": index,
+            "content_block": {"type": "tool_use", "id": held["id"],
+                              "name": held["name"], "input": {}}})
+        if held["args"]:
+            yield _sse("content_block_delta", {
+                "type": "content_block_delta", "index": index,
+                "delta": {"type": "input_json_delta", "partial_json": held["args"]}})
+        yield _sse("content_block_stop", {"type": "content_block_stop", "index": index})
+
+    if finish == "length" or dropped:
+        index += 1
+        yield _sse("content_block_start", {"type": "content_block_start", "index": index,
+                                           "content_block": {"type": "text", "text": ""}})
+        yield _sse("content_block_delta", {
+            "type": "content_block_delta", "index": index,
+            "delta": {"type": "text_delta",
+                      "text": CUT_NOTE % usage.get("completion_tokens", 0)}})
+        yield _sse("content_block_stop", {"type": "content_block_stop", "index": index})
+
+    settled = STOP_REASON.get(finish, "end_turn")
+    if tool_slot and settled == "end_turn" and not dropped:
+        settled = "tool_use"        # a complete call still has to be run, cut answer or not
     yield _sse("message_delta", {"type": "message_delta",
-                                 "delta": {"stop_reason": STOP_REASON.get(finish, "end_turn"),
-                                           "stop_sequence": None},
+                                 "delta": {"stop_reason": settled, "stop_sequence": None},
                                  "usage": {"output_tokens": usage.get("completion_tokens", 0)}})
     yield _sse("message_stop", {"type": "message_stop"})
 

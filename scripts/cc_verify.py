@@ -41,6 +41,9 @@ PASS = "pass"
 INDENT_DRIFT = "indent-drift"
 RETOUCHED = "retouched"
 REWRAPPED = "rewrapped"
+CLIPPED = "clipped"
+PARTIAL = "partial"
+ESCAPED = "escaped"
 WRONG_LINES = "wrong-lines"
 FAIL = "fail"
 UNVERIFIED = "unverified"
@@ -60,7 +63,22 @@ UNVERIFIED = "unverified"
 # refused because one line's indent differs from its neighbours', which in Python can change what
 # the code means -- here the whole range is compared as a single run of text, so there is no line
 # whose indent could be quietly wrong.
-ACCEPTABLE = {PASS, INDENT_DRIFT, REWRAPPED}
+# CLIPPED is accepted because the text is in the file and the reader can find it. It is what
+# quoting a wrapped string literal looks like: a stage quoting the deny message wrote `Do not sleep
+# for %ds. Run the command in the foreground ...` for a line that begins `deny("Do not sleep for`,
+# and three claims that had read the right lines were failed with "quote not present in", the
+# verdict kept for fabrication. Each quoted line must still sit inside the file's line at the same
+# place in the run, so a fragment cannot drift to somewhere else in the file.
+# PARTIAL is accepted because the quote is inside the range the claim named. A stage cited
+# `cc-context-guard.py:174-207` -- the rule and the function it calls -- and quoted the handful of
+# lines its claim turned on, which is the sane way to cite a block. Judged as though the quote had
+# to be the whole range, it came back as "wrong-lines, text is near line 144", a number in
+# blank-stripped coordinates that names nothing in the file.
+# ESCAPED is accepted because the difference is in the quoting, not in the code. A stage gave its
+# quotes as JSON strings -- the only unambiguous way to write a regex containing newlines -- and
+# wrote `(\w+)\'?` for the file's `(\w+)'?`, one backslash it added while escaping. Six correct
+# citations out of eighteen were failed as "quote not present in", over that character.
+ACCEPTABLE = {PASS, INDENT_DRIFT, REWRAPPED, CLIPPED, PARTIAL, ESCAPED}
 
 
 @dataclass
@@ -297,15 +315,83 @@ def file_quote(root: str, path: str, start: int, end: int, quote: str) -> Verdic
         return Verdict(REWRAPPED, "%s:%d-%d, quote rewrapped onto %d line%s"
                        % (path, start, end, len(quoted), "" if len(quoted) == 1 else "s"))
 
-    # Right text, wrong address: worth distinguishing, because it means the model read the file and
-    # mis-remembered where, rather than inventing the content.
-    haystack = _significant("\n".join(lines))
+    # Each quoted line inside the file's line at the same position in the run: a quote clipped out
+    # of wrapped source, most often a string literal without the `deny("` that opens it. Short
+    # fragments are not taken this way -- `allow()` appears in this file eleven times and would
+    # vouch for anything.
+    if (len(cited) == len(quoted) and len("".join(quoted)) >= 20
+            and all(q.strip() and q.strip() in c for c, q in zip(cited, quoted))):
+        return Verdict(CLIPPED, "%s:%d-%d, quoted without the line's opening text"
+                       % (path, start, end))
+
+    if _unslashed_quotes(cited) == _unslashed_quotes(quoted):
+        return Verdict(ESCAPED, "%s:%d-%d, apostrophes escaped in the quote" % (path, start, end))
+
+    # Part of the range, quoted: a claim about a block cites the block and quotes what it turns on.
     needle = _dedented(quoted)
+    for i in range(len(cited) - len(needle) + 1):
+        if _dedented(cited[i:i + len(needle)]) == needle:
+            return Verdict(PARTIAL, "%s:%d-%d, quoted part of the range" % (path, start, end))
+
+    # Right text, wrong address: worth distinguishing, because it means the model read the file and
+    # mis-remembered where, rather than inventing the content. The line reported is the file's own,
+    # found by the same search that locates a quote carrying no line numbers at all.
+    where = locate(root, path, quote)
+    if where:
+        return Verdict(WRONG_LINES, "cited %s:%d-%d, text is at line %d"
+                       % (path, start, end, where[0]))
+    return Verdict(FAIL, "quote not present in %s" % path)
+
+
+def locate(root: str, path: str, quote: str) -> tuple[int, int] | None:
+    """Where in `path` the quoted text sits, if it sits there at all.
+
+    A stage wrote ten findings as `EVIDENCE: <path>` and a run of QUOTE lines, with no line numbers
+    anywhere, and every quote was verbatim. Line numbers are how a reader finds the text; the text
+    being in the file is the thing that makes the claim true, and it can be established without
+    them. Refusing this shape sent a correct ledger round again to add addresses.
+    """
+    full = os.path.join(root, path)
+    if not os.path.isfile(full):
+        return None
+    try:
+        lines = open(full, encoding="utf-8", errors="replace").read().split("\n")
+    except OSError:
+        return None
+    # Real line numbers, so blank lines have to be carried through the match rather than dropped:
+    # the first version searched the blank-stripped text and reported the offset in it, which read
+    # as "cited line 167, text is near line 167" on a quote that was exactly where it said.
+    kept = [(n, line.rstrip()) for n, line in enumerate(lines, 1) if line.strip()]
+    haystack = [text for _, text in kept]
+    needle = _dedented(_significant(quote))
+    if not needle or len(needle) > len(haystack):
+        return None
     for i in range(len(haystack) - len(needle) + 1):
         if _dedented(haystack[i:i + len(needle)]) == needle:
-            return Verdict(WRONG_LINES, "cited %s:%d-%d, text is near line %d"
-                           % (path, start, end, i + 1))
-    return Verdict(FAIL, "quote not present in %s" % path)
+            return kept[i][0], kept[i + len(needle) - 1][0]
+    if len("".join(needle)) < 20:
+        return None
+    for i in range(len(haystack) - len(needle) + 1):
+        window = haystack[i:i + len(needle)]
+        if all(q.strip() and q.strip() in c for c, q in zip(window, needle)):
+            return kept[i][0], kept[i + len(needle) - 1][0]
+    return None
+
+
+_PATHISH = re.compile(r"[\w./~-]+\.[A-Za-z0-9_]+")
+
+
+def path_named(root: str, raw: str) -> str | None:
+    """The first token in `raw` that is the name of a file which exists."""
+    for token in _PATHISH.findall(DECORATION.sub("", raw or "")):
+        if os.path.isfile(os.path.join(root, token)):
+            return token
+    return None
+
+
+def _unslashed_quotes(lines: list[str]) -> list[str]:
+    """The same lines with a backslash before an apostrophe dropped, on both sides of a comparison."""
+    return [re.sub(r"\\+'", "'", line) for line in lines]
 
 
 def _flat(lines: list[str]) -> str:
@@ -425,7 +511,15 @@ LINES_PATH = re.compile(r"lines?\s+(?P<ranges>\d{1,6}(?:\s*[-\u2013]\s*\d{1,6})?
 # own line instead of under a QUOTE header. Only text in quotes or backticks is taken this way; the
 # prose a claim ends with is not evidence and must not be compared against the file as though it
 # were, which would turn "no citation" into "quote not present" and read as fabrication.
-_INLINE_QUOTE = re.compile(r"^\s*[:,-]?\s*(?P<q>[\"'`])(?P<text>.+)(?P=q)\s*$", re.S)
+# The trailing full stop is allowed because a stage writes its citation as a sentence: `lines
+# 221-222: `ap.add_argument("--max-sleep", type=int, default=30, ...)`.` -- one backticked span and
+# a period, refused for the period as "incomplete file_quote" on a claim that had quoted the line.
+# The text may not contain its own delimiter. Greedy, it ran from the first backtick to the last one
+# on the line and swallowed the prose between them, so a claim that had cited two spans and
+# described them was told its quote was "not present in" the file -- which reads as an accusation of
+# fabrication, on the one shape of citation that is merely incomplete.
+_INLINE_QUOTE = re.compile(r"^\s*[:,-]?\s*(?P<q>[\"'`])(?P<text>(?:(?!(?P=q)).)+)(?P=q)"
+                           r"\s*[.;]?\s*$", re.S)
 
 
 def _inline_quote(body: str, path: str, ranges: str) -> str | None:
@@ -533,6 +627,147 @@ def _elided(body: str) -> list[str]:
     return [p for p in pieces if p.strip()]
 
 
+_MARKED = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?P<name>%s)\s*(?:\([^)]*\))?\s*:(?P<body>.*)$"
+                     % "|".join(h.rstrip(":") for h in HEADERS))
+_EMPHASIS = re.compile(r"(\*\*|__|\*|_)")
+# `**Finding 1: the rule is broader than its intent.**` -- what a review stage calls a claim when
+# nobody has told it the word. A seven-finding report with a path and a line range under every one
+# parsed as nought claims because of this word, and was refused for stating none.
+_SYNONYM = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?:finding|issue|claim)\s*#?\s*\d*\s*:", re.I)
+
+
+def _starts_with_citation(line: str) -> bool:
+    """Does this line open on a citation, rather than merely mention a path somewhere in prose?"""
+    bare = DECORATION.sub("", line).strip().lstrip("'\"- ")
+    return bool(PATH_LINES.match(bare) or LINES_PATH.match(bare) or FILE_EV_ANY.match(bare))
+
+
+def normalise(text: str) -> str:
+    """Undo the markdown a model puts on its headers, before the ledger is read line by line.
+
+    A claims stage verified eight findings by running the guard and reporting what it printed, and
+    the parser scored the answer nought claims, nought unknowns -- because every header arrived as
+    `**CLAIM: the boundary is strict at 30 seconds.** `sleep 30` ... returned "allow"`. Bold is
+    decoration, and the refusal it earned ("no claims were stated") described the one thing the
+    stage had not done wrong.
+
+    Two things happen here. The emphasis and bullet marks in front of a header are dropped, and a
+    header emphasised inline is split at its closing mark, so the sentence after it is read as what
+    it is rather than swallowed into the claim. If that remainder carries a citation it becomes an
+    EVIDENCE line; prose that cites nothing is left alone, because inventing evidence for a claim
+    is worse than reporting that it has none.
+    """
+    out: list[str] = []
+    claimed = False                 # the last header emitted was a CLAIM, so a citation is its own
+    for line in text.split("\n"):
+        synonym = _SYNONYM.match(line)
+        if synonym and not HEADER_RE.match(line):
+            line = "%sCLAIM:%s" % (synonym.group("lead"), line[synonym.end():])
+        seen = _MARKED.match(line)
+        if not seen or not seen.group("lead").strip(" 	>#-"):
+            # A citation on the line under a CLAIM, with no EVIDENCE header in front of it: the
+            # shape every stage here writes when it has not been given the schema twice. It is a
+            # citation either way, and dropping it reports a cited finding as citing nothing.
+            if claimed and line.strip() and _starts_with_citation(line):
+                out.append("EVIDENCE: %s" % line.strip())
+                claimed = False
+            else:
+                out.append(line)
+                claimed = claimed and not line.strip()
+            continue
+        mark = _EMPHASIS.search(seen.group("lead"))
+        body, extra = seen.group("body"), ""
+        if mark:
+            closing = body.find(mark.group(1))
+            if closing != -1:
+                body, extra = body[:closing], body[closing + len(mark.group(1)):]
+        out.append("%s: %s" % (seen.group("name"), body.strip()))
+        claimed = seen.group("name") == "CLAIM"
+        if extra.strip() and _classify_all(extra.strip()):
+            out.append("EVIDENCE: %s" % extra.strip())
+            claimed = False
+    return "\n".join(out)
+
+
+# `QUOTE: scripts/guard.py, lines 231-232: "    if OFF.exists():\n        allow()"` -- the citation
+# on the QUOTE line and the text as a JSON string. Eighteen claims arrived in this shape, every one
+# of them accurate, and all eighteen were judged as citing nothing: the EVIDENCE line above them
+# described where in prose, so the only address in the block was the one inside the quote.
+_LEADING_CITE = re.compile(r'^(?P<cite>[^"\']{0,240}?)\s*(?P<q>["\'])')
+# `\'` is not an escape in JSON, and a model writing a quote full of regexes produces it. The decode
+# then fails and the quote keeps the stray backslash, so an eleven-line citation that was correct to
+# the character came back as "quote not present in" -- over one character it had added, not moved.
+_BAD_ESCAPE = re.compile(r"(?<!\\)\\'")
+
+
+def _quote_carrying_citation(body: str) -> tuple[list[dict], str]:
+    """Split a QUOTE body into the citation it opens with and the quoted text after it.
+
+    The text is decoded as a JSON string when it is one, which is the only way to tell the newline
+    the model meant as a line break from the `\\n` inside a regex it quoted. Guessing between them
+    corrupts either the layout or the code.
+    """
+    seen = _LEADING_CITE.match(body)
+    if not seen:
+        return [], body
+    found = _classify_all(seen.group("cite"))
+    if not found:
+        return [], body
+    rest = body[seen.start("q"):]
+    if rest.startswith('"'):
+        for candidate in (rest, _BAD_ESCAPE.sub("'", rest)):
+            try:
+                text, _ = json.JSONDecoder().raw_decode(candidate)
+                return found, text
+            except ValueError:
+                continue
+    span = _first_span(rest)
+    if span is None:
+        return found, rest
+    # Single-quoted, which JSON has no opinion about: the same string, escaped the way Python would
+    # write it. Left as it arrived, `\n` stays two characters and the quote is one long line that
+    # matches nothing.
+    return found, _unescaped(span)
+
+
+def _first_span(text: str) -> str | None:
+    """The first quoted run in `text`, honouring backslash escapes, ignoring whatever follows it.
+
+    Not anchored to the end of the line, because a citation is often followed by the point it is
+    making: `... % max(naps))' -- no off-switch reference.` The prose after the closing quote is
+    commentary, and taking it as part of the quote fails the comparison against the file.
+    """
+    if not text or text[0] not in "\"'":
+        return None
+    delim, i = text[0], 1
+    out: list[str] = []
+    while i < len(text):
+        if text[i] == "\\" and i + 1 < len(text):
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        if text[i] == delim:
+            return "".join(out)
+        out.append(text[i])
+        i += 1
+    return None
+
+
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "'": "'", "\\": "\\"}
+
+
+def _unescaped(text: str) -> str:
+    out, i = [], 0
+    while i < len(text):
+        if text[i] == "\\" and i + 1 < len(text) and text[i + 1] in _ESCAPES:
+            out.append(_ESCAPES[text[i + 1]])
+            i += 2
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
 def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
     """Split an answer into claims and declared unknowns.
 
@@ -540,6 +775,7 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
     header and quoted code contains blank lines, colons and anything else a regex would trip on.
     The rule is simply: a quote ends at the next line beginning with a known header, or at the end.
     """
+    text = normalise(text)
     claims: list[dict] = []
     current: dict | None = None
     evidence: dict | None = None
@@ -552,6 +788,16 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
             quote = None
             return
         body = "\n".join(quote).strip("\n")
+        carried, spoken = _quote_carrying_citation(body)
+        if carried and evidence is not None:
+            # The QUOTE line's own citation, whether or not the EVIDENCE line above it named one.
+            # Only filling this in when EVIDENCE named nothing left the address sitting inside the
+            # quoted text whenever a stage said where twice, so the comparison ran the citation
+            # against the file and reported the claim as unquoted.
+            for key, value in carried[0].items():
+                if key != "quote" and not evidence.get(key):
+                    evidence[key] = value
+            body = spoken
         pieces = _elided(body)
         if len(cited) > 1 and len(pieces) == len(cited):
             # One EVIDENCE line naming two ranges, quoted with an elision between them: the
@@ -589,6 +835,24 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
             # under. The earlier ones are still checked, on their line numbers alone.
             evidence = found[-1]
         elif header == "QUOTE:":
+            if evidence is None:
+                # A QUOTE with no EVIDENCE line above it. The citation it carries is the only
+                # address the claim has, and dropping the whole block on a missing header reports a
+                # cited claim as citing nothing.
+                evidence = {"kind": "file_quote"}
+                current["evidence"].append(evidence)
+                cited = [evidence]
+            elif evidence.get("quote"):
+                # A second QUOTE under the same EVIDENCE is a second piece of evidence, not a
+                # correction of the first. Overwriting kept only the last of ten quoted lines and
+                # judged the claim on it, which is how a ledger of verbatim quotes came back as one
+                # quote that did not match.
+                sibling = {k: v for k, v in evidence.items() if k != "quote"}
+                sibling.pop("start", None)
+                sibling.pop("end", None)
+                current["evidence"].append(sibling)
+                evidence = sibling
+                cited = [sibling]
             quote = []
             rest = line[seen.end():].strip()
             if rest:
@@ -610,6 +874,11 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
     for claim in claims:
         for piece in claim["evidence"]:
             if piece.get("kind") is not None or not root or not piece.get("quote"):
+                continue
+            named = path_named(root, piece.get("raw", ""))
+            if named and not BARE_LINES.search(piece.get("raw", "")):
+                # A path and a quote, no line numbers. Where it is gets worked out from the quote.
+                piece.update(kind="file_quote", path=named)
                 continue
             where = BARE_LINES.search(piece.get("raw", ""))
             if not where:

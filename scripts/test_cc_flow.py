@@ -562,3 +562,111 @@ def test_a_launch_the_client_refused_does_not_hold_the_stage() -> None:
         after = cc_flowstate.load("s1", root)
     assert cc_flowstate.running(after) == [], after
     assert cc_flowstate.next_stage(after) == "survey", after
+
+
+def _post(tool: str, response, root: str, session: str = "s1") -> None:
+    """Run the PostToolUse side of the flow guard, as the client would after a tool returned."""
+    payload = {"hook_event_name": "PostToolUse", "tool_name": tool, "cwd": root,
+               "session_id": session, "tool_response": response}
+    proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                          capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_a_stage_the_client_says_is_gone_stops_blocking_the_flow() -> None:
+    """A refusal reopens a stage, because a refused subagent usually goes round again. This one had
+    exited, so the parent was ordered to wait for it, asked TaskList, was told `No tasks found`, and
+    said so -- eleven times, until the nudge limit let the session go with nothing judged."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.record_verdict(state, "claims", ["cites nothing"], "a1")
+        cc_flowstate.save(state, "s1", root)
+        assert cc_flowstate.running(cc_flowstate.load("s1", root)) == ["claims"]
+
+        _post("TaskList", "No tasks found", root)
+        assert not cc_flowstate.running(cc_flowstate.load("s1", root))
+
+
+def test_a_stage_still_working_is_not_forgotten() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.save(state, "s1", root)
+        _post("TaskOutput", "<status>running</status><output>reading</output>", root)
+        assert cc_flowstate.running(cc_flowstate.load("s1", root)) == ["claims"]
+
+
+def test_a_stage_refused_three_times_stops_being_asked() -> None:
+    """Without a cap, claims was refused, relaunched and refused again until the nudge limit ended
+    the session with nothing judged. Three rounds is the budget; after that the flow moves on."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey", "a0")
+        cc_flowstate.record_verdict(state, "survey", [], "a0")
+        for _ in range(3):
+            cc_flowstate.record_launch(state, "claims", "a1")
+            cc_flowstate.record_verdict(state, "claims", ["cites nothing"], "a1")
+        assert cc_flowstate.exhausted(state, "claims")
+        assert cc_flowstate.next_stage(state) == "adversary", cc_flowstate.summary(state)
+
+
+def test_a_blocking_stage_nobody_can_satisfy_ends_the_flow() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("change", "t", "s1", root)
+        first = cc_flowstate.next_stage(state)
+        for _ in range(3):
+            cc_flowstate.record_launch(state, first, "a1")
+            cc_flowstate.record_verdict(state, first, ["no plan"], "a1")
+        assert cc_flowstate.next_stage(state) is None, cc_flowstate.summary(state)
+
+
+def test_a_session_that_keeps_working_around_the_guard_gets_the_short_version() -> None:
+    """A session read the long refusal as a puzzle and spent six turns on grep, python3 -c, a
+    heredoc and a temp script, filling its window with identical refusals. Explanation was what it
+    was arguing with, so past three attempts it is not offered."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.save(state, "s1", root)
+        said = ""
+        for _ in range(5):
+            decision, said, _ = run("", root, tool="Read")
+            assert decision == "deny", said
+        assert said.startswith("Refused."), said
+        assert "sandbox" not in said, said
+
+
+def test_the_wiring_routes_the_tools_the_hooks_have_rules_about() -> None:
+    """Two fixes were dead for a run each because the matchers did not send them the tool. The flow
+    guard reads TaskList and TaskOutput to notice a stage that has exited; the context guard refuses
+    a ledger written with Write. Both were matched on other tools only."""
+    root = Path(__file__).resolve().parent
+    for name in ("flow_smoke.sh", "claude-gemma.sh"):
+        text = (root / name).read_text()
+        pre = [line for line in text.split("\n") if "matcher" in line and "Read|Bash" in line]
+        post = [line for line in text.split("\n") if "matcher" in line and "Task|Agent" in line]
+        assert pre and "Write" in pre[0], "%s: the context guard never sees a Write" % name
+        assert post and "TaskList" in post[0], "%s: the flow guard never sees a TaskList" % name
+
+
+def test_a_reopened_round_that_never_starts_is_given_up_on_quickly() -> None:
+    """A refusal reopens the stage in case the subagent goes round again. Headless it exits instead,
+    and the flow then held the stage open for ten minutes with nothing behind it while the parent was
+    ordered to wait for a task the client had already forgotten."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.record_verdict(state, "claims", ["cites nothing"], "a1")
+        reopened = state["stages"][-1]
+        assert reopened.get("reopened")
+        reopened["launched"] = time.time() - (cc_flowstate.REOPENED_STALE + 1)
+        assert cc_flowstate.forget_running(state) == ["claims"], state["stages"]
+
+        # One that did start again is left alone: it is working, not gone.
+        state = cc_flowstate.begin("review", "t", "s2", root)
+        cc_flowstate.record_launch(state, "claims", "a2")
+        cc_flowstate.record_verdict(state, "claims", ["cites nothing"], "a2")
+        again = state["stages"][-1]
+        again["launched"] = time.time() - (cc_flowstate.REOPENED_STALE + 1)
+        again["calls"], again["active"] = 3, time.time()
+        assert cc_flowstate.forget_running(state) == [], state["stages"]

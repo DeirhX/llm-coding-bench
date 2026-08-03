@@ -166,17 +166,56 @@ def main():
             ("sleep 180 && tail -20 /tmp/task.log", "deny", "a long sleep is refused"),
             ("sleep 2 && pytest -q", "allow", "a short sleep is fine"),
             ("pytest -q --timeout 300", "allow", "a big number that is not a sleep"),
+            # A stage reviewing this rule was denied three times for writing `sleep 180` as data.
+            ("""python3 -c "print('sleep 180')" """, "allow", "a sleep inside a quoted string"),
+            ("cat > /tmp/x.py << 'EOF'\ncheck('sleep 180')\nEOF", "allow", "a sleep in a heredoc"),
+            ("(cd /tmp && sleep 90)", "deny", "a sleep in a subshell still counts"),
+            ("pytest -q; sleep 120", "deny", "a sleep after a semicolon still counts"),
     ):
         got, said = run("Bash", {"command": command}, empty)
         ok = got == expected
         failures += not ok
         print(f"  {'ok  ' if ok else 'FAIL'}  {label:<42} expected {expected:<5} got {got}")
 
+    # A claims stage wrote its whole ledger to claims.jsonl and summarised it in prose, so the gate
+    # judged four cited findings as citing nothing.
+    ledger = "CLAIM: the rule is broader than its intent\nEVIDENCE: file_quote\nQUOTE: x\n"
+    got, said = run("Write", {"file_path": "/tmp/guard_test/claims.jsonl", "content": ledger}, empty)
+    ok = got == "deny" and "message you finish with" in said
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'a ledger written to a file is refused':<42} "
+          f"expected deny  got {got}")
+
+    # ...but the repo's own sources quote those headers, and an implement stage must be able to edit
+    # them.
+    source = '"""The contract."""\n\nCLAIMS = "CLAIM: ...\\nEVIDENCE: ...")\n'
+    got, said = run("Write", {"file_path": "/tmp/guard_test/cc_ledger.py", "content": source}, empty)
+    ok = got == "allow"
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'source that quotes the headers is fine':<42} "
+          f"expected allow got {got}")
+
     got, said = run("Write", {"file_path": str(small)}, empty, ("--deny", "Write,Edit"))
     ok = got == "deny" and "judging" in said
     failures += not ok
     print(f"  {'ok  ' if ok else 'FAIL'}  {'a judging stage may not write':<42} "
           f"expected deny  got {got}")
+
+    # A parent read a 231,800-byte subagent transcript in 67 lines: roughly 58,000 tokens, waved
+    # through by a rule that counts lines.
+    fat = TMP / "transcript.jsonl"
+    fat.write_text("\n".join('{"role":"assistant","text":"%s"}' % ("x" * 4000) for _ in range(40)))
+    got, said = run("Read", {"file_path": str(fat)}, empty)
+    ok = got == "deny" and "bytes" in said
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'a few enormous lines are refused':<42} "
+          f"expected deny  got {got}")
+
+    got, _ = run("Read", {"file_path": str(fat), "offset": 1, "limit": 20}, empty)
+    ok = got == "allow"
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'a slice of it is allowed':<42} "
+          f"expected allow got {got}")
 
     OFF.touch()
     got, _ = run("Read", {"file_path": str(big)}, empty)
@@ -193,3 +232,30 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_the_model_may_not_turn_the_guard_off():
+    """A survey stage ran `touch /tmp/cc-guard-off`, described it as "Temporarily disable guard for
+    reading", and left it there. Every stage after it, and every session started afterwards, ran
+    unguarded. The switch belongs to whoever is at the keyboard."""
+    big, _ = setup()
+    for command in ("touch /tmp/cc-guard-off",
+                    "touch /tmp/cc-depth-off && echo done",
+                    "python3 -c \"open('/tmp/cc-guard-off','w')\"",
+                    "echo x > /tmp/cc-guard-off",
+                    "rm -f /tmp/cc-guard-off"):
+        decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision == "deny", command
+    decision, _ = run("Write", {"file_path": "/tmp/cc-guard-off", "content": ""},
+                      TMP / "none.jsonl")
+    assert decision == "deny"
+
+
+def test_reading_about_the_off_switch_is_not_tampering():
+    """A review of this guard has to be able to grep for the thing it is reviewing."""
+    setup()
+    for command in ("grep -rn cc-guard-off scripts/",
+                    "ls -l /tmp/cc-guard-off",
+                    "rg OFF_SWITCH scripts/cc-context-guard.py"):
+        decision, why = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision == "allow", (command, why)

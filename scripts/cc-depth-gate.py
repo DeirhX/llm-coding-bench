@@ -170,8 +170,13 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
         label = "claim %d (%s)" % (i, claim.claim[:70])
         if not claim.evidence:
             claim.verdict = "no-evidence"
-            gaps.append("%s cites nothing. Quote the lines it rests on, or move it to UNKNOWN."
-                        % label)
+            # Seven claims came back established by actually running the guard and reporting what
+            # it printed, and every one was told to "quote the lines it rests on" -- advice that
+            # fits a claim about what the code says and not one about what it does. Both admissible
+            # forms are named, or the stage is being asked to fake the wrong one.
+            gaps.append("%s cites nothing. Quote the lines it rests on under a QUOTE header, or if "
+                        "you established it by running something, write EVIDENCE: command: <the "
+                        "command> -> <text it printed>. Otherwise move it to UNKNOWN." % label)
             report["verdicts"].append({"claim": claim.claim, "verdict": claim.verdict})
             continue
 
@@ -217,7 +222,20 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
                             "the severity."
                             % (label, "" if probes else " -- no command was run at all"))
 
-    if not claims:
+    # Length is what separates the two failures. A stage that stopped mid-thought writes one line
+    # about what it is going to do next; a stage that answered in the wrong shape writes pages. The
+    # first version of this told a seven-finding report that its turn had ended before it answered.
+    if not claims and len(answer.strip()) < 500 and not re.search(
+            r"(?m)^\W{0,4}(CLAIM|UNKNOWN)\b", answer):
+        # Not a formatting complaint: the turn ended before the ledger began. Every first round of
+        # every claims stage has finished on a sentence like "Now let me run the actual tests and
+        # verify each claim", and telling it that no claims were stated reads as a quarrel about
+        # blocks when what it needs to hear is that it stopped in the middle.
+        gaps.append("Your turn ended before you answered -- the last thing you wrote was a sentence "
+                    "about what you were going to do next. Write the ledger now: the findings you "
+                    "have, each as a CLAIM with its EVIDENCE and QUOTE, and an UNKNOWN for whatever "
+                    "you did not get to.")
+    elif not claims:
         gaps.append("No claims were stated. Write each finding as a CLAIM/EVIDENCE/QUOTE block, or "
                     "state UNKNOWN for what you could not establish.")
 
@@ -486,8 +504,21 @@ def _is_probe(command: str | None) -> bool:
 
 def _check(ev, root: str, calls: list):
     if ev.kind == cc_ledger.FILE_QUOTE:
+        if ev.path and ev.quote and not ev.start:
+            # A quote with no line numbers: find it. The lines are set on the evidence so that the
+            # coverage check downstream still has an address to work with.
+            where = cc_verify.locate(root, ev.path, ev.quote)
+            if where is None:
+                return cc_verify.Verdict(cc_verify.FAIL, "quote not present in %s" % ev.path)
+            ev.start, ev.end = where
         if not (ev.path and ev.start and ev.quote):
-            return cc_verify.Verdict(cc_verify.UNVERIFIED, "incomplete file_quote")
+            # "incomplete file_quote" told seven cited findings nothing they could act on. What is
+            # missing is almost always the quote: the stage named the file and the lines and then
+            # described them, which is the habit the quote exists to break.
+            missing = ("the lines themselves -- paste them under a QUOTE header, exactly as they "
+                       "appear, instead of describing them" if ev.path and ev.start
+                       else "a file and a line range")
+            return cc_verify.Verdict(cc_verify.UNVERIFIED, "this citation is missing " + missing)
         return cc_verify.file_quote(root, ev.path, ev.start, ev.end or ev.start, ev.quote)
     if ev.kind == cc_ledger.COMMAND_RESULT:
         return cc_verify.command_result(calls, ev.command or "", ev.expect or "")
@@ -503,10 +534,13 @@ def refusal(gaps: list[str], claims_path: Path) -> str:
     head = ("This answer is not accepted yet. %d thing(s) below are asserted without evidence that "
             "holds up. Fix them and finish; you will not be asked twice." % len(gaps))
     body = "\n".join("%d. %s" % (i, g) for i, g in enumerate(gaps, 1))
+    # The tail used to offer claims.jsonl as an alternative home for the ledger, which is why a
+    # stage put it there and summarised it in prose: the file is read only by the scripted driver,
+    # and in a flow the next stage sees nothing but the message.
     tail = ("\nRe-read what you cite before quoting it -- quoting from memory is what produced "
-            "half of these. Record the corrected findings in your reply as CLAIM/EVIDENCE/QUOTE "
-            "blocks%s. Anything you cannot establish goes to UNKNOWN, which costs you nothing."
-            % (", or in %s" % claims_path if claims_path.parent.is_dir() else ""))
+            "half of these. Record the corrected findings in the message you finish with, as "
+            "CLAIM/EVIDENCE/QUOTE blocks, in full. Anything you cannot establish goes to UNKNOWN, "
+            "which costs you nothing.")
     return "%s\n\n%s\n%s" % (head, body, tail)
 
 
@@ -638,6 +672,23 @@ def main() -> int:
                 "set to true and a timeout of several minutes -- that is how you wait; saying you "
                 "will wait and then stopping is not. It has not failed and it is not stuck."
                 % ", ".join(in_flight))
+        given_up = [st.name for st in cc_flow.flow_for(state["flow"]) or []
+                    if cc_flowstate.exhausted(state, st.name)
+                    and st.name not in cc_flowstate.done(state)]
+        if not left and given_up and not state.get("disclosed"):
+            # A flow that gave up on a stage still produces an answer, and without this the answer
+            # reads like any other: three refused rounds of claims are invisible to whoever asked
+            # for the review. The gaps are the most useful thing the flow learned, so they are made
+            # part of the reply rather than left in a state file nobody opens.
+            state["disclosed"] = True
+            cc_flowstate.save(state, session, root)
+            gaps = [g for e in cc_flowstate.refused(state) for g in e.get("gaps", [])]
+            return block(
+                "The %s stage was refused %d times and the flow has given up on it, so your answer "
+                "must say so rather than reading like a finished review. Say which stage it was, "
+                "and state plainly what was never established: %s. Then finish."
+                % (", ".join(given_up), cc_flowstate.ROUND_CAP,
+                   " | ".join(g[:160] for g in gaps[:6]) or "nothing was recorded"))
         if left and nudges < NUDGE_LIMIT:
             done = cc_flowstate.done(state)
             state["nudges"] = nudges + 1

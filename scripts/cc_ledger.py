@@ -363,6 +363,14 @@ def contract_markdown(contract: Contract) -> str:
     if wanted:
         lines += ["", "This task also needs evidence of these kinds, one per EVIDENCE line:"]
         lines += wanted
+    elif COMMAND_RESULT not in contract.required_evidence:
+        # A stage established seven findings by running the guard and reporting what it printed,
+        # and had no admissible way to say so: the command form was shown only to adapters that
+        # require it. A claim about what the code does is checked against the commands this session
+        # actually ran, which is evidence, so the form is always offered.
+        lines += ["", "A claim about what the code does, rather than what it says, may cite the run "
+                  "instead: " + extra[COMMAND_RESULT][0] + " -- checked against the commands you "
+                  "actually ran in this session."]
     if contract.min_probes:
         lines.append("")
         lines.append("You must actually run at least %d command(s); describing one does not count."

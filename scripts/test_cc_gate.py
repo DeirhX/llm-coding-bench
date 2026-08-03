@@ -644,3 +644,30 @@ def test_the_contract_shows_a_filled_in_block_not_only_a_schema() -> None:
     text = cc_ledger.contract_markdown(cc_ledger.contract_for("review"))
     assert "EVIDENCE: scripts/cc-context-guard.py:213-213" in text, text
     assert "carries a colon before its line numbers" in text, text
+
+
+def test_a_turn_that_stopped_before_answering_is_told_that() -> None:
+    """Every first round of a claims stage has ended on a sentence like "Now let me run the actual
+    tests and verify each claim". Telling it no claims were stated reads as a quarrel about blocks
+    when what it needs to hear is that it stopped in the middle."""
+    gaps, _ = _load_gate().evaluate(cc_ledger.contract_for("review"), [], [], [], ".",
+                            check_coverage=False,
+                            answer="Now let me run the actual tests and verify each claim.")
+    assert any("ended before you answered" in g for g in gaps), gaps
+
+
+def test_a_ledger_with_no_claims_is_still_told_about_blocks() -> None:
+    gaps, _ = _load_gate().evaluate(cc_ledger.contract_for("review"), [], [], [], ".",
+                            check_coverage=False, answer="CLAIM\nbut nothing parseable")
+    assert any("No claims were stated" in g for g in gaps), gaps
+
+
+def test_a_long_report_in_the_wrong_shape_is_not_told_it_stopped_early() -> None:
+    """A seven-finding report was told its turn had ended before it answered. It had answered; it
+    used the word Observation, and the complaint has to be about the shape, not about stopping."""
+    report = "\n\n".join("**Observation %d: something is true here.** I looked and saw it." % i
+                         for i in range(1, 9))
+    gaps, _ = _load_gate().evaluate(cc_ledger.contract_for("review"), [], [], [], ".",
+                                    check_coverage=False, answer=report)
+    assert any("No claims were stated" in g for g in gaps), gaps
+    assert not any("ended before you answered" in g for g in gaps), gaps

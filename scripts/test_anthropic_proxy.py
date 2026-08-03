@@ -141,10 +141,16 @@ def test_stream_grammar_opens_and_closes_every_block() -> None:
     events = [e.decode() for e in ap.stream_anthropic(iter(chunks), "m")]
     kinds = [line.split(": ", 1)[1] for e in events for line in e.split("\n")
              if line.startswith("event: ")]
+    # One delta for the tool arguments rather than two: the call is assembled and held until it is
+    # whole, so that a truncated one can be dropped rather than sent as half a JSON object.
     assert kinds == ["message_start", "content_block_start", "content_block_delta",
                      "content_block_delta", "content_block_stop", "content_block_start",
-                     "content_block_delta", "content_block_delta", "content_block_stop",
+                     "content_block_delta", "content_block_stop",
                      "message_delta", "message_stop"], kinds
+    args = "".join(json.loads(line[6:])["delta"]["partial_json"]
+                   for e in events for line in e.split("\n")
+                   if line.startswith("data: ") and "input_json_delta" in line)
+    assert json.loads(args) == {"file": "a.py"}, args
     fragments = [json.loads(line[6:])["delta"]["partial_json"]
                  for e in events for line in e.split("\n")
                  if line.startswith("data: ") and '"input_json_delta"' in line]
@@ -194,10 +200,12 @@ def test_reasoning_becomes_a_thinking_block() -> None:
     Reading only `content` yields a blank answer, which is indistinguishable from a dead model --
     and is exactly what the first live smoke test produced.
     """
-    msg = ap.to_anthropic({"choices": [{"finish_reason": "length", "message": {
+    msg = ap.to_anthropic({"choices": [{"finish_reason": "stop", "message": {
         "content": "", "reasoning": "The user said banana."}}]}, "m")
     assert msg["content"] == [{"type": "thinking", "thinking": "The user said banana."}]
-    assert msg["stop_reason"] == "max_tokens"
+    # `length` used to be reported as max_tokens, which kills the session outright. See
+    # test_a_cut_answer_is_a_turn_and_not_the_end_of_the_session.
+    assert msg["stop_reason"] == "end_turn"
 
 
 def test_thinking_then_text_are_separate_streamed_blocks() -> None:
@@ -263,3 +271,39 @@ def test_a_modest_request_is_left_alone() -> None:
 def test_a_client_that_names_no_limit_still_gets_one() -> None:
     asked = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
     assert ap.to_openai(asked)["max_tokens"] == ap.MAX_OUTPUT
+
+
+def test_a_cut_answer_is_a_turn_and_not_the_end_of_the_session() -> None:
+    """Handed stop_reason max_tokens, Claude Code ends the session with "Claude's response exceeded
+    the 32000 output token maximum", mid-flow, with no way back. A cut answer is still a turn."""
+    msg = ap.to_anthropic({"choices": [{"finish_reason": "length", "message": {
+        "content": "CLAIM: the rule is"}}], "usage": {"completion_tokens": 8192}}, "m")
+    assert msg["stop_reason"] == "end_turn", msg["stop_reason"]
+    assert "cut off at 8192 tokens" in msg["content"][-1]["text"], msg["content"]
+
+
+def test_a_tool_call_cut_in_half_is_dropped() -> None:
+    """Passed through, the client answers that the input could not be parsed as JSON and the model
+    sends the same oversized call again."""
+    msg = ap.to_anthropic({"choices": [{"finish_reason": "length", "message": {
+        "content": "here goes",
+        "tool_calls": [{"id": "c1", "function": {"name": "Write", "arguments": '{"file_pa'}}]}}]}, "m")
+    assert not [b for b in msg["content"] if b["type"] == "tool_use"], msg["content"]
+    assert msg["stop_reason"] == "end_turn", msg["stop_reason"]
+
+
+def test_a_streamed_tool_call_cut_in_half_is_dropped_and_the_cut_is_stated() -> None:
+    """The live failure: a stage's answer ran past the cap in the middle of a tool call, the client
+    was handed half a JSON object and stop_reason max_tokens, and the session ended there."""
+    chunks = [
+        {"choices": [{"delta": {"content": "Now let me"}}]},
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "c1", "function": {"name": "Write", "arguments": '{"file_pa'}}]}},
+                     ], "usage": {"completion_tokens": 8192}},
+        {"choices": [{"delta": {}, "finish_reason": "length"}], "usage": {"completion_tokens": 8192}},
+    ]
+    events = [e.decode() for e in ap.stream_anthropic(iter(chunks), "m")]
+    body = "".join(events)
+    assert "tool_use" not in body, body
+    assert "cut off at 8192 tokens" in body, body
+    assert '"stop_reason": "end_turn"' in body, body
