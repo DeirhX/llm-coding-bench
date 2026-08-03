@@ -214,21 +214,40 @@ def naps_in(command: str) -> list[int]:
     return [int(m.group(1)) for m in _SLEEP.finditer(bare)]
 
 
-_WRITES = re.compile(r"touch|>|tee\b|rm\b|unlink|mv\b|cp\b|install\b|open\s*\(|Path\s*\(|write")
+# A probe of the hook, which is the one way to establish what the hook does. The payload it feeds in
+# has to contain the very command being asked about, so a rule that reads its own test as an attempt
+# refuses the only admissible evidence about itself -- and did: a survey stage wrote "the guard
+# itself ran on me", deleted its test file and fell back to reasoning it could not cite.
+_PROBE = re.compile(r"cc-(?:context-guard|depth-gate|flow-guard|depth-contract)\.py")
+
+# Written as "what would this command do to that path", not "does this command mention that path".
+# The mention version refused `grep -rn cc-guard-off scripts/ > notes.txt`, which reads the rule and
+# writes somewhere else entirely, and a guard that refuses reading is a guard nobody can review.
+_VERBS = r"(?:touch|rm|unlink|mv|cp|tee|install|ln)\b[^;|&\n]*"
+_CALLS = r"(?:open|Path|write_text|writeFile)\s*\(\s*['\"]?"
 
 
 def tampers(command: str) -> bool:
     """True if this command would create or remove a guard's off-switch.
 
-    A survey stage ran `touch /tmp/cc-guard-off`, described as "Temporarily disable guard for
-    reading", and never removed it. Every stage after it in that run, and every session started
-    afterwards, ran with no read discipline at all and nothing said so. The switch exists for the
-    person at the keyboard; a model that can turn off the thing judging it is not being judged.
-
-    Naming the file at all is not the offence -- a review of this guard has to grep for it -- so
-    inspection passes and only a command that could write the path is refused.
+    A stage that wants past a refusal can make the file some way this does not match -- by building
+    the name out of two strings, or through a variable -- which is why the switch needs the launch
+    flag and not just this. What this buys is that the obvious attempt costs a turn and is told what
+    to do instead, rather than appearing to work.
     """
-    return (any(s.name in command for s in SWITCHES)) and bool(_WRITES.search(command))
+    if _PROBE.search(command) and ("tool_input" in command or "tool_name" in command):
+        return False
+    for switch in SWITCHES:
+        # The directory is optional because a stage writes the path any way it likes -- /tmp/x,
+        # ../tmp/x, or x from /tmp -- and the file is what matters.
+        name = r"(?:[^\s'\";|&]*/)?" + re.escape(switch.name)
+        if re.search(_VERBS + name, command):
+            return True
+        if re.search(r">>?\s*['\"]?" + name, command):
+            return True
+        if re.search(_CALLS + name, command):
+            return True
+    return False
 
 
 def main():

@@ -261,6 +261,8 @@ def test_the_model_may_not_turn_the_guard_off():
                     "touch /tmp/cc-depth-off && echo done",
                     "python3 -c \"open('/tmp/cc-guard-off','w')\"",
                     "echo x > /tmp/cc-guard-off",
+                    "echo x >> /tmp/cc-guard-off",
+                    "cd /tmp && touch cc-guard-off",
                     "rm -f /tmp/cc-guard-off"):
         decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
         assert decision == "deny", command
@@ -269,11 +271,26 @@ def test_the_model_may_not_turn_the_guard_off():
     assert decision == "deny"
 
 
+def test_a_stage_may_ask_the_hook_what_it_would_do():
+    """The only admissible evidence about a hook is what the hook printed, and the payload that
+    gets it to print has to contain the command being asked about. A rule that reads its own test
+    as an attempt refuses the one experiment that could establish anything about it."""
+    setup()
+    probe = ("echo '{\"tool_name\": \"Bash\", \"tool_input\": {\"command\": "
+             "\"touch /tmp/cc-guard-off\"}}' | python3 scripts/cc-context-guard.py")
+    decision, why = run("Bash", {"command": probe}, TMP / "none.jsonl")
+    assert decision == "allow", why
+
+
 def test_reading_about_the_off_switch_is_not_tampering():
     """A review of this guard has to be able to grep for the thing it is reviewing."""
     setup()
     for command in ("grep -rn cc-guard-off scripts/",
                     "ls -l /tmp/cc-guard-off",
+                    # Refused until a survey stage wrote "the guard itself ran on me", deleted its
+                    # test file and fell back to reasoning it could not cite. Writing the result of
+                    # a search somewhere is not writing the switch.
+                    "grep -rn cc-guard-off scripts/ > /tmp/notes.txt",
                     "rg OFF_SWITCH scripts/cc-context-guard.py"):
         decision, why = run("Bash", {"command": command}, TMP / "none.jsonl")
         assert decision == "allow", (command, why)

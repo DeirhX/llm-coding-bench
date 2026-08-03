@@ -737,3 +737,34 @@ def test_an_accepted_stage_is_not_handed_a_ledger_to_fix() -> None:
         prompt = guard.compose(cc_flow.stage_in("review", "claims"), "review", "review the guard",
                                [], "", ())
         assert "refused ledger" not in prompt
+
+
+def test_the_hand_back_survives_the_hook_and_not_just_the_function() -> None:
+    """The hand-back is only worth anything if it reaches the subagent. Twice now a fix here was
+    correct in the function and never reached, because the hook that calls it was not wired to the
+    tool it needed to see. This drives the guard as the client does: a real PreToolUse payload for
+    an Agent launch, and the amended prompt read back out of what the hook returned."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "review the guard", "s9", root)
+        cc_flowstate.record_launch(state, "survey", "a0")
+        cc_flowstate.record_verdict(state, "survey", [], "a0")
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.record_verdict(state, "claims", ["claim 6 cites a command nothing ran"], "a1",
+                                    "CLAIM: the switch can be made under another name\n"
+                                    "QUOTE: g.py:12 `if OFF.exists():`\n")
+        # The refusal reopened the stage; the client's next launch is the round that must fix it.
+        cc_flowstate.forget_running(state)
+        cc_flowstate.save(state, "s9", root)
+
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "cwd": root,
+                   "session_id": "s9",
+                   "tool_input": {"prompt": "STAGE: claims", "description": "claims",
+                                  "subagent_type": "general-purpose"}}
+        proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                              capture_output=True, text=True, timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        out = json.loads(proc.stdout)["hookSpecificOutput"]
+        assert out.get("permissionDecision") != "deny", out
+        sent = (out.get("updatedInput") or {}).get("prompt", "")
+        assert "the switch can be made under another name" in sent, sent[:400]
+        assert "claim 6 cites a command nothing ran" in sent, sent[:400]
