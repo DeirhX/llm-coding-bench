@@ -904,3 +904,41 @@ def test_the_word_in_a_sentence_is_still_not_a_header() -> None:
                                 "EVIDENCE: scripts/g.py:1-2\n")
     assert len(claims) == 1, claims
     assert claims[0]["claim"].startswith("the evidence:"), claims[0]
+
+
+def test_the_word_evidence_at_the_end_of_a_paragraph_is_still_evidence() -> None:
+    """Six claims cited nothing with the citation sitting in the last sentence of each: `... becomes
+    a no-op for the session. Evidence: line 280-281 of `guard.py`.`"""
+    text = ("**CLAIM: the check short-circuits the rest.**\n\n"
+            "When both are true allow() is called at once. Evidence: line 12-13 of `scripts/g.py`.\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, claims
+    piece = [p for p in claims[0]["evidence"] if p.get("start")]
+    assert piece and piece[0]["start"] == 12, claims[0]["evidence"]
+    assert piece[0]["path"] == "scripts/g.py", piece
+
+
+def test_a_sentence_about_evidence_is_not_a_citation() -> None:
+    claims, _ = vf.parse_ledger("CLAIM: the rule is narrow.\n"
+                                "There is no evidence: nobody ran it.\n")
+    assert not [p for p in claims[0]["evidence"] if p.get("start")], claims[0]["evidence"]
+
+
+def test_a_file_cited_by_its_absolute_path_is_the_file_in_the_tree() -> None:
+    """macOS puts a symlink on /tmp, so a stage in a tree opened as /tmp/x cites /private/tmp/x. Left
+    absolute the quote verifies and then fails the coverage check, which compares what was read."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("import re\nVERBS = 1\n")
+        assert vf.under_root(root, str(Path(root, "g.py").resolve())) == "g.py"
+        assert vf.file_quote(root, str(Path(root, "g.py").resolve()), 2, 2, "VERBS = 1").ok
+        assert vf.under_root(root, "/etc/passwd") == "/etc/passwd"
+
+
+def test_an_evidence_header_is_not_read_twice() -> None:
+    """The inline rule fired on the header itself, duplicating it, so the QUOTE attached to the copy
+    and the original was refused for missing the lines. Twenty-two tests said so at once."""
+    claims, _ = vf.parse_ledger("CLAIM: add returns the sum.\n"
+                                "EVIDENCE: src/m.py:1-2\n"
+                                "QUOTE:\ndef add(a, b):\n    return a + b\n")
+    assert len(claims[0]["evidence"]) == 1, claims[0]["evidence"]
+    assert claims[0]["evidence"][0]["quote"].startswith("def add"), claims[0]["evidence"]

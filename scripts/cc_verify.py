@@ -271,8 +271,27 @@ def _dedented(lines: Iterable[str]) -> list[str]:
     return textwrap.dedent("\n".join(lines)).split("\n")
 
 
+def under_root(root: str, path: str) -> str:
+    """A path inside the tree, named relative to it however the model wrote it.
+
+    A stage citing `/private/tmp/r17tree/scripts/guard.py` for a tree opened as `/tmp/r17tree` names
+    the same file, through the symlink macOS puts on /tmp. Left absolute it verifies and then fails
+    the coverage check, which compares against what the reads recorded.
+    """
+    if not root or not os.path.isabs(path):
+        return path
+    try:
+        real = os.path.realpath(path)
+        base = os.path.realpath(root)
+    except OSError:
+        return path
+    inside = os.path.relpath(real, base)
+    return path if inside.startswith("..") else inside
+
+
 def file_quote(root: str, path: str, start: int, end: int, quote: str) -> Verdict:
     """Do lines [start, end] of `path` contain `quote`, allowing for reindentation?"""
+    path = under_root(root, path)
     full = os.path.join(root, path)
     if not os.path.isfile(full):
         return Verdict(UNVERIFIED, "no such file: %s" % path)
@@ -789,6 +808,11 @@ _SECTION = re.compile(r"^[\s>*_#]{0,6}(?:claims|findings)\s*:?\s*[*_#]{0,3}\s*$"
 _NUMBERED = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?P<n>\d{1,3})[.)]\s+(?P<rest>\S.*)$")
 
 
+# `Evidence: line 280-281 of `guard.py`` at the end of a paragraph. Only where it introduces
+# something that classifies as a citation, so a sentence about the evidence stays a sentence.
+_SAID_EVIDENCE = re.compile(r"\bevidence\s*:", re.I)
+
+
 def _starts_with_citation(line: str) -> bool:
     """Does this line open on a citation, rather than merely mention a path somewhere in prose?"""
     bare = DECORATION.sub("", line).strip().lstrip("'\"- ")
@@ -837,6 +861,13 @@ def normalise(text: str) -> str:
                 claimed = False
             else:
                 out.append(line)
+                said = None if HEADER_RE.match(line) else _SAID_EVIDENCE.search(line)
+                if said and _classify_all(line[said.end():].strip()):
+                    # `... becomes a no-op for the session. Evidence: line 280-281 of `guard.py`.`
+                    # The word at the end of the paragraph rather than the start of a line, which is
+                    # where a paragraph puts it. Six claims cited nothing with the citation sitting in
+                    # the last sentence of each.
+                    out.append("EVIDENCE: %s" % line[said.end():].strip())
                 claimed = claimed and not line.strip()
             continue
         mark = _EMPHASIS.search(seen.group("lead"))
