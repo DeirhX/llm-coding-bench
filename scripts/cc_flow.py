@@ -56,20 +56,31 @@ DEFAULT_STAGES = [
         name="claims",
         produces="claims.md",
         consumes=("survey.md",),
+        # Nothing downstream means anything without this. Run 7 gave up on claims and then ran the
+        # adversary anyway, which had nothing to attack, said so, and was refused for saying it.
+        blocking=True,
         stance=("Now make the claims the survey supports, and only those. Open every file you "
                 "cite, in this stage, before quoting it -- the survey is a map, not a substitute "
                 "for reading, and it saw at most the first part of a long file. To cite a line "
                 "beyond that, find it with a search and read around the hit; a line number you "
                 "have not seen is a guess even when the claim is right. Each claim gets its own "
                 "block. If the survey pointed somewhere you could not resolve, that is an "
-                "UNKNOWN, not a guess."),
+                "UNKNOWN, not a guess.\n"
+                "A claim about what a program does when run is settled by running it, and a hook "
+                "is a program: feed it the JSON it expects on stdin and report what it printed, "
+                "`echo '{\"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"...\"}}' "
+                "| python3 <the hook> `. That is evidence. Describing what it would print is not, "
+                "however obvious the reasoning looks, and a claim that a rule can be walked around "
+                "is the one most worth actually walking around -- against the hook itself, not "
+                "against the machine, so nothing is left behind."),
     ),
     Stage(
         name="adversary",
         produces="verdict.md",
         consumes=("claims.md",),
         stance=("Try to break each claim above. For each one, run the cheapest thing that would "
-                "show it false and report what it printed; a claim you cannot attack survives, a "
+                "show it false and report what it printed -- a rule in a hook is attacked by "
+                "feeding the hook the payload that should trip it and showing what it decided; a "
                 "claim your attack kills is deleted, and a claim you cannot test becomes an "
                 "UNKNOWN with the reason. Do not add new findings. Do not soften the surviving "
                 "ones -- restate them with their evidence intact."),

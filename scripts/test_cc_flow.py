@@ -20,6 +20,15 @@ import cc_flowstate     # noqa: E402
 GUARD = HERE / "cc-flow-guard.py"
 
 
+def _load_guard():
+    """The hook as a module, for the parts of it worth testing without a subprocess."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("flow_guard", GUARD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def run(prompt: str, root: str, session: str = "s1", tool: str = "Task",
         kind: str = "general-purpose") -> tuple[str, str, dict]:
     payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": session,
@@ -599,16 +608,41 @@ def test_a_stage_still_working_is_not_forgotten() -> None:
 
 def test_a_stage_refused_three_times_stops_being_asked() -> None:
     """Without a cap, claims was refused, relaunched and refused again until the nudge limit ended
-    the session with nothing judged. Three rounds is the budget; after that the flow moves on."""
+    the session with nothing judged. Three rounds is the budget, and claims is blocking, so a
+    review nobody could get claims out of ends rather than sending an adversary at nothing."""
     with tempfile.TemporaryDirectory() as root:
         state = cc_flowstate.begin("review", "t", "s1", root)
         cc_flowstate.record_launch(state, "survey", "a0")
         cc_flowstate.record_verdict(state, "survey", [], "a0")
         for _ in range(3):
             cc_flowstate.record_launch(state, "claims", "a1")
-            cc_flowstate.record_verdict(state, "claims", ["cites nothing"], "a1")
+            cc_flowstate.record_verdict(state, "claims", ["cites nothing"], "a1",
+                                        "CLAIM: something\n")
         assert cc_flowstate.exhausted(state, "claims")
-        assert cc_flowstate.next_stage(state) == "adversary", cc_flowstate.summary(state)
+        assert cc_flowstate.next_stage(state) is None, cc_flowstate.summary(state)
+
+
+def test_rounds_that_never_wrote_a_ledger_are_counted_apart() -> None:
+    """Two of run 7's three claims rounds ended mid-sentence without a ledger, so the stage was
+    given up on having been judged on its evidence exactly once. A round that produced claims and a
+    round that produced nothing are different failures and are budgeted separately."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        for _ in range(2):
+            cc_flowstate.record_launch(state, "claims", "a1")
+            cc_flowstate.record_verdict(state, "claims", ["Your turn ended before you answered"],
+                                        "a1", "Now let me verify each of these.")
+        assert cc_flowstate.exhausted(state, "claims"), "two silent rounds is the whole budget"
+
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s2", root)
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.record_verdict(state, "claims", ["Your turn ended"], "a1", "about to start")
+        for _ in range(2):
+            cc_flowstate.record_launch(state, "claims", "a1")
+            cc_flowstate.record_verdict(state, "claims", ["cites nothing"], "a1", "CLAIM: x\n")
+        assert not cc_flowstate.exhausted(state, "s2" and "claims"), \
+            "a silent round must not spend one of the three the evidence gets"
 
 
 def test_a_blocking_stage_nobody_can_satisfy_ends_the_flow() -> None:
@@ -670,3 +704,36 @@ def test_a_reopened_round_that_never_starts_is_given_up_on_quickly() -> None:
         again["launched"] = time.time() - (cc_flowstate.REOPENED_STALE + 1)
         again["calls"], again["active"] = 3, time.time()
         assert cc_flowstate.forget_running(state) == [], state["stages"]
+
+
+def test_a_reopened_round_is_handed_the_ledger_it_must_fix() -> None:
+    """Run 7's first claims round spent 252 tool calls and produced seven cited findings, two of
+    them short. The round after it was a fresh subagent that had never seen them: 16 calls, six
+    claims, not one citation. A refusal has to arrive with the thing being refused."""
+    guard = _load_guard()
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("s1", "review", "review the guard", root)
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.record_verdict(state, "claims", ["claim 6 cites a command nothing ran"], "a1",
+                                    "CLAIM: the switch can be made by another name\n"
+                                    "QUOTE: g.py:12 `if OFF.exists():`\n")
+        cc_flowstate.save(state, "s1", root)
+        # The refusal reopens the stage, so the last entry is the new round and the ledger sits on
+        # the one before it -- which is the entry the guard looks for too.
+        hurt = [e for e in state["stages"] if e.get("verdict") == "refused"][-1]
+        prompt = guard.compose(cc_flow.stage_in("review", "claims"), "review", "review the guard",
+                               [], hurt.get("answer", ""), hurt.get("gaps", ()))
+        assert "the switch can be made by another name" in prompt
+        assert "claim 6 cites a command nothing ran" in prompt
+        assert "word for word" in prompt
+
+
+def test_an_accepted_stage_is_not_handed_a_ledger_to_fix() -> None:
+    guard = _load_guard()
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("s2", "review", "review the guard", root)
+        cc_flowstate.record_launch(state, "survey", "a1")
+        cc_flowstate.record_verdict(state, "survey", [], "a1", "SURVEY: files")
+        prompt = guard.compose(cc_flow.stage_in("review", "claims"), "review", "review the guard",
+                               [], "", ())
+        assert "refused ledger" not in prompt

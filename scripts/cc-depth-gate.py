@@ -806,7 +806,7 @@ def main() -> int:
     if stage:
         # What the next stage may do turns on this verdict, so it is written where the hook that
         # admits the next launch can read it rather than left in the conversation.
-        cc_flowstate.record_verdict(state, stage, gaps, agent)
+        cc_flowstate.record_verdict(state, stage, gaps, agent, text)
         state["nudges"] = 0     # a stage reported, so the budget for pushing is not being spent
         for entry in reversed(state.get("stages", [])):
             if entry.get("stage") == stage and not entry.get("summary"):

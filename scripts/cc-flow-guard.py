@@ -71,8 +71,17 @@ def amend(tool_input: dict, prompt: str, reason: str) -> None:
     sys.exit(0)
 
 
-def compose(stage, flow: str, task: str, prior: list[str]) -> str:
-    """What a stage subagent is told: its stance, the task, and what the stages before it found."""
+def compose(stage, flow: str, task: str, prior: list[str], refused: str = "",
+            gaps: list[str] = ()) -> str:
+    """What a stage subagent is told: its stance, the task, and what the stages before it found.
+
+    A refused round is not a fresh start. The round that follows it is a new subagent with no
+    memory, and without the ledger it is meant to be fixing it does the work again from nothing:
+    run 7's first claims round spent 252 tool calls and produced seven cited findings, two of them
+    short of what the gate wanted, and the round after it made 16 calls and cited nothing at all.
+    Handing the ledger back with the gaps marked is the difference between a correction and a
+    retry.
+    """
     parts = ["STAGE: %s" % stage.name,
              "You are one stage of a %s flow. Do this stage only." % flow,
              "",
@@ -82,6 +91,17 @@ def compose(stage, flow: str, task: str, prior: list[str]) -> str:
     if prior:
         parts += ["", "What the stages before you established, which you may build on but must "
                       "verify before you cite:", ""] + prior
+    if refused:
+        parts += ["",
+                  "A previous round of this stage produced the ledger below and the gate refused "
+                  "it. This is your ledger to correct, not a draft to replace: keep every claim it "
+                  "does not object to, word for word, and spend your effort on the ones it names. "
+                  "The work behind the accepted claims is done and paying for it twice is what "
+                  "runs the budget out.", "",
+                  "--- the refused ledger ---", refused, "--- end of it ---"]
+        if gaps:
+            parts += ["", "What the gate said was wrong with it:", ""]
+            parts += ["  %d. %s" % (i, " ".join(g.split())) for i, g in enumerate(gaps, 1)]
     parts += ["",
               "Answer in the ledger format the session contract describes. Your answer is read by a "
               "gate that checks every claim against what you actually ran and read, so cite as you "
@@ -269,7 +289,12 @@ def main() -> int:
     # The model asked for the right stage; the wording of it is not its business. Substituting the
     # stance verbatim also keeps the interactive path and the scripted one on the same words, which
     # is the only reason a result from one says anything about the other.
-    return amend(tool_input, compose(stage, state["flow"], state.get("task", ""), prior),
+    # The last refusal of this stage, if there is one: what this round is here to fix.
+    hurt = [e for e in state.get("stages", [])
+            if e.get("stage") == stage.name and e.get("verdict") == "refused"]
+    last = hurt[-1] if hurt else {}
+    return amend(tool_input, compose(stage, state["flow"], state.get("task", ""), prior,
+                                     last.get("answer", ""), last.get("gaps", ())),
                  "stage %s of the %s flow" % (stage_name, state["flow"]))
 
 

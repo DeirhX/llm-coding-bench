@@ -80,7 +80,12 @@ def record_launch(state: dict, stage: str, agent: str = "") -> dict:
     return state
 
 
-def record_verdict(state: dict, stage: str, gaps: list, agent: str = "") -> dict:
+# How much of a refused ledger is handed back to the round that must fix it. Long enough for the
+# eighteen-claim ledgers this produces, short enough not to crowd out the file it is about.
+LEDGER_KEPT = 12_000
+
+
+def record_verdict(state: dict, stage: str, gaps: list, agent: str = "", answer: str = "") -> dict:
     """Attach a gate verdict to the most recent launch of `stage`.
 
     A refusal does not end a subagent, it sends it round again, so the same launch reports twice --
@@ -102,6 +107,8 @@ def record_verdict(state: dict, stage: str, gaps: list, agent: str = "") -> dict
         entry["gaps"] = list(gaps)
         entry["agent"] = agent or entry.get("agent", "")
         entry["finished"] = time.time()
+        if gaps and answer:
+            entry["answer"] = answer[-LEDGER_KEPT:]
         entry["rounds"] = int(entry.get("rounds", 1)) + (0 if pending else 1)
         if gaps:
             # A refusal is not the end of the subagent, so the stage is still in flight and must
@@ -147,11 +154,23 @@ def running(state: dict) -> list[str]:
 # either by the third is not going to. Without a cap a claims stage was refused, relaunched, and
 # refused again until the nudge limit ended the session with nothing judged at all.
 ROUND_CAP = 3
+# A round that never wrote a ledger at all -- it narrated what it was about to do and stopped -- is
+# not one of the three. Two of run 7's three claims rounds went that way, so the stage was given up
+# on having been judged on its evidence exactly once. Those rounds are capped separately, and
+# lower, because a stage that cannot produce the shape twice running will not produce it a third
+# time either.
+SILENT_CAP = 2
+
+
+def _answered(entry: dict) -> bool:
+    return "CLAIM" in (entry.get("answer") or "") or bool(entry.get("summary"))
 
 
 def exhausted(state: dict, stage: str) -> bool:
-    return len([e for e in state.get("stages", [])
-                if e.get("stage") == stage and e.get("verdict") == "refused"]) >= ROUND_CAP
+    refused = [e for e in state.get("stages", [])
+               if e.get("stage") == stage and e.get("verdict") == "refused"]
+    judged = [e for e in refused if _answered(e)]
+    return len(judged) >= ROUND_CAP or len(refused) - len(judged) >= SILENT_CAP
 
 
 def next_stage(state: dict) -> str | None:
