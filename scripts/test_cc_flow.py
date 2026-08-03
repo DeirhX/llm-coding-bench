@@ -291,16 +291,29 @@ def test_a_finished_flow_may_end() -> None:
     assert decision == "allow", decision
 
 
-def test_a_stage_still_running_when_the_session_stops_went_away() -> None:
-    """A parent cannot finish a turn while its own Task call is outstanding.
-
-    Measured on the second flow: the orchestrator said it would wait for the survey, then answered
-    from a file it had read itself while the survey was still going. Leaving the entry in flight
-    would have the launch hook refuse the relaunch as a duplicate.
-    """
+def test_stopping_while_a_stage_reads_is_told_to_wait_for_it() -> None:
+    """A parent reaches its stop routinely with a stage still working: the launch returns a task
+    and the turn ends while the reading goes on. This once deleted the entry and asked for a
+    relaunch, so a stage that was working perfectly well was forgotten mid-run and a session that
+    took the hint killed the task and answered from a file it had read itself."""
     with tempfile.TemporaryDirectory() as root:
         state = cc_flowstate.begin("review", "t", "s1", root)
         cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.save(state, "s1", root)
+        decision, why = _stop("here is what I think", root)
+        after = cc_flowstate.load("s1", root)
+    assert decision == "block", decision
+    assert "still running" in why, why
+    assert cc_flowstate.running(after) == ["survey"], after
+
+
+def test_a_stage_that_said_nothing_for_ten_minutes_is_given_up_on() -> None:
+    """A subagent that dies never fires its stop, and its entry would hold the stage open for
+    good -- the launch hook would refuse every relaunch as a duplicate."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        state["stages"][-1]["launched"] -= cc_flowstate.STALE_AFTER + 1
         cc_flowstate.save(state, "s1", root)
         decision, why = _stop("here is what I think", root)
         after = cc_flowstate.load("s1", root)

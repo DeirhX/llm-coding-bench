@@ -175,16 +175,21 @@ def admits(state: dict, stage: str) -> tuple[bool, str]:
 
 
 def forget_running(state: dict) -> list[str]:
-    """Drop stages recorded as in flight, returning their names.
+    """Drop stages whose subagent went away, returning their names.
 
-    A parent cannot be finishing its turn while one of its own Task calls is outstanding, so a
-    stage still marked running when the session stops is one whose subagent went away without the
-    gate hearing about it. Leaving the entry there would have the launch hook refuse the relaunch
-    as a duplicate, and the session would have nowhere to go.
+    This used to drop every stage in flight, on the reasoning that a parent cannot be finishing its
+    turn while one of its own Task calls is outstanding. It can: a stage is launched as a task and
+    the session goes on without it, so the parent reaches its stop routinely while the stage is
+    still reading. Deleting the entry then loses a stage that was working perfectly well, and the
+    flow forgets a run it is about to be told to repeat. Only a launch that has said nothing for
+    STALE_AFTER is treated as gone -- long enough that no working stage is caught by it, and the
+    only case that needs the escape is a subagent that died without its stop ever firing.
     """
-    stale = [e["stage"] for e in state.get("stages", []) if e.get("verdict") is None]
-    state["stages"] = [e for e in state.get("stages", []) if e.get("verdict") is not None]
-    return stale
+    now = time.time()
+    gone = [e for e in state.get("stages", []) if e.get("verdict") is None
+            and now - float(e.get("launched") or 0) >= STALE_AFTER]
+    state["stages"] = [e for e in state.get("stages", []) if e not in gone]
+    return [e["stage"] for e in gone]
 
 
 def summary(state: dict) -> str:

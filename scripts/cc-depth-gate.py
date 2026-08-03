@@ -598,15 +598,28 @@ def main() -> int:
             cc_flowstate.save(state, session, root)
         left = cc_flowstate.next_stage(state)
         nudges = int(state.get("nudges", 0))
+        in_flight = cc_flowstate.running(state)
+        if in_flight and nudges < NUDGE_LIMIT:
+            # Stopping with a stage still reading is the ordinary shape of this: the launch returns
+            # a task and the turn ends while the work goes on. What the session must not do is take
+            # that as the stage having failed, which it did -- killing the task, then answering from
+            # a file it had read itself.
+            state["nudges"] = nudges + 1
+            cc_flowstate.save(state, session, root)
+            return block(
+                "The %s stage is still running. Read its output and wait for it to report. It has "
+                "not failed and it is not stuck; a stage takes minutes, and its report is the only "
+                "thing here that gets judged."
+                % ", ".join(in_flight))
         if left and nudges < NUDGE_LIMIT:
             done = cc_flowstate.done(state)
             state["nudges"] = nudges + 1
             cc_flowstate.save(state, session, root)
             return block(
                 "The %s flow is not finished. %s run; %s has not. Launch a subagent whose "
-                "prompt begins with `STAGE: %s`. The Task tool hands you that subagent's report as "
-                "its result -- there is nothing to wait for and nothing running in the background, "
-                "so do not stop to wait. Answering now would give me one stage's view of this, and "
+                "prompt begins with `STAGE: %s`. Nothing is running now, so there is nothing to "
+                "wait for -- launch it, then read its output until it reports. Answering now would "
+                "give me one stage's view of this, and "
                 "the stages after it exist because that view is the one that has been wrong before."
                 % (state["flow"],
                    ("%s %s" % (", ".join(done), "have" if len(done) > 1 else "has"))
