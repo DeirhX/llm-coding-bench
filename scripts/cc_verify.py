@@ -804,7 +804,7 @@ _CONCLUSION = re.compile(r"^[\s>*_#-]{0,6}(?:finding|conclusion|verdict)s?\s*:",
 # said once as a heading and the findings numbered under it, which is how a person writes a report.
 # Nothing in it says CLAIM, so a stage that made 188 of these parsed as none and was told no claims
 # were stated. Only numbered under such a heading: a numbered list in prose is a numbered list.
-_SECTION = re.compile(r"^[\s>*_#]{0,6}(?:claims|findings)\s*:?\s*[*_#]{0,3}\s*$", re.I)
+_SECTION = re.compile(r"^[\s>*_#]{0,6}(?:claims?|findings?)\s*:?\s*[*_#]{0,3}\s*$", re.I)
 _NUMBERED = re.compile(r"^(?P<lead>[\s>*_#-]{0,6})(?P<n>\d{1,3})[.)]\s+(?P<rest>\S.*)$")
 
 
@@ -817,6 +817,16 @@ def _starts_with_citation(line: str) -> bool:
     """Does this line open on a citation, rather than merely mention a path somewhere in prose?"""
     bare = DECORATION.sub("", line).strip().lstrip("'\"- ")
     return bool(PATH_LINES.match(bare) or LINES_PATH.match(bare) or FILE_EV_ANY.match(bare))
+
+
+def _cites(rest: str) -> bool:
+    """Whether what follows the word `evidence` in a sentence is a citation of any admissible kind.
+
+    Asked of file citations only, a paragraph ending `EVIDENCE: echo ... | python3 guard.py produced
+    no output (ALLOW)` keeps the probe inside the claim, and eight findings that had each run their
+    probe were refused for citing nothing.
+    """
+    return bool(_classify_all(rest) or _bare_command(rest) or _probes(rest))
 
 
 def normalise(text: str) -> str:
@@ -837,6 +847,7 @@ def normalise(text: str) -> str:
     out: list[str] = []
     claimed = False                 # the last header emitted was a CLAIM, so a citation is its own
     listing = False                 # a CLAIMS heading has been seen, so numbered items are claims
+    opening = True                   # this line begins a paragraph, so under a heading it is a claim
     for line in text.split("\n"):
         if _SECTION.match(line):
             listing = True
@@ -845,6 +856,13 @@ def normalise(text: str) -> str:
         numbered = _NUMBERED.match(line) if listing else None
         if numbered and not HEADER_RE.match(line) and not _SYNONYM.match(line):
             line = "%sCLAIM: %s" % (numbered.group("lead"), numbered.group("rest"))
+        elif (listing and opening and line.strip() and not HEADER_RE.match(line)
+              and not _SYNONYM.match(line) and not _CONCLUSION.match(line)):
+            # Under a bare `CLAIM` heading, one finding to a paragraph and no marker on any of them.
+            # A stage wrote four that way, each with its probe in the last sentence, and the answer
+            # scored no claims at all -- the heading having said the word once for all of them.
+            line = "CLAIM: %s" % line.strip()
+        opening = not line.strip()
         if _CONCLUSION.match(line) and not HEADER_RE.match(line) and not _SYNONYM.match(line):
             out.append(line)
             continue
@@ -860,15 +878,21 @@ def normalise(text: str) -> str:
                 out.append("EVIDENCE: %s" % line.strip())
                 claimed = False
             else:
-                out.append(line)
-                said = None if HEADER_RE.match(line) else _SAID_EVIDENCE.search(line)
-                if said and _classify_all(line[said.end():].strip()):
+                head = HEADER_RE.match(line)
+                said = _SAID_EVIDENCE.search(line, head.end() if head else 0)
+                if said and _cites(line[said.end():].strip()):
                     # `... becomes a no-op for the session. Evidence: line 280-281 of `guard.py`.`
                     # The word at the end of the paragraph rather than the start of a line, which is
                     # where a paragraph puts it. Six claims cited nothing with the citation sitting in
-                    # the last sentence of each.
+                    # the last sentence of each. Under a CLAIM header the same sentence carries the
+                    # citation of the finding it states, so the header keeps its sentence and loses
+                    # the citation to a line of its own.
+                    out.append(line[:said.start()].rstrip() if head else line)
                     out.append("EVIDENCE: %s" % line[said.end():].strip())
-                claimed = claimed and not line.strip()
+                    claimed = False
+                else:
+                    out.append(line)
+                    claimed = claimed and not line.strip()
             continue
         mark = _EMPHASIS.search(seen.group("lead"))
         body, extra = seen.group("body"), ""
@@ -883,8 +907,19 @@ def normalise(text: str) -> str:
                 # is trailing prose, so it was dropped: eight findings arrived as `claim 1 ()` and
                 # were refused for citing nothing, the citations having gone the same way.
                 body, extra = extra, ""
+        # `CLAIM: the rule is narrow. Evidence: g.py:12-14` -- the citation in the same sentence as
+        # the claim, which is where it lands when the heading said the word once and the finding is a
+        # paragraph. Left in the claim it is not evidence of anything and the claim reads oddly.
+        inline = ""
+        said = _SAID_EVIDENCE.search(body)
+        if said and _cites(body[said.end():].strip()):
+            inline = body[said.end():].strip()
+            body = body[:said.start()].strip()
         out.append("%s: %s" % (seen.group("name").upper(), body.strip()))
         claimed = seen.group("name").upper() == "CLAIM"
+        if inline:
+            out.append("EVIDENCE: %s" % inline)
+            claimed = False
         if extra.strip() and _classify_all(extra.strip()):
             out.append("EVIDENCE: %s" % extra.strip())
             claimed = False
@@ -979,7 +1014,11 @@ _BETWEEN = re.compile(r"(?<=\))\s*[;,]\s*(?=[\"'`])")
 # What a stage writes when it has run something and wants to say so: the command, then what it did.
 # Nothing here is taken on the strength of the sentence -- the command still has to appear in the
 # transcript and the output still has to bear the description out.
-_DID = re.compile(r"\s+(?:->|returns|returned|prints|printed|outputs|output|gives|gave)\s+")
+# `produced` before `output`, because a probe reported as `... produced no output (ALLOW)` splits at
+# whichever word comes first in the line: at `output` the command keeps `produced no` and what it
+# printed is read as `(ALLOW)`, and the probe fails against its own recording.
+_DID = re.compile(r"\s+(?:->|returns|returned|produced|produces|prints|printed|said|says|"
+                  r"outputs|output|gives|gave|yielded|emitted)\s+")
 
 
 _AFTERWARDS = re.compile(r"\s*\((?:[Ll]ines?\s+)(?P<start>\d{1,6})"

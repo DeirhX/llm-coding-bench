@@ -165,7 +165,15 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
                      "what you learned in your answer. A file you create is not evidence here: "
                      "nothing reads it, and the stage after you sees the tree, not your scratch."
                      % in_flight[0])
-        if spent > cc_flowstate.CALL_BUDGET:
+        over = spent - cc_flowstate.CALL_BUDGET
+        if over > 0:
+            # The refusal has to get shorter as it repeats, because it is charged to the context it
+            # is trying to protect. Run 18's second round spent 361 calls against a budget of 140 and
+            # was refused for 220 of them; by the end the client had room for two tokens of output,
+            # so the stage that had been told to answer could not, and the answer on record is the
+            # proxy's note that it was cut off at 2 tokens.
+            if over > 6:
+                deny("Refused. Answer now, in CLAIM/EVIDENCE/QUOTE blocks.")
             deny("You have spent %d tool calls on the %s stage. Stop reading and write your answer "
                  "now from what you have already seen. Anything you could not establish is an "
                  "UNKNOWN, which is a complete answer here -- going round the files again is not."

@@ -826,3 +826,21 @@ def test_the_budget_refusal_is_the_one_the_model_reads() -> None:
     printed = done.stdout[done.stdout.index("{"):]
     hooks = json.loads(printed)["hooks"]["PreToolUse"]
     assert "cc-flow-guard" in hooks[0]["hooks"][0]["command"], hooks
+
+
+def test_the_budget_refusal_gets_shorter_as_it_repeats() -> None:
+    """The refusal is charged to the context it protects. Run 18's second round was refused 220 times
+    over budget, and by the end the client had two tokens of room for output: the stage that had been
+    told to answer could not, and the answer on record is the proxy's note that it was cut at 2."""
+    with tempfile.TemporaryDirectory() as root:
+        session = "spent"
+        state = cc_flowstate.begin("review", "q", session, root)
+        cc_flowstate.record_launch(state, "claims")
+        state["stages"][-1]["calls"] = cc_flowstate.CALL_BUDGET
+        cc_flowstate.save(state, session, root)
+        first = _edit(session, root, tool="Read", path="a.py")
+        seen = [_edit(session, root, tool="Read", path="a.py")[1] for _ in range(8)]
+        assert first[0] == "deny", first
+        assert "You have spent" in first[1], first
+        assert len(seen[-1]) < 80, seen[-1]
+        assert "Answer now" in seen[-1], seen[-1]

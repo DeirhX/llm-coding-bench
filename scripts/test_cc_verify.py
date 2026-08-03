@@ -990,3 +990,41 @@ def test_a_bare_command_nobody_ran_is_not_evidence() -> None:
     piece = vf.parse_ledger('CLAIM: it passes.\n'
                             'EVIDENCE: pytest -q -- "29 passed"\n')[0][0]["evidence"][0]
     assert not vf.command_result([], piece["command"], piece["expect"]).ok
+
+
+def test_a_bare_claim_heading_makes_each_paragraph_under_it_a_claim() -> None:
+    """`CLAIM` once as a heading and one finding to a paragraph, no marker on any of them. A stage
+    wrote four that way, each with its probe in the last sentence, and scored no claims at all."""
+    text = ("CLAIM\n\n"
+            "The rule catches four of six classes. Evidence: scripts/g.py:12-14\n\n"
+            "The write branch checks the basename. Evidence: scripts/g.py:20-21\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 2, [c["claim"] for c in claims]
+    assert claims[0]["claim"].startswith("The rule catches"), claims[0]
+    assert claims[1]["evidence"][0]["start"] == 20, claims[1]["evidence"]
+
+
+def test_paragraphs_before_any_heading_are_not_claims() -> None:
+    text = ("I read the file and ran the hook.\n\n"
+            "Here is what I found, in a moment.\n\n"
+            "CLAIM: the rule is narrow.\nEVIDENCE: scripts/g.py:1-2\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, [c["claim"] for c in claims]
+
+
+def test_a_continuation_line_of_a_paragraph_is_not_a_second_claim() -> None:
+    text = ("CLAIMS\n\n"
+            "The rule catches four of six classes,\nbecause it matches literals only.\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, [c["claim"] for c in claims]
+
+
+def test_a_probe_reported_as_having_produced_no_output_keeps_its_command() -> None:
+    """`... produced no output (ALLOW)`. Split at `output` instead of `produced`, the command keeps
+    the words `produced no` and what it printed is read as `(ALLOW)`, so a probe that ran exactly as
+    reported fails against its own recording. Eight findings arrived in that shape."""
+    body = ("echo '{\"tool_name\": \"Bash\"}' | python3 /tmp/cc-guard.py produced no output (ALLOW)")
+    piece = vf._bare_command(body)
+    assert len(piece) == 1, piece
+    assert piece[0]["command"].endswith("python3 /tmp/cc-guard.py"), piece[0]["command"]
+    assert piece[0]["expect"] == "no output (ALLOW)", piece[0]["expect"]
