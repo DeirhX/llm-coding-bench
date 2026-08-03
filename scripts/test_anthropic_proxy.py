@@ -339,3 +339,15 @@ def test_the_model_cannot_turn_its_own_thinking_off() -> None:
         {"role": "assistant", "content": "This answer is not accepted yet"},
         {"role": "user", "content": "carry on"}, {"role": "user", "content": "and on"}]})
     assert "chat_template_kwargs" not in old
+
+
+def test_thinking_stops_once_a_stage_is_deep_in_its_work() -> None:
+    """Ten turns into a stage the context holds everything the stage needs and the reasoning is
+    about how to phrase it. That is where every runaway here has been: run 11 generated 32,000
+    tokens a turn and was cut ten times, all of it reasoning, none of it seen by anyone."""
+    early = [{"role": "user", "content": "review this"},
+             {"role": "assistant", "content": "reading"}]
+    assert "chat_template_kwargs" not in ap.to_openai({"model": "m", "messages": early})
+    deep = early + [{"role": "assistant", "content": "still reading"}] * 10
+    assert ap.to_openai({"model": "m", "messages": deep})["chat_template_kwargs"] == {
+        "enable_thinking": False}

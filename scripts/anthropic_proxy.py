@@ -83,7 +83,7 @@ def _text_of(content: Any) -> str:
 # the same budget, and a ten-claim ledger with quotes ran past it twice. Still far under the client's
 # 32,000, which is the number that matters -- a cut answer is recoverable, but only because the cut
 # is reported as an ordinary turn rather than as the max_tokens stop that ends a session.
-MAX_OUTPUT = 32768
+MAX_OUTPUT = 16384
 
 
 # Repetition sampling, sent with every request because the failure it addresses is not occasional.
@@ -99,7 +99,15 @@ DRY = {"dry_multiplier": 0.8, "dry_base": 1.75, "dry_allowed_length": 12, "dry_p
 # in both cases the thinking has been done and the work left is transcription. Those are exactly the
 # turns that looped: one spent 15,255 reasoning tokens redrafting a ledger it had already written.
 # Only strings this harness itself emits are matched, so nothing the model says can turn it off.
-NO_THINKING = ("This answer is not accepted yet", "cut off at", "Write the ledger now")
+NO_THINKING = ("This answer is not accepted yet", "cut off at", "Write the ledger now",
+               "--- the refused ledger ---")
+
+# How many turns of reasoning a stage gets before it is asked to work without it. The loop does not
+# appear at the start of a stage, when there is little in the context and something real to work
+# out; it appears deep in one, where the model has everything it needs and reasons in circles about
+# how to say it. Raising the ceiling to 32,768 established that this is not a ceiling problem: the
+# client asks for 32,000 and the model filled them, so the cut moved and the waste doubled.
+THINKING_TURNS = 8
 
 
 def _transcribing(messages: list) -> bool:
@@ -108,7 +116,7 @@ def _transcribing(messages: list) -> bool:
         text = content if isinstance(content, str) else json.dumps(content)
         if any(mark in (text or "") for mark in NO_THINKING):
             return True
-    return False
+    return sum(1 for m in messages if m.get("role") == "assistant") > THINKING_TURNS
 
 
 def to_openai(body: dict, ceiling: int = 0, dry: bool = True) -> dict:
