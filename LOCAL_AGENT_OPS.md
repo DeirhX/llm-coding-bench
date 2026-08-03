@@ -1295,8 +1295,8 @@ Refused. Call the Agent tool, prompt first line `STAGE: claims`.
 
 Told to launch itself. The stage *was* the claims stage, working, and the flow had no record that it
 existed: `flow.json` held one entry, for the survey. With nothing running, the rule that stops the
-orchestrator from doing stage work applies to everything, and since **no hook payload carries any
-client identity**, a working subagent and an idle orchestrator are the same caller here.
+orchestrator from doing stage work applies to everything, and the guard was written believing a
+working subagent and an idle orchestrator are the same caller here. They are not -- see below.
 
 The record was written and then written back out of existence. Three refusals landed in the same
 second -- one assistant turn, three tool calls, three hook processes at once -- and the launch was
@@ -1318,6 +1318,31 @@ that fixing it taught, both worth more than the fix:
   `release()` for letting go before anything slow, and the Stop hook calls both.
 - **Prefer a bug to a hang.** The lock waits five seconds and then proceeds without it. A lost update
   costs a record; a hook that never returns costs the session.
+
+### The client does say who is calling, and this repo said it does not
+
+Every rule that confuses a stage with its parent rests on one belief, written down here and in the
+guard: that a hook cannot tell them apart. It is false. Traced from a live run with `CC_FLOW_TRACE`:
+
+```
+event PreToolUse   tool Read         agent_id None                 agent_type None
+event PreToolUse   tool Agent        agent_id None                 agent_type None
+event PreToolUse   tool Bash         agent_id acb612f0b25d37102    agent_type general-purpose
+event PreToolUse   tool TaskOutput   agent_id None                 agent_type None
+```
+
+`agent_id` is the subagent's id on its own calls and absent on the parent's -- 15 payloads carrying
+it, matching the survey stage's 15 tool calls exactly, and none on the orchestrator's `Read`, `Agent`
+and `TaskOutput`. `agent_type` comes with it. Neither is documented.
+
+Do not confuse this with the model server, where it remains true that **no client identity is ever
+logged** and attribution requires interposing before the fact. Two different questions with the same
+shape, and one of them had an answer sitting in the payload the whole time.
+
+What it is worth: a subagent's call is never answered with an order to launch itself, so run 19's
+deadlock cannot recur even if the record is lost again. And where the flow has no record of the stage
+making a call, the record is put back from the caller's own id, which repairs the state rather than
+arguing with it. **Check what the client actually sends before designing around what it does not.**
 
 ### A refusal is charged to the context it protects
 
