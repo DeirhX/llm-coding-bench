@@ -77,7 +77,7 @@ def _significant(text: str, first: int = 0) -> list[str]:
     the line the citation names is not a coincidence.
     """
     return [line.rstrip()
-            for line in _unlabelled(_ungutted(_unfenced(text), first), first)
+            for line in _untrailed(_unlabelled(_ungutted(_unfenced(text), first), first), first)
             .strip("\n").split("\n") if line.strip()]
 
 
@@ -154,6 +154,30 @@ def _unlabelled(text: str, first: int = 0) -> str:
     if first and numbers[0] != first:
         return text
     if any(b - a != 1 for a, b in zip(numbers, numbers[1:])):
+        return text
+    return "\n".join(stripped.get(l, l) for l in lines)
+
+
+# `` `code` (line 174) `` -- the snippet in backticks with the line it came from after it. The
+# same impulse as the written-out gutter, from the other end of the line.
+_TRAILING_LINE = re.compile(r"^(?P<code>.*?)\s*\((?:[Ll]ines?\s+)(?P<n>\d{1,6})"
+                            r"(?:\s*[-\u2013]\s*\d{1,6})?\)\s*$")
+
+
+def _untrailed(text: str, first: int = 0) -> str:
+    """Drop a trailing `(line N)` label from each quoted line, on the citation's word."""
+    lines = text.split("\n")
+    content = [l for l in lines if l.strip()]
+    if not content:
+        return text
+    numbers, stripped = [], {}
+    for line in content:
+        found = _TRAILING_LINE.match(line)
+        if not found or not found.group("code").strip():
+            return text
+        numbers.append(int(found.group("n")))
+        stripped[line] = found.group("code").strip().strip("`")
+    if first and numbers[0] != first:
         return text
     return "\n".join(stripped.get(l, l) for l in lines)
 
@@ -314,6 +338,26 @@ ABSENCE_EV = re.compile(r"^absence:\s*(?P<pattern>.+?)(?:\s+in\s+(?P<globs>\S+))
 LOG_EV = re.compile(r"^log:\s*(?P<path>\S+)\s*~\s*(?P<pattern>.+)$", re.I)
 
 
+# `cc-context-guard.py lines 174, 188-189, 212-213` -- the path and the lines, with everything but
+# the colon. Written this way by every stage that has run here, and refused by a parser that wanted
+# `path:174`, which is a quarrel about punctuation rather than about evidence.
+PATH_LINES = re.compile(r"(?P<path>[^\s`*'\",]+\.[A-Za-z0-9_]+)\s+lines?\s+"
+                        r"(?P<ranges>\d{1,6}(?:\s*[-\u2013]\s*\d{1,6})?"
+                        r"(?:\s*,\s*\d{1,6}(?:\s*[-\u2013]\s*\d{1,6})?)*)")
+ONE_RANGE = re.compile(r"(?P<start>\d{1,6})(?:\s*[-\u2013]\s*(?P<end>\d{1,6}))?")
+
+
+def _path_lines(body: str) -> list[dict]:
+    """Citations written as a path followed by the lines, rather than path:line."""
+    out = []
+    for found in PATH_LINES.finditer(DECORATION.sub("", body)):
+        for span in ONE_RANGE.finditer(found.group("ranges")):
+            start = int(span.group("start"))
+            out.append({"kind": "file_quote", "path": found.group("path"), "start": start,
+                        "end": int(span.group("end") or start)})
+    return out
+
+
 def _classify_all(body: str) -> list[dict]:
     """Every piece of evidence on one EVIDENCE line, decoration and all.
 
@@ -337,6 +381,9 @@ def _classify_all(body: str) -> list[dict]:
         found += [{"kind": "file_quote", "path": last, "start": int(m.group("start")),
                    "end": int(m.group("end"))} for m in MORE_RANGES.finditer(tail)]
         return found
+    spelled = _path_lines(body)
+    if spelled:
+        return spelled
     return [single] if single else []
 
 

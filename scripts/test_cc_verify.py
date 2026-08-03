@@ -328,3 +328,18 @@ def test_the_written_out_line_label_is_not_a_fabrication() -> None:
     n = next(i for i, l in enumerate(body, 1) if l.startswith("BARE_LINES = re.compile"))
     quoted = "Line %d: `%s`" % (n, body[n - 1])
     assert vf.file_quote(ROOT, "scripts/cc_verify.py", n, n, quoted).ok
+
+
+def test_a_path_followed_by_its_lines_is_a_citation() -> None:
+    """Every stage that has run here writes `guard.py lines 174, 188-189` rather than
+    `guard.py:174`. Refusing that is a quarrel about punctuation, not about evidence."""
+    found = vf._classify_all("`scripts/cc_verify.py` lines 174, 188-189")
+    assert [(f["path"], f["start"], f["end"]) for f in found] == [
+        ("scripts/cc_verify.py", 174, 174), ("scripts/cc_verify.py", 188, 189)], found
+
+
+def test_a_snippet_labelled_with_its_line_is_not_a_fabrication() -> None:
+    """`` `code` (line 174) `` is the gutter again, written after the code instead of before it."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("PATH_LINES = re.compile"))
+    assert vf.file_quote(ROOT, "scripts/cc_verify.py", n, n, "`%s` (line %d)" % (body[n - 1], n)).ok
