@@ -1124,7 +1124,6 @@ def test_a_quoted_regex_keeps_the_escapes_that_make_it_one() -> None:
         target.write_text(source)
         body = 'guard.py:1 "%s"' % source.rstrip().replace('"', '\\"')
         found, text = vf._quote_carrying_citation(body)
-        assert len(text.splitlines()) == 1, repr(text)
         assert "\\b" in text and "\x08" not in text, repr(text)
         verdict = vf.file_quote(tmp, found[0]["path"], found[0]["start"], found[0]["end"], text)
         assert verdict.ok, verdict
@@ -1147,3 +1146,22 @@ def test_an_intentionally_escaped_backslash_still_decodes_to_one() -> None:
     would come back with a backslash it never had."""
     assert vf._protect(r'"a\\b"') == r'"a\\b"', vf._protect(r'"a\\b"')
     assert vf._protect(r'"a\b"') != r'"a\b"'
+
+
+def test_a_quote_of_two_lines_citing_one_still_says_where_it_is() -> None:
+    """Reading the `\\n` as two characters must not cost the near-miss message. Deciding the reading
+    in the parser turned this from `wrong-lines`, which names the lines the text is actually at, into
+    a bare `quote not present` -- the same verdict a fabricated quote gets. So the parser hands over
+    one reading, the verifier tries the other, and the better answer wins."""
+    with tempfile.TemporaryDirectory() as tmp:
+        (pathlib.Path(tmp) / "widen.py").write_text("def widen(rows):\n    width = 0\n    return w\n")
+        found, text = vf._quote_carrying_citation('widen.py:1 "def widen(rows):\\n    width = 0"')
+        verdict = vf.file_quote(tmp, found[0]["path"], found[0]["start"], found[0]["end"], text)
+        assert verdict.kind == vf.WRONG_LINES, verdict
+
+
+def test_a_quote_with_no_newline_either_way_is_judged_once() -> None:
+    """There is no second reading to try when nothing in the quote is ambiguous."""
+    assert vf._other_reading("width = 0") is None
+    assert vf._other_reading("a\nb") == "a\\nb"
+    assert vf._other_reading("a\\nb") == "a\nb"

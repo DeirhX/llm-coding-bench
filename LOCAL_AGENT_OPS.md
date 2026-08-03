@@ -1607,10 +1607,17 @@ character class was. It matches nothing, and the verifier reports it as not pres
 just been copied out of -- the most expensive verdict this harness can produce, because the stage did
 everything right and is told it invented the line.
 
-`\b` and `\f` are now held back across the decode and restored as the two characters written. For
-`\n` the citation decides: a citation of one line cannot be right about several lines of text, so the
-escape was inside something quoted. Only an even number of backslashes is protected, so a quote that
-really contained `\\b` still decodes to one.
+`\b` and `\f` are now held back across the decode and restored as the two characters written. Only an
+even number of backslashes is protected, so a quote that really contained `\\b` still decodes to one.
+
+`\n` cannot be settled that way, because both readings are things models really write: a line break
+when a run of lines is handed over as one string, two characters when a character class is quoted. The
+first attempt let the citation decide -- one line cited cannot be several lines quoted -- and that cost
+something not visible from the case it fixed. A quote of two lines citing only the first used to come
+back `wrong-lines`, which names the lines the text is actually at; flattened, it came back `quote not
+present`, the verdict a fabrication gets. So the parser hands over one reading and the verifier tries
+the other, keeping whichever holds, or failing that whichever says where it looked. Trying twice costs a
+string comparison; refusing a correct quote costs a round.
 
 The first attempt at this failed in the way worth recording. It carried the escapes through the decode
 as `\x00b`, and JSON refuses a raw control character inside a string -- so the decode it existed to

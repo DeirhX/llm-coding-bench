@@ -289,8 +289,45 @@ def under_root(root: str, path: str) -> str:
     return path if inside.startswith("..") else inside
 
 
+def _other_reading(quote: str) -> str | None:
+    r"""The same quote with `\n` read the other way, if there is another way to read it.
+
+    A quote that arrived as a JSON string has already had its escapes decoded, and for `\n` that
+    decision cannot be made from the text: it is a line break when the model handed over a run of
+    lines as one string, and two characters when it quoted a character class. Deciding it in the
+    parser is guessing. The file settles it, so the parser hands over one reading and this supplies
+    the other.
+    """
+    if "\n" in quote:
+        return quote.replace("\n", "\\n")
+    if "\\n" in quote:
+        return quote.replace("\\n", "\n")
+    return None
+
+
+def _closer(first: Verdict, second: Verdict) -> Verdict:
+    """The more useful of two readings: one that holds, else the one that says where it looked."""
+    for candidate in (first, second):
+        if candidate.ok:
+            return candidate
+    told = {FAIL: 0, UNVERIFIED: 1}
+    return second if told.get(second.kind, 2) > told.get(first.kind, 2) else first
+
+
 def file_quote(root: str, path: str, start: int, end: int, quote: str) -> Verdict:
-    """Do lines [start, end] of `path` contain `quote`, allowing for reindentation?"""
+    """Do lines [start, end] of `path` contain `quote`, allowing for reindentation?
+
+    Both readings of an ambiguous `\n` are tried, because refusing a correct quote costs a round and
+    trying twice costs a string comparison.
+    """
+    verdict = _judged_quote(root, path, start, end, quote)
+    other = None if verdict.ok else _other_reading(quote)
+    if other is None:
+        return verdict
+    return _closer(verdict, _judged_quote(root, path, start, end, other))
+
+
+def _judged_quote(root: str, path: str, start: int, end: int, quote: str) -> Verdict:
     path = under_root(root, path)
     full = os.path.join(root, path)
     if not os.path.isfile(full):
@@ -994,28 +1031,20 @@ _BAD_ESCAPE = re.compile(r"(?<!\\)\\'")
 # break when it hands over a multi-line quote. Only an even number of backslashes counts, so an
 # intentional `\\b` still decodes to a literal one.
 _REGEXY = re.compile(r"(?<!\\)((?:\\\\)*)\\([bf])")
-_ALSO_NEWLINES = re.compile(r"(?<!\\)((?:\\\\)*)\\([bfn])")
 # A private-use character, not a control one: JSON refuses a raw NUL in a string, so the decode this
 # was meant to protect failed outright and the fallback path did the work instead -- silently, and
 # with the newline it was there to prevent.
 _KEPT = "\ue000"
 
 
-def _protect(text: str, newlines: bool = False) -> str:
-    pattern = _ALSO_NEWLINES if newlines else _REGEXY
-    return pattern.sub(lambda m: m.group(1) + _KEPT + m.group(2), text)
+def _protect(text: str) -> str:
+    return _REGEXY.sub(lambda m: m.group(1) + _KEPT + m.group(2), text)
 
 
 def _restore(text: str) -> str:
     for letter in "bfn":
         text = text.replace(_KEPT + letter, "\\" + letter)
     return text
-
-
-def _one_line(found: list[dict]) -> bool:
-    """Does every citation here name a single line?"""
-    spans = [(c.get("start"), c.get("end")) for c in found if c.get("start")]
-    return bool(spans) and all(end in (None, start) for start, end in spans)
 
 
 def _quote_carrying_citation(body: str) -> tuple[list[dict], str]:
@@ -1038,17 +1067,7 @@ def _quote_carrying_citation(body: str) -> tuple[list[dict], str]:
                 text, _ = json.JSONDecoder().raw_decode(_protect(candidate))
             except ValueError:
                 continue
-            text = _restore(text)
-            if "\n" in text and _one_line(found):
-                # One line cited, several lines quoted: the citation and the text disagree, and the
-                # citation is the thing the model had in front of it. So the `\n` was inside
-                # something it quoted -- a character class, most often -- and not a break it meant.
-                try:
-                    flat, _ = json.JSONDecoder().raw_decode(_protect(candidate, newlines=True))
-                    text = _restore(flat)
-                except ValueError:
-                    pass
-            return found, text
+            return found, _restore(text)
     span = _first_span(rest)
     if span is None:
         return found, rest
