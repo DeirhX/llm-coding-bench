@@ -214,3 +214,74 @@ None of them changes this plan, and one of them closes a door for good.
   attribution logged on arrival rather than reconstructed, and `--force-model`, after the client was
   caught asking for `claude-opus-4-8` regardless of every model setting — the failure mode that
   evicts a resident 62 GB runner.
+
+## 7. State of the harness, measured over runs 17–21
+
+Every line below is from a live headless run against the local 35B, reviewing this repo's own
+off-switch tamper rule. Nothing here is inferred from a unit test. 285 tests pass, which is a
+statement about the parts, not about the whole.
+
+### What works
+
+**A run terminates cleanly and says what it failed to establish.** Run 21 finished with
+`is_error: false`, 22 turns, no context overflow. Its claims stage was refused three times, the flow
+gave up on it, and the session's final answer opened: *"The review flow is not finished. The claims
+stage was refused 3 times and the flow has given up on it."* That is the designed outcome for a stage
+that cannot meet its contract — an honest non-answer rather than a plausible one.
+
+**The survey stage.** Accepted in 258 s on 2 tool calls. It was 141 calls in run 20 before stages were
+given budgets of their own; the survey's is 60 and it now finishes well inside it.
+
+**Claims are parsed, and judged one at a time.** Run 21 round 4 produced 7 claims and 1 declared
+unknown, carrying 14 command citations; 6 claims stood and 1 was reported unverified, by name and with
+the reason. Compare run 18, where a stage with eight findings was told it had made none. The verifier
+now reads bold headers, numbered findings under a heading, paragraphs under a bare `CLAIM` heading,
+citations in a claim's own last sentence, probes reported in prose, quotes carrying gutters, and a
+dozen other shapes models actually write.
+
+**A refused probe counts as evidence of refusal.** A rule that denies things is proved by denying, and
+the stage under review spent 11 of its calls collecting exactly that.
+
+**Stage accounting is exact.** Every tool call is attributed to the stage that made it, because the
+client's `agent_id` distinguishes a subagent's calls from its parent's. Flow state is serialised with
+an `flock`, so concurrent hooks no longer overwrite each other.
+
+**The budget ends a runaway stage in one turn.** Run 20's survey hit 141 calls, received one refusal,
+and answered immediately. The same mechanism in run 18 produced 220 refusals.
+
+### What does not work
+
+**A stage that verifies six findings still delivers nothing.** `claims` is blocking, so when it is
+given up on the flow ends and the adversary never runs. Run 21 established six verified findings about
+a real rule and shipped none of them: they exist only in a refused round's ledger. This is the single
+biggest gap between the harness and the thing a user wants.
+
+**The review adapter demands a file quote and this stage never produced one.** Four rounds, 25
+citations, all of them commands. Every round was refused partly for `requires file_quote evidence and
+none was given` — the requirement is right for a code review, and the contract is losing the argument.
+
+**The same finding, restated, counts three times.** Run 21's round 1 wrote its four findings in three
+formats — bold, plain, then with line numbers — and all 14 parsed as separate claims, over the cap of
+12, with no evidence attached to any of them. There is no deduplication.
+
+**A round can end mid-thought.** Round 3 of run 21 wrote 454 characters and stopped on a sentence
+about what it was going to do next. It cost a round out of three.
+
+**A whole answer can vanish into one tool call.** Run 20's claims stage spent all 16,384 tokens of an
+answer on a single call's arguments; the proxy dropped it as truncated and the only thing on record was
+the note that it had been cut. Both proxy paths now log what they discard, which makes this findable
+rather than mysterious — it does not stop it happening.
+
+**The context ceiling is a cliff, not a slope.** Run 18 died at 98,342 tokens against a 98,304 window
+and run 20 at 98,950 — the second *with* a declared budget of 90,112, because Claude Code estimates
+tokens and llama-server tokenises them, and the two disagree by about 10% at that size. A quarter of
+the window is now held back and run 21 survived. This is a margin chosen by measurement, not a fix.
+
+**Two `Write` attempts per stage, refused.** Stages that only read keep trying to write their ledger
+to a file. The rule catches it every time; the instinct does not go away.
+
+### Not yet exercised
+
+The `implement` flow has not been run against a real feature since the harness changed under it. The
+interactive path (`claude-gemma.sh --flows`, `/review`, `/implement`) has the same wiring and the same
+tests, but the runs above are all headless.
