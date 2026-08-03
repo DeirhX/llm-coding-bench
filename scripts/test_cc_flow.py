@@ -771,9 +771,13 @@ def test_the_hand_back_survives_the_hook_and_not_just_the_function() -> None:
         assert "claim 6 cites a command nothing ran" in sent, sent[:400]
 
 
-def _edit(session: str, root: str, tool: str = "Write", path: str = "probe.py") -> tuple[str, str]:
+def _edit(session: str, root: str, tool: str = "Write", path: str = "probe.py",
+          agent: str = "") -> tuple[str, str]:
     payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": session,
                "cwd": root, "tool_input": {"file_path": str(Path(root, path)), "content": "x = 1"}}
+    if agent:
+        payload["agent_id"] = agent
+        payload["agent_type"] = "general-purpose"
     proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
                           capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
@@ -882,3 +886,28 @@ def test_hooks_writing_at_once_do_not_lose_each_others_records() -> None:
             proc.wait(timeout=60)
         kept = {e["stage"] for e in cc_flowstate.peek("race", root).get("stages", [])}
     assert kept == {"s%d" % i for i in range(6)}, kept
+
+
+def test_a_subagents_call_is_never_answered_with_an_order_to_launch_itself() -> None:
+    """The client sends `agent_id` on a subagent's calls and nothing on the parent's, so the two are
+    distinguishable after all. Run 19 could not tell them apart, lost the launch record of its claims
+    stage to a race, and refused all 157 of that stage's own calls with an order to launch it."""
+    with tempfile.TemporaryDirectory() as root:
+        session = "worker"
+        state = cc_flowstate.begin("review", "q", session, root)
+        cc_flowstate.save(state, session, root)         # nothing recorded as running
+        decision, why = _edit(session, root, tool="Read", path="a.py", agent="ag123")
+        assert decision == "allow", why
+        after = cc_flowstate.peek(session, root)
+        assert cc_flowstate.running(after) == ["survey"], after
+        assert after["stages"][-1].get("agent") == "ag123", after["stages"][-1]
+
+
+def test_the_parents_own_call_is_still_refused_while_a_stage_is_owed() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        session = "parent"
+        state = cc_flowstate.begin("review", "q", session, root)
+        cc_flowstate.save(state, session, root)
+        decision, why = _edit(session, root, tool="Read", path="a.py")
+        assert decision == "deny", why
+        assert "STAGE: survey" in why, why

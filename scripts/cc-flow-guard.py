@@ -127,7 +127,7 @@ CLERICAL = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "Tas
 
 
 def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = "",
-                       tool_input: dict | None = None) -> None:
+                       tool_input: dict | None = None, agent: str = "") -> None:
     """While a flow is running with no stage in flight, the session is an orchestrator.
 
     Told to run its stages as subagents, the first real session read the file itself and answered
@@ -149,6 +149,19 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
              "answered yet is working, not stuck, and stopping it leaves the flow with nothing to "
              "judge." % (", ".join(cc_flowstate.running(state)), (tool_input or {}).get("task_id") or ""))
     in_flight = cc_flowstate.running(state)
+    if agent and not in_flight:
+        # This call comes from a subagent, so a stage is working whatever the flow remembers. Run 19
+        # lost the launch of its claims stage to a race between hooks and then read all 157 of the
+        # stage's own tool calls as the orchestrator idling, refusing each one with an order to launch
+        # the stage that was making them. A worker is never told to launch itself; the record is put
+        # back instead, and the stage is charged for the calls it has made since.
+        stage = cc_flowstate.next_stage(state)
+        if stage is not None:
+            cc_flowstate.record_launch(state, stage, agent=agent)
+            cc_flowstate.save(state, session, root)
+            in_flight = cc_flowstate.running(state)
+        else:
+            allow()
     if in_flight:
         # A stage is in flight, so this is that stage working -- but only up to a point. Reading is
         # charged against a budget because a claims stage once spent 387 calls re-reading the files
@@ -290,8 +303,14 @@ def main() -> int:
         allow()             # no flow running: ordinary delegation is none of our business
 
     tool_input = payload.get("tool_input") or {}
+    # Who is calling. Undocumented, and long assumed absent -- the note in this repo said no client
+    # identity ever reaches a hook -- but the client does send it: `agent_id` is the subagent's id on
+    # its own calls and absent on the parent's. Measured from a live run: 15 payloads carrying it,
+    # matching the survey stage's 15 calls exactly, and none on the orchestrator's Read, Agent and
+    # TaskOutput. It is the difference between a stage working and a session avoiding the work.
+    agent = str(payload.get("agent_id") or "")
     if tool not in ("Task", "Agent"):
-        return _orchestrator_only(state, tool, session, root, tool_input)
+        return _orchestrator_only(state, tool, session, root, tool_input, agent)
 
     prompt = str(tool_input.get("prompt") or "")
     found = STAGE_LINE.search(prompt)
