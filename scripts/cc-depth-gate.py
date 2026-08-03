@@ -540,6 +540,24 @@ def _digest(text: str, limit: int = 1200) -> str:
     return "\n".join(kept)[:limit]
 
 
+# How long the stop hook will sit waiting for a stage to report before answering the session. Long
+# enough to cover the gap between a session finishing its turn and its stage finishing its work,
+# short enough that a hook the client has given up on is not still sleeping.
+WAIT_FOR = float(os.environ.get("CC_FLOW_WAIT", "90"))
+
+
+def _await_stage(session: str, root: str, state: dict) -> tuple[dict, list[str]]:
+    """Wait here for the stage in flight, and say what is still running when we give up."""
+    deadline = time.time() + WAIT_FOR
+    while time.time() < deadline:
+        in_flight = cc_flowstate.running(state)
+        if not in_flight:
+            return state, []
+        time.sleep(2.0)
+        state = cc_flowstate.load(session, root)
+    return state, cc_flowstate.running(state)
+
+
 def main() -> int:
     if OFF_SWITCH.exists():
         return allow()
@@ -596,9 +614,18 @@ def main() -> int:
         abandoned = cc_flowstate.forget_running(state)
         if abandoned:
             cc_flowstate.save(state, session, root)
+        in_flight = cc_flowstate.running(state)
+        if in_flight:
+            # Blocking a stop cannot make a session wait. It can only make it speak again, and it
+            # did: told to wait for the survey, it said "I'll wait for it to report" and stopped,
+            # eighty-four times over ten minutes and seventy-six thousand tokens. So the waiting is
+            # done here instead, in the hook, where waiting is a thing a process can actually do.
+            state, in_flight = _await_stage(session, root, state)
+        # After the wait, and not before it: a stage that reported while we waited has changed what
+        # comes next, and answering from the older view told a session that survey had run and that
+        # survey had not.
         left = cc_flowstate.next_stage(state)
         nudges = int(state.get("nudges", 0))
-        in_flight = cc_flowstate.running(state)
         if in_flight and nudges < NUDGE_LIMIT:
             # Stopping with a stage still reading is the ordinary shape of this: the launch returns
             # a task and the turn ends while the work goes on. What the session must not do is take
@@ -607,9 +634,9 @@ def main() -> int:
             state["nudges"] = nudges + 1
             cc_flowstate.save(state, session, root)
             return block(
-                "The %s stage is still running. Read its output and wait for it to report. It has "
-                "not failed and it is not stuck; a stage takes minutes, and its report is the only "
-                "thing here that gets judged."
+                "The %s stage is still running. Call the TaskOutput tool for it with `block` "
+                "set to true and a timeout of several minutes -- that is how you wait; saying you "
+                "will wait and then stopping is not. It has not failed and it is not stuck."
                 % ", ".join(in_flight))
         if left and nudges < NUDGE_LIMIT:
             done = cc_flowstate.done(state)

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -229,8 +232,11 @@ def _subagent_stop(answer: str, root: str, session: str = "s1") -> str:
     payload = {"hook_event_name": "SubagentStop", "session_id": session, "cwd": root,
                "agent_id": "a1", "last_assistant_message": answer,
                "agent_transcript_path": ""}
+    # The stop hook waits for a stage in flight, which is the point of it; a test that wanted the
+    # full ninety seconds of that would be a test nobody runs.
+    env = {**os.environ, "CC_FLOW_WAIT": os.environ.get("CC_FLOW_WAIT", "4")}
     proc = subprocess.run([sys.executable, str(GATE)], input=json.dumps(payload),
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True, timeout=60, env=env)
     assert proc.returncode == 0, proc.stderr
     if not proc.stdout.strip():
         return "allow"
@@ -258,8 +264,11 @@ def _stop(answer: str, root: str, session: str = "s1", resumed: bool = False) ->
     payload = {"hook_event_name": "Stop", "session_id": session, "cwd": root,
                "last_assistant_message": answer, "transcript_path": "",
                "stop_hook_active": resumed}
+    # The stop hook waits for a stage in flight, which is the point of it; a test that wanted the
+    # full ninety seconds of that would be a test nobody runs.
+    env = {**os.environ, "CC_FLOW_WAIT": os.environ.get("CC_FLOW_WAIT", "4")}
     proc = subprocess.run([sys.executable, str(GATE)], input=json.dumps(payload),
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True, timeout=60, env=env)
     assert proc.returncode == 0, proc.stderr
     if not proc.stdout.strip():
         return "allow", ""
@@ -460,3 +469,28 @@ def test_a_stage_reading_within_its_budget_is_left_alone() -> None:
         after = cc_flowstate.load("s1", root)
     assert decision == "allow", why
     assert after["stages"][-1]["calls"] == 1, after
+
+
+def test_the_stop_hook_waits_rather_than_asking_the_session_to() -> None:
+    """Told to wait for its survey, a session said "I'll wait for it to report" and stopped --
+    eighty-four times, over ten minutes and seventy-six thousand output tokens. Blocking a stop
+    cannot make a session wait; it can only make it speak again. So the hook waits, and when the
+    stage reports while it is waiting the session is told what to do next instead."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.save(state, "s1", root)
+
+        def report() -> None:
+            time.sleep(1.0)
+            live = cc_flowstate.load("s1", root)
+            cc_flowstate.record_verdict(live, "survey", [])
+            cc_flowstate.save(live, "s1", root)
+
+        threading.Thread(target=report, daemon=True).start()
+        began = time.time()
+        decision, why = _stop("here is what I think", root)
+        waited = time.time() - began
+    assert decision == "block", decision
+    assert waited >= 1.0, waited
+    assert "STAGE: claims" in why, why
