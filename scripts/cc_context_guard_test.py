@@ -341,3 +341,23 @@ def test_the_refusal_says_how_to_exercise_the_rule_it_enforces() -> None:
     assert decision == "deny", why
     assert "cc-context-guard.py" in why, why
     assert "tool_input" in why, why
+
+
+def test_a_file_whose_name_merely_ends_with_the_switch_is_not_the_switch():
+    """The name was bounded on the right and not on the left, and _VERBS ends in a run of any
+    characters, so the switch name matched inside a longer one: `touch /tmp/my-cc-guard-off` was
+    refused as tampering with a file it does not name. Found by a review stage probing this rule,
+    which is the only reason it is known -- and the refusal cost that stage a round."""
+    setup()
+    for command in ("touch /tmp/my-cc-guard-off", "touch /tmp/not-cc-depth-off", "mv a b-cc-guard-off"):
+        decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision != "deny", command
+
+
+def test_a_path_still_reaches_the_switch_itself():
+    """Bounding the left side must not stop the rule reaching the file through a directory, which is
+    how every real attempt on it is written."""
+    setup()
+    for command in ("touch /tmp/cc-guard-off", "touch ../tmp/cc-depth-off", "echo x > /tmp/cc-guard-off"):
+        decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision == "deny", command

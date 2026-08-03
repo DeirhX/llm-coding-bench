@@ -243,7 +243,12 @@ def tampers(command: str) -> bool:
     for switch in SWITCHES:
         # The directory is optional because a stage writes the path any way it likes -- /tmp/x,
         # ../tmp/x, or x from /tmp -- and the file is what matters.
-        name = r"(?:[^\s'\";|&]*/)?" + re.escape(switch.name) + r"(?![\w.-])"
+        # Both ends are bounded. The right one was, the left was not, and _VERBS ends in a run of
+        # any characters -- so the name matched inside a longer one and `touch /tmp/my-cc-guard-off`
+        # was refused as tampering with a file it does not name. Found by a review stage probing this
+        # very rule, which is the only reason it is known. A `/` is not a name character, so a path
+        # still reaches the switch.
+        name = (r"(?:[^\s'\";|&]*/)?(?<![\w.-])" + re.escape(switch.name) + r"(?![\w.-])")
         if re.search(_VERBS + name, command):
             return True
         if re.search(r">>?\s*['\"]?" + name, command):
