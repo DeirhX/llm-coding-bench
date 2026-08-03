@@ -911,3 +911,18 @@ def test_the_parents_own_call_is_still_refused_while_a_stage_is_owed() -> None:
         decision, why = _edit(session, root, tool="Read", path="a.py")
         assert decision == "deny", why
         assert "STAGE: survey" in why, why
+
+
+def test_the_stage_on_record_learns_which_worker_is_making_its_calls() -> None:
+    """A launch is recorded before the client has said which agent it started, so the id is only
+    knowable when that agent calls a tool. Bound then, a stage can afterwards be matched to a worker
+    rather than inferred from whatever happens to be in flight."""
+    with tempfile.TemporaryDirectory() as root:
+        session = "bind"
+        state = cc_flowstate.begin("review", "q", session, root)
+        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.save(state, session, root)
+        decision, why = _edit(session, root, tool="Read", path="a.py", agent="agworker")
+        assert decision == "allow", why
+        entry = cc_flowstate.peek(session, root)["stages"][-1]
+        assert entry["agent"] == "agworker", entry

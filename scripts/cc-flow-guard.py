@@ -167,6 +167,14 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
         # charged against a budget because a claims stage once spent 387 calls re-reading the files
         # it was about to cite, announcing each time that it needed to re-read them first.
         spent = cc_flowstate.spend(state, in_flight[0])
+        if agent:
+            # Bind the stage to the worker that is actually making the calls. Launches are recorded
+            # before the client has said which agent it started, so the id only becomes knowable when
+            # that agent calls a tool, and it is what lets anything later match a stage to a worker.
+            for entry in reversed(state.get("stages") or []):
+                if entry.get("stage") == in_flight[0] and entry.get("verdict") is None:
+                    entry["agent"] = entry.get("agent") or agent
+                    break
         cc_flowstate.save(state, session, root)
         # A stage that reads and judges must not write. The scripted path checks the tree's
         # fingerprint after the fact; here there is no after, so the edit is refused as it is made.
