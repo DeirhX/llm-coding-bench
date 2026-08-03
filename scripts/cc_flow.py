@@ -34,6 +34,11 @@ class Stage:
     # committed to nothing was still implemented, faithfully, by the two stages below it -- which is
     # how a change that alters no behaviour gets built and then verified.
     blocking: bool = False
+    # How many tool calls this stage may spend before it is told to answer, where the flow's default
+    # is too generous for it. An index of forty entries does not need what a claims stage needs: run
+    # 20's survey spent 141 calls, a third of them refused, and then wrote its index from what it had
+    # in the first twenty. 0 means the flow's default.
+    budget: int = 0
 
     @property
     def tools(self) -> str:
@@ -45,6 +50,7 @@ DEFAULT_STAGES = [
         name="survey",
         produces="survey.md",
         verify=False,     # an inventory makes no claims, so there is nothing to verify yet
+        budget=60,
         stance=("Map the territory and stop. List the files, entry points and data that bear on "
                 "the question, each with the line range you actually opened. A file here can be "
                 "longer than one read allows, so say which part of it you saw and let the next "

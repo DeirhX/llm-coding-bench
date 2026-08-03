@@ -186,7 +186,10 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
                      "what you learned in your answer. A file you create is not evidence here: "
                      "nothing reads it, and the stage after you sees the tree, not your scratch."
                      % in_flight[0])
-        over = spent - cc_flowstate.CALL_BUDGET
+        judged = cc_flow.stage_in(state.get("flow") or "", in_flight[0])
+        allowed = (judged.budget if judged is not None and judged.budget else
+                   cc_flowstate.CALL_BUDGET)
+        over = spent - allowed
         if over > 0:
             # The refusal has to get shorter as it repeats, because it is charged to the context it
             # is trying to protect. Run 18's second round spent 361 calls against a budget of 140 and

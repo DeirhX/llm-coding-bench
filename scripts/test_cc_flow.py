@@ -464,7 +464,7 @@ def test_a_stage_that_will_not_stop_reading_is_made_to_answer() -> None:
     nothing about this: the loop is in the reading, not the writing."""
     with tempfile.TemporaryDirectory() as root:
         state = cc_flowstate.begin("review", "t", "s1", root)
-        cc_flowstate.record_launch(state, "survey")
+        cc_flowstate.record_launch(state, "claims")   # the survey has a shorter leash of its own
         state["stages"][-1]["calls"] = cc_flowstate.CALL_BUDGET
         cc_flowstate.save(state, "s1", root)
         decision, why, _ = run("", root, tool="Read")
@@ -926,3 +926,20 @@ def test_the_stage_on_record_learns_which_worker_is_making_its_calls() -> None:
         assert decision == "allow", why
         entry = cc_flowstate.peek(session, root)["stages"][-1]
         assert entry["agent"] == "agworker", entry
+
+
+def test_a_stage_may_be_given_a_shorter_leash_than_the_flow() -> None:
+    """An index of forty entries does not need what a claims stage needs. Run 20's survey spent 141
+    calls, a third of them refused, and then wrote its index from what it had seen in the first
+    twenty."""
+    survey = cc_flow.stage_in("review", "survey")
+    assert survey is not None and 0 < survey.budget < cc_flowstate.CALL_BUDGET, survey
+    with tempfile.TemporaryDirectory() as root:
+        session = "leash"
+        state = cc_flowstate.begin("review", "q", session, root)
+        cc_flowstate.record_launch(state, "survey")
+        state["stages"][-1]["calls"] = survey.budget
+        cc_flowstate.save(state, session, root)
+        decision, why = _edit(session, root, tool="Read", path="a.py", agent="ag1")
+        assert decision == "deny", why
+        assert "survey" in why, why
