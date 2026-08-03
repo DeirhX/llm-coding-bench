@@ -361,8 +361,28 @@ def test_a_quote_rewrapped_onto_one_line_is_not_a_fabrication() -> None:
     joined = " ".join(l.strip() for l in body[n - 1:n + 1])
     verdict = vf.file_quote(ROOT, "scripts/cc_verify.py", n, n + 1, joined)
     assert verdict.ok, verdict.detail
-    assert "rewrapped" in verdict.detail, verdict.detail
+    assert verdict.kind == vf.REWRAPPED, verdict.detail
 
 
 def test_rewrapping_does_not_excuse_the_wrong_text() -> None:
     assert not vf.file_quote(ROOT, "scripts/cc_verify.py", 1, 2, "def nothing_of_the_sort():").ok
+
+
+def test_a_header_that_says_the_range_in_passing_is_still_a_header() -> None:
+    """`QUOTE (lines 212-217):` went unrecognised as a header, so the quote attached to nothing
+    and nine otherwise complete claims were reported as incomplete file_quotes."""
+    claims, _ = vf.parse_ledger(
+        "CLAIM: x\nEVIDENCE: a/b.py:10-11\nQUOTE (lines 10-11):\n    pass\n")
+    assert claims[0]["quote"] == "    pass", claims[0]
+
+
+def test_lines_joined_with_slashes_are_still_lines() -> None:
+    """A stage quoted six lines of the guard on one line with ` / ` between them."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("def _flat("))
+    joined = " / ".join("`%s`" % l.strip() for l in body[n - 1:n + 1])
+    assert vf.file_quote(ROOT, "scripts/cc_verify.py", n, n + 1, joined).ok
+
+
+def test_a_slash_in_code_is_not_a_line_break() -> None:
+    assert vf._unslashed("a = b / c") == "a = b / c"

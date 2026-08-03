@@ -84,8 +84,8 @@ def _significant(text: str, first: int = 0) -> list[str]:
     the line the citation names is not a coincidence.
     """
     return [line.rstrip()
-            for line in _unticked(
-                _untrailed(_unlabelled(_ungutted(_unfenced(text), first), first), first))
+            for line in _unticked(_unslashed(
+                _untrailed(_unlabelled(_ungutted(_unfenced(text), first), first), first)))
             .strip("\n").split("\n") if line.strip()]
 
 
@@ -190,6 +190,23 @@ def _untrailed(text: str, first: int = 0) -> str:
     return "\n".join(stripped.get(l, l) for l in lines)
 
 
+# `` `first line` / `second line` `` -- several lines of a file quoted on one, with a slash between
+# them. Only split when every piece is backticked, because a slash between two pieces of bare code
+# is division far more often than it is a line break.
+_SLASHED = re.compile(r"\s+/\s+")
+
+
+def _unslashed(text: str) -> str:
+    """Split a one-line quote back into the lines it was joined from."""
+    if "\n" in text.strip():
+        return text
+    pieces = [p.strip() for p in _SLASHED.split(text.strip()) if p.strip()]
+    if len(pieces) < 2 or not all(p.startswith("`") and p.endswith("`") and len(p) > 1
+                                  for p in pieces):
+        return text
+    return "\n".join(pieces)
+
+
 def _unticked(text: str) -> str:
     """Drop the inline backticks a quote is wrapped in, line by line.
 
@@ -257,6 +274,13 @@ def file_quote(root: str, path: str, start: int, end: int, quote: str) -> Verdic
     if _dedented(cited) == _dedented(quoted):
         shift = _indent(quoted[0]) - _indent(cited[0])
         return Verdict(INDENT_DRIFT, "%s:%d-%d, quote reindented by %+d" % (path, start, end, shift))
+
+    # A quote written on one line never claimed a layout, so the rule below -- which refuses a
+    # quote whose indentation differs from the file's, because in Python that can change what the
+    # code means -- has nothing to protect here. Judge it as the single run of text it was written
+    # as, and only then fall through.
+    if "\n" not in quote.strip() and end > start and _flat(cited) == _flat(quoted) and _flat(cited):
+        return Verdict(REWRAPPED, "%s:%d-%d, quoted as one line" % (path, start, end))
 
     if [l.strip() for l in cited] == [l.strip() for l in quoted]:
         for n, (was, now) in enumerate(zip(cited, quoted)):
@@ -355,6 +379,12 @@ CLAIM_RE = re.compile(r"^CLAIM:\s*(?P<claim>.+?)\s*$", re.M)
 UNKNOWN_RE = re.compile(r"^UNKNOWN:\s*(?P<unknown>.+?)\s*$", re.M)
 HEADERS = ("CLAIM:", "EVIDENCE:", "QUOTE:", "UNKNOWN:", "SEVERITY:", "FALSIFICATION:",
            "PREDICT:")
+
+# `QUOTE (lines 212-217):` -- the header with the range said in passing before the colon. Written
+# that way by a stage whose ledger was otherwise complete, and unrecognised as a header at all, so
+# the quote never attached to anything and nine claims were reported as incomplete.
+HEADER_RE = re.compile(r"^(?P<name>%s)\s*(?:\([^)]*\))?\s*:"
+                       % "|".join(h.rstrip(":") for h in HEADERS))
 
 # The four shapes an EVIDENCE line may take. Only the first was accepted originally, which quietly
 # made two adapters impossible to satisfy: refactor-proposal requires an `absence` search and
@@ -491,20 +521,21 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
         quote = None
 
     for line in text.split("\n"):
-        header = next((h for h in HEADERS if line.startswith(h)), None)
+        seen = HEADER_RE.match(line)
+        header = seen.group("name") + ":" if seen else None
         if quote is not None and header is None:
             quote.append(line)
             continue
         close_quote()
         if header == "CLAIM:":
-            current = {"claim": line[len("CLAIM:"):].strip(), "evidence": [],
+            current = {"claim": line[seen.end():].strip(), "evidence": [],
                        "severity": None, "falsification": None}
             claims.append(current)
             evidence = None
         elif current is None:
             continue
         elif header == "EVIDENCE:":
-            body = line[len("EVIDENCE:"):].strip()
+            body = line[seen.end():].strip()
             found = _classify_all(body)
             if not found:
                 found = [{"kind": None, "raw": body}]
@@ -515,13 +546,13 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
             evidence = found[-1]
         elif header == "QUOTE:":
             quote = []
-            rest = line[len("QUOTE:"):].strip()
+            rest = line[seen.end():].strip()
             if rest:
                 quote.append(rest)
         elif header == "SEVERITY:":
-            current["severity"] = line[len("SEVERITY:"):].strip().lower()
+            current["severity"] = line[seen.end():].strip().lower()
         elif header == "FALSIFICATION:":
-            current["falsification"] = {"command": line[len("FALSIFICATION:"):].strip()}
+            current["falsification"] = {"command": line[seen.end():].strip()}
     close_quote()
 
     for claim in claims:
