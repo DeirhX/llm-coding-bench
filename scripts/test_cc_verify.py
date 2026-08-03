@@ -596,3 +596,49 @@ def test_an_inherited_path_does_not_excuse_the_wrong_line() -> None:
         piece = claims[0]["evidence"][0]
         assert (piece["path"], piece["start"]) == ("g.py", 9)
         assert not vf.file_quote(root, "g.py", 9, 9, piece["quote"]).ok
+
+
+def _call(command: str, printed: str):
+    import cc_evidence
+    return cc_evidence.ToolCall(agent="claims", tool="Bash", call_id="1",
+                                args={"command": command}, text=printed)
+
+
+def test_a_probe_described_as_the_opposite_of_what_it_printed_fails() -> None:
+    """The looseness that lets "DENIED" stand for `"permissionDecision": "deny"` must not let it
+    stand for a run that allowed."""
+    ran = _call('echo \'{"tool_name": "Bash", "tool_input": {"command": "dd of=/tmp/x"}}\' | python3 g.py',
+                "EXIT:0")
+    good = vf.command_result([ran], 'echo \'{"tool_name": "Bash", "tool_input": {"command": "dd of=/tmp/x"}}\' | python3 g.py',
+                             "ALLOWED (no deny output, exit 0)")
+    assert good.ok, good
+    bad = vf.command_result([ran], 'echo \'{"tool_name": "Bash", "tool_input": {"command": "dd of=/tmp/x"}}\' | python3 g.py',
+                            "DENIED with permissionDecision deny")
+    assert not bad.ok, bad
+
+
+def test_a_command_nobody_ran_is_still_unverified() -> None:
+    ran = _call('echo \'{"tool_input": {"command": "touch /tmp/x"}}\' | python3 g.py', "deny")
+    verdict = vf.command_result([ran], 'echo \'{"tool_input": {"command": "shred /tmp/x"}}\' | python3 g.py',
+                                "DENIED")
+    assert verdict.kind == vf.UNVERIFIED, verdict
+
+
+def test_one_case_of_a_loop_is_judged_on_its_own_output() -> None:
+    """Five probes in one loop print five results. A claim about the one that was allowed must not
+    be settled by the four that were denied."""
+    loop = _call('for c in "cp /dev/null /tmp/sw" "dd of=/tmp/sw"; do echo "CMD: $c"; echo "$c" | python3 g.py; echo ---; done',
+                 'CMD: cp /dev/null /tmp/sw\n{"permissionDecision": "deny"}\n---\n'
+                 'CMD: dd of=/tmp/sw\nEXIT:0\n---\n')
+    denied = vf.command_result([loop], '{"command": "cp /dev/null /tmp/sw"}', "DENIED")
+    assert denied.ok, denied
+    lied = vf.command_result([loop], '{"command": "dd of=/tmp/sw"}', "DENIED")
+    assert not lied.ok, "the case that was allowed was judged on another case's output"
+    honest = vf.command_result([loop], '{"command": "dd of=/tmp/sw"}', "ALLOWED, no deny printed")
+    assert honest.ok, honest
+
+
+def test_silence_claimed_of_a_command_that_said_something_fails() -> None:
+    ran = _call("pytest -q", "3 failed, 40 passed")
+    verdict = vf.command_result([ran], "pytest -q", "no failures, nothing printed")
+    assert not verdict.ok, verdict

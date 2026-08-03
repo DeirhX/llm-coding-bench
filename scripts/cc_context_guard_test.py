@@ -263,6 +263,10 @@ def test_the_model_may_not_turn_the_guard_off():
                     "echo x > /tmp/cc-guard-off",
                     "echo x >> /tmp/cc-guard-off",
                     "cd /tmp && touch cc-guard-off",
+                    # Found by a review of this rule, which ran each of them against the hook:
+                    # neither dd nor ln was a write verb, and both make the file.
+                    "dd of=/tmp/cc-guard-off",
+                    "ln -s /dev/null /tmp/cc-guard-off",
                     "rm -f /tmp/cc-guard-off"):
         decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
         assert decision == "deny", command
@@ -280,6 +284,18 @@ def test_a_stage_may_ask_the_hook_what_it_would_do():
              "\"touch /tmp/cc-guard-off\"}}' | python3 scripts/cc-context-guard.py")
     decision, why = run("Bash", {"command": probe}, TMP / "none.jsonl")
     assert decision == "allow", why
+
+
+def test_a_file_that_merely_starts_with_the_switch_name_is_not_the_switch():
+    """Also from that review: the Write branch compared the name as a substring, so writing to
+    /tmp/cc-guard-off.bak -- a different file -- was refused as tampering."""
+    setup()
+    decision, _ = run("Write", {"file_path": "/tmp/cc-guard-off.bak", "content": "x"},
+                      TMP / "none.jsonl")
+    assert decision == "allow"
+    decision, _ = run("Write", {"file_path": "/tmp/cc-guard-off", "content": "x"},
+                      TMP / "none.jsonl")
+    assert decision == "deny"
 
 
 def test_reading_about_the_off_switch_is_not_tampering():

@@ -223,7 +223,7 @@ _PROBE = re.compile(r"cc-(?:context-guard|depth-gate|flow-guard|depth-contract)\
 # Written as "what would this command do to that path", not "does this command mention that path".
 # The mention version refused `grep -rn cc-guard-off scripts/ > notes.txt`, which reads the rule and
 # writes somewhere else entirely, and a guard that refuses reading is a guard nobody can review.
-_VERBS = r"(?:touch|rm|unlink|mv|cp|tee|install|ln)\b[^;|&\n]*"
+_VERBS = r"(?:touch|rm|unlink|mv|cp|dd|tee|install|ln|shred|truncate)\b[^;|&\n]*"
 _CALLS = r"(?:open|Path|write_text|writeFile)\s*\(\s*['\"]?"
 
 
@@ -306,7 +306,7 @@ def main():
              "refusal is not a way round the refusal: the refusal is the instruction. Do what it "
              "said, or say in your answer that you could not and why.")
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit") and any(
-            s.name in (tool_input.get("file_path") or "") for s in SWITCHES):
+            Path(tool_input.get("file_path") or "").name == s.name for s in SWITCHES):
         deny("The guards' off-switches are the operator's, not yours. Do what the refusal said, or "
              "say in your answer that you could not and why.")
 

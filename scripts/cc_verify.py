@@ -403,21 +403,137 @@ def _indent(line: str) -> int:
     return len(line) - len(line.lstrip())
 
 
+_STOPWORDS = {"the", "a", "an", "and", "or", "of", "to", "in", "on", "with", "no", "not", "is",
+              "was", "it", "its", "that", "this", "for", "as", "at", "by", "from", "so", "output",
+              "exit", "code", "printed", "prints", "returns", "returned", "result"}
+
+
+def _tokens(text: str) -> list[str]:
+    return [w for w in re.findall(r"[A-Za-z0-9_]+", text.lower())
+            if w not in _STOPWORDS and len(w) > 1]
+
+
+_SILENCE = re.compile(r"\b(no|nothing|silent|silence|empty|without)\b", re.I)
+# What a shell says when a command said nothing: the client's placeholder, and the exit marker a
+# stage adds to see the status. A probe of a hook that allows prints exactly this and nothing else.
+_QUIET = re.compile(r"^(?:\s*|-{2,}|EXIT:\s*\d+|\(?[Bb]ash completed with no output\)?|"
+                    r"\(?no output\)?)$")
+
+
+def _said(printed: str) -> str:
+    """What the command actually printed, with the shell's bookkeeping taken out."""
+    return "\n".join(l for l in (printed or "").splitlines() if not _QUIET.match(l.strip())).strip()
+
+
+def _supports(printed: str, expected: str) -> bool:
+    """Does what the command printed bear out how the stage described it?
+
+    Verbatim substring was the first rule and it refused a stage that had run the experiment and
+    reported it correctly: it wrote "DENIED (hookSpecificOutput with permissionDecision: deny)" of
+    output that says exactly that in JSON, and "ALLOWED (no deny output, exit code 0)" of a command
+    that printed nothing at all. Neither description is a quote and neither is wrong. Descriptions
+    are held to their content words instead, most of which must appear in the output, and a
+    description of silence is held to the output being silent.
+    """
+    if expected in printed:
+        return True
+    body = _said(printed)
+    wanted = _tokens(expected)
+    if not body:
+        # "no deny output", "exit code 0", "nothing printed": a claim about silence, against
+        # silence. Anything that names something the command supposedly said is not that.
+        return bool(_SILENCE.search(expected)) or not wanted
+    if not wanted:
+        return False
+    low = body.lower()
+    # "DENIED" of output that says `"permissionDecision": "deny"`, "ALLOWED" of one that says
+    # allow: the stage described what it saw in the words a person uses for it. Long words are
+    # matched on their opening so that the tense does not decide whether a true report is accepted.
+    hits = sum(1 for w in set(wanted) if w in low or (len(w) >= 5 and w[:3] in low))
+    if _SILENCE.search(expected):
+        # A description with "no" or "nothing" in it is partly about what is absent, and counting
+        # words cannot see a negation: "no failures, nothing printed" scored a match against "3
+        # failed, 40 passed", on the strength of failures against failed. Every word has to be
+        # there before a claim of that shape is accepted against output that is not silent.
+        return hits == len(set(wanted))
+    return hits * 2 >= len(set(wanted))
+
+
+# `"command": "touch /tmp/cc-guard-off"` -- the payload inside a probe of a hook. Twenty probes in
+# one session differ only here; everything around them is the same echo, the same pipe and the same
+# path, so this is the part that says which experiment a citation is about.
+_PAYLOAD = re.compile(r'"(?:command|file_path|new_string|content)"\s*:\s*"(?P<value>[^"]{3,})"')
+
+
+def _same_command(wanted: str, ran: str) -> bool:
+    """Is the cited command one of the things this call ran?
+
+    A stage testing six payloads runs them in one loop and cites them one at a time, which is the
+    right way round to report it: the loop is how it was run, the payload is what the claim is
+    about. Content-word overlap alone said yes to all twenty, because probes of the same hook are
+    nearly the same string -- so when the citation carries a payload, that payload has to be in
+    what ran, and it is what distinguishes them.
+    """
+    payloads = [m.group("value") for m in _PAYLOAD.finditer(wanted)]
+    if payloads:
+        return all(" ".join(v.split()) in ran for v in payloads)
+    words = set(_tokens(wanted))
+    if len(words) < 4:
+        return False
+    present = set(_tokens(ran))
+    return len(words & present) * 10 >= len(words) * 7
+
+
+# Where the next case starts in the output of a loop: a rule of dashes, or a label the stage echoed
+# before each one. EXIT is deliberately not a label -- it is the status of the case just run, and
+# treating it as the start of the next one empties every section.
+_NEXT_CASE = re.compile(r"^\s*(?:-{3,}|={3,}|(?!EXIT)[A-Z][A-Z_]{1,9}:)", re.M)
+
+
+def _section(printed: str, payloads: list[str]) -> str:
+    """The part of the output belonging to the payload cited, when several ran in one call.
+
+    Five probes in one loop print five results, and judging a claim about the third against all
+    five would accept "denied" from a run that allowed. The stage labels each case as it goes,
+    which is what makes the split possible; when it does not, the whole output stands.
+    """
+    # Only a payload long enough to be its own address. `"content": "off"` is a payload too, and
+    # looking for "off" in the output found it inside "off-switches" in the refusal text, so the
+    # section began in the middle of the sentence that proved the claim.
+    for value in sorted((v for v in payloads if len(v) >= 8), key=len, reverse=True):
+        at = printed.find(value)
+        if at < 0:
+            continue
+        rest = printed[at + len(value):]
+        stop = _NEXT_CASE.search(rest)
+        return rest[:stop.start()] if stop else rest
+    return printed
+
+
 def command_result(calls, command_fragment: str, expected: str) -> Verdict:
-    """Did some command in this session run `command_fragment` and print `expected`?"""
+    """Did some command in this session run `command_fragment` and print `expected`?
+
+    The fragment is matched loosely in both directions because a stage testing six payloads runs
+    them in one call, joined by semicolons or wrapped in a loop, and then cites them one at a time
+    -- which is the right way round to report it and was reported as five commands nobody ran.
+    """
     seen = 0
+    wanted = " ".join(command_fragment.split())
     for call in calls:
         if call.tool != "Bash":
             continue
-        if command_fragment not in str(call.args.get("command", "")):
+        ran = " ".join(str(call.args.get("command", "")).split())
+        if wanted not in ran and ran not in wanted and not _same_command(wanted, ran):
             continue
         seen += 1
-        if expected in (call.text or ""):
+        payloads = [m.group("value") for m in _PAYLOAD.finditer(wanted)]
+        if _supports(_section(call.text or "", payloads), expected):
             return Verdict(PASS if call.ok else FAIL,
-                           "%s (exit %s)" % (command_fragment, "ok" if call.ok else "error"))
+                           "%s (exit %s)" % (command_fragment[:60], "ok" if call.ok else "error"))
     if not seen:
-        return Verdict(UNVERIFIED, "no recorded command matching %r" % command_fragment)
-    return Verdict(FAIL, "%d run(s) of %r, none printed %r" % (seen, command_fragment, expected))
+        return Verdict(UNVERIFIED, "no recorded command matching %r" % command_fragment[:80])
+    return Verdict(FAIL, "%d run(s) of %r, none printed anything like %r"
+                   % (seen, command_fragment[:60], expected[:60]))
 
 
 def log_match(path: str, pattern: str) -> Verdict:
