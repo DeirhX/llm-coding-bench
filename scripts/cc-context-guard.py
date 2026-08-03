@@ -305,9 +305,17 @@ def main():
              % max(naps))
 
     if tool == "Bash" and tampers(tool_input.get("command") or ""):
-        deny("The guards' off-switches are the operator's, not yours. Turning one off to get past a "
-             "refusal is not a way round the refusal: the refusal is the instruction. Do what it "
-             "said, or say in your answer that you could not and why.")
+        # A stage reviewing this rule has to exercise it, and the only way that is permitted is to
+        # send the hook a payload -- which the rule allows and nothing said so. Run 12 spent 262
+        # refusals discovering that by trial; run 20's survey spent half its calls on the same thing.
+        # So the refusal now names the one form that works.
+        deny("The guards' off-switches are the operator's, not yours, and turning one off to get past "
+             "a refusal is not a way round it: the refusal is the instruction. To test this rule "
+             "rather than trip it, send the hook the payload instead of running the command -- "
+             "echo '{\"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"touch "
+             "/tmp/cc-guard-off\"}}' | python3 scripts/cc-context-guard.py -- which is allowed, and "
+             "prints the refusal you are asking about. Otherwise do what the refusal said, or say in "
+             "your answer that you could not and why.")
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit") and any(
             Path(tool_input.get("file_path") or "").name == s.name for s in SWITCHES):
         deny("The guards' off-switches are the operator's, not yours. Do what the refusal said, or "

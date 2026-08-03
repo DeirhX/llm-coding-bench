@@ -331,3 +331,13 @@ def test_reading_about_the_off_switch_is_not_tampering():
                     "rg OFF_SWITCH scripts/cc-context-guard.py"):
         decision, why = run("Bash", {"command": command}, TMP / "none.jsonl")
         assert decision == "allow", (command, why)
+
+
+def test_the_refusal_says_how_to_exercise_the_rule_it_enforces() -> None:
+    """A stage reviewing this rule must be able to test it, and the only permitted way is to send the
+    hook a payload. Run 12 spent 262 refusals finding that out by trial and run 20's survey spent half
+    its calls on it, because the refusal described the prohibition and not the alternative."""
+    decision, why = run("Bash", {"command": "touch /tmp/cc-guard-off"}, "")
+    assert decision == "deny", why
+    assert "cc-context-guard.py" in why, why
+    assert "tool_input" in why, why
