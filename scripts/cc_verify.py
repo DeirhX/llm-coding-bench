@@ -377,6 +377,7 @@ def absence(root: str, pattern: str, globs: str = "") -> Verdict:
 
 CLAIM_RE = re.compile(r"^CLAIM:\s*(?P<claim>.+?)\s*$", re.M)
 UNKNOWN_RE = re.compile(r"^UNKNOWN:\s*(?P<unknown>.+?)\s*$", re.M)
+_SAYS_UNKNOWN = re.compile(r"^\s*UNKNOWN\b\s*[:\u2014-]*\s*", re.I)
 HEADERS = ("CLAIM:", "EVIDENCE:", "QUOTE:", "UNKNOWN:", "SEVERITY:", "FALSIFICATION:",
            "PREDICT:")
 
@@ -413,10 +414,24 @@ PATH_LINES = re.compile(r"(?P<path>[^\s`*'\",]+\.[A-Za-z0-9_]+)\s+lines?\s+"
                         r"(?:\s*,\s*\d{1,6}(?:\s*[-\u2013]\s*\d{1,6})?)*)")
 ONE_RANGE = re.compile(r"(?P<start>\d{1,6})(?:\s*[-\u2013]\s*(?P<end>\d{1,6}))?")
 
+# `line 212-217 of scripts/cc-context-guard.py` -- the same citation with the halves the other way
+# round, which is how a claim reads when the sentence begins with where rather than what.
+LINES_PATH = re.compile(r"lines?\s+(?P<ranges>\d{1,6}(?:\s*[-\u2013]\s*\d{1,6})?"
+                        r"(?:\s*,\s*\d{1,6}(?:\s*[-\u2013]\s*\d{1,6})?)*)"
+                        r"\s+(?:of|in|from)\s+(?P<path>[^\s`*'\",]+\.[A-Za-z0-9_]+)")
+
 
 def _path_lines(body: str) -> list[dict]:
     """Citations written as a path followed by the lines, rather than path:line."""
     out = []
+    plain = DECORATION.sub("", body)
+    for found in LINES_PATH.finditer(plain):
+        for span in ONE_RANGE.finditer(found.group("ranges")):
+            start = int(span.group("start"))
+            out.append({"kind": "file_quote", "path": found.group("path"), "start": start,
+                        "end": int(span.group("end") or start)})
+    if out:
+        return out
     for found in PATH_LINES.finditer(DECORATION.sub("", body)):
         for span in ONE_RANGE.finditer(found.group("ranges")):
             start = int(span.group("start"))
@@ -573,7 +588,15 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
         first = next((e for e in claim["evidence"] if e.get("kind") == "file_quote"), {})
         claim.update({"path": first.get("path"), "start": first.get("start"),
                       "end": first.get("end"), "quote": first.get("quote")})
-    return claims, [m.group("unknown") for m in UNKNOWN_RE.finditer(text)]
+    # A claim that says UNKNOWN is an unknown, whichever header it arrived under. Two came back as
+    # `CLAIM: UNKNOWN: I could not verify ...` and were refused for citing nothing -- for saying the
+    # one thing the stance calls a complete answer, in the wrong place.
+    unknowns = [m.group("unknown") for m in UNKNOWN_RE.finditer(text)]
+    declared = [c for c in claims if _SAYS_UNKNOWN.match(c["claim"])]
+    for claim in declared:
+        unknowns.append(_SAYS_UNKNOWN.sub("", claim["claim"]).strip() or claim["claim"])
+        claims.remove(claim)
+    return claims, unknowns
 
 
 PREDICT_RE = re.compile(r"^PREDICT:\s*(?P<body>.+?)\s*$", re.M)

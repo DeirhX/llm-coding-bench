@@ -386,3 +386,19 @@ def test_lines_joined_with_slashes_are_still_lines() -> None:
 
 def test_a_slash_in_code_is_not_a_line_break() -> None:
     assert vf._unslashed("a = b / c") == "a = b / c"
+
+
+def test_a_citation_written_lines_first_is_still_a_citation() -> None:
+    """`line 212-217 of guard.py` is how a claim reads when the sentence begins with where."""
+    found = vf._classify_all("line 212-217 of scripts/cc_verify.py")
+    assert [(f["path"], f["start"], f["end"])
+            for f in found] == [("scripts/cc_verify.py", 212, 217)], found
+
+
+def test_an_unknown_declared_as_a_claim_is_an_unknown() -> None:
+    """Two came back as `CLAIM: UNKNOWN: I could not verify ...` and were refused for citing
+    nothing -- for saying the one thing the stance calls a complete answer, under the wrong
+    header."""
+    claims, unknowns = vf.parse_ledger("CLAIM: UNKNOWN: whether the suite is slow\n")
+    assert claims == [], claims
+    assert unknowns == ["whether the suite is slow"], unknowns
