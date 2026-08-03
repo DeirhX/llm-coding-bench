@@ -942,3 +942,51 @@ def test_an_evidence_header_is_not_read_twice() -> None:
                                 "QUOTE:\ndef add(a, b):\n    return a + b\n")
     assert len(claims[0]["evidence"]) == 1, claims[0]["evidence"]
     assert claims[0]["evidence"][0]["quote"].startswith("def add"), claims[0]["evidence"]
+
+
+def test_the_line_saying_where_a_quote_came_from_is_the_citation() -> None:
+    """`(From scripts/g.py, lines 12-13)` after the quote is the stage saying where it copied from,
+    put where a person puts an attribution. Swallowed into the text it made the quote absent from the
+    very file it names."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("\n" * 11 + "if x:\n    pass\n")
+        text = ("CLAIM: the branch is there.\n"
+                "QUOTE:\nif x:\n    pass\n(From g.py, lines 12-13)\n")
+        claims, _ = vf.parse_ledger(text, root=root)
+        piece = claims[0]["evidence"][0]
+        assert piece["start"] == 12 and piece["path"] == "g.py", piece
+        assert vf.file_quote(root, piece["path"], piece["start"], piece["end"], piece["quote"]).ok
+
+
+def test_an_attribution_does_not_override_a_citation_already_made() -> None:
+    text = ("CLAIM: the branch is there.\n"
+            "EVIDENCE: g.py:12-13\n"
+            "QUOTE:\nif x:\n(From somewhere/else.py, line 99)\n")
+    piece = vf.parse_ledger(text)[0][0]["evidence"][0]
+    assert piece["path"] == "g.py" and piece["start"] == 12, piece
+    assert piece["quote"] == "if x:", piece
+
+
+def test_a_command_with_neither_a_header_word_nor_backticks_is_still_one() -> None:
+    """How a stage writes it when it has just run the thing:
+    `EVIDENCE: python3 scripts/guard_test.py -- "expected deny got deny"`."""
+    claims, _ = vf.parse_ledger(
+        'CLAIM: the suite passes.\n'
+        'EVIDENCE: python3 scripts/guard_test.py -- "29 passed"\n')
+    piece = claims[0]["evidence"][0]
+    assert piece["kind"] == "command_result", piece
+    assert piece["command"] == "python3 scripts/guard_test.py", piece
+    assert piece["expect"] == '"29 passed"', piece
+
+
+def test_an_evidence_line_that_opens_on_a_sentence_is_a_sentence() -> None:
+    claims, _ = vf.parse_ledger(
+        "CLAIM: the rule is narrow.\n"
+        "EVIDENCE: The pattern -- as written -- matches only literals.\n")
+    assert claims[0]["evidence"][0].get("kind") is None, claims[0]["evidence"]
+
+
+def test_a_bare_command_nobody_ran_is_not_evidence() -> None:
+    piece = vf.parse_ledger('CLAIM: it passes.\n'
+                            'EVIDENCE: pytest -q -- "29 passed"\n')[0][0]["evidence"][0]
+    assert not vf.command_result([], piece["command"], piece["expect"]).ok

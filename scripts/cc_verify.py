@@ -993,6 +993,25 @@ _AFTERWARDS = re.compile(r"\s*\((?:[Ll]ines?\s+)(?P<start>\d{1,6})"
 _PROBED = re.compile(r"`(?P<command>[^`]{4,400})`\s*(?:--|\u2014|->|:|,)?\s*"
                      r"(?P<outcome>[^.;`]{2,120})")
 _LIKE_A_COMMAND = re.compile(r"^(?:\./)?[\w/~$]")
+# `EVIDENCE: python3 scripts/guard_test.py -- "expected deny got deny"` -- the command with neither
+# the header word nor backticks, which is how a stage writes it when it has just run the thing. Named
+# programs only: an EVIDENCE line that opens on a sentence is a sentence.
+_OPENS_ON_A_PROGRAM = re.compile(r"^(?:python3?|pytest|bash|sh|zsh|echo|cat|grep|rg|git|make|node|"
+                                 r"npm|uv|\./\S+|\S+\.(?:py|sh))\b")
+
+
+def _bare_command(body: str) -> list[dict]:
+    """A command run and reported without a header word or backticks to mark it."""
+    if not _OPENS_ON_A_PROGRAM.match(body.strip()):
+        return []
+    command, expect = _ran(body.strip())
+    if expect is None:
+        parts = re.split(r"\s+--\s+", body.strip(), maxsplit=1)
+        if len(parts) != 2:
+            return []
+        command, expect = parts[0], parts[1]
+    return [{"kind": "command_result", "command": command.strip(),
+             "expect": expect.strip().rstrip(".")}]
 # `denied (line 307-310)` -- the outcome and, in the same breath, where in the file the denial comes
 # from. The bracket is a citation, not part of what the command printed, and comparing it against the
 # output failed a probe that had run and said exactly what the stage reported.
@@ -1017,6 +1036,26 @@ def _probes(body: str) -> list[dict]:
             continue
         out.append({"kind": "command_result", "command": command, "expect": outcome})
     return out
+
+
+# `(From scripts/guard.py, lines 280-281)` on the line after the quote -- the stage saying where it
+# copied from, which is the citation, put where a person puts an attribution. Swallowed into the
+# quoted text it made the quote absent from the file it names.
+_PROVENANCE = re.compile(r"^\(\s*(?:from|source|in|see)\s+(?P<rest>[^)]+)\)\s*[.;]?\s*$", re.I)
+
+
+def _attributed(body: str) -> tuple[str, dict | None]:
+    """Split a trailing attribution line off a quote, and read it as the citation it is."""
+    lines = body.split("\n")
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines:
+        return body, None
+    seen = _PROVENANCE.match(lines[-1].strip())
+    if not seen:
+        return body, None
+    found = _classify_all(seen.group("rest").replace(",", " "))
+    return "\n".join(lines[:-1]), found[0] if found else None
 
 
 def _spread(body: str) -> list[tuple[str, dict | None]]:
@@ -1082,6 +1121,11 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
             quote = None
             return
         body = "\n".join(quote).strip("\n")
+        body, attributed = _attributed(body)
+        if attributed and evidence is not None:
+            for key, value in attributed.items():
+                if key != "quote" and not evidence.get(key):
+                    evidence[key] = value
         carried, spoken = _quote_carrying_citation(body)
         if carried and evidence is not None:
             # The QUOTE line's own citation, whether or not the EVIDENCE line above it named one.
@@ -1162,7 +1206,7 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
             body = line[seen.end():].strip()
             found = _classify_all(body)
             if not found:
-                found = _probes(body) or [{"kind": None, "raw": body}]
+                found = _probes(body) or _bare_command(body) or [{"kind": None, "raw": body}]
             current["evidence"].extend(found)
             cited = found
             # A QUOTE that follows attaches to the last citation named, which is the one it is
