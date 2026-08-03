@@ -60,7 +60,14 @@ STOP_REASON = {"stop": "end_turn", "length": "end_turn", "tool_calls": "tool_use
 CUT_NOTE = ("\n\n[This answer was cut off at %d tokens by the proxy, so what is above is "
             "incomplete and any tool call it was about to make was dropped. Do not repeat it from "
             "the start: write the short version now -- for a ledger, the CLAIM/EVIDENCE/QUOTE "
-            "blocks and nothing else.]")
+            "blocks and nothing else, as the reply itself. Do not put it in a tool call: a whole "
+            "ledger inside one argument is what filled these tokens, writing it to a file is "
+            "refused, and nothing read from a file is judged.]")
+
+
+def _dropped(name: str, size: int) -> None:
+    """Note a tool call discarded for being cut off, so the next investigation is one grep long."""
+    print("dropped a cut %s call carrying %d chars of arguments" % (name, size), flush=True)
 
 
 # --- request translation ---------------------------------------------------------------------
@@ -235,6 +242,11 @@ def to_anthropic(reply: dict, model: str) -> dict:
             # JSON" and the model sends the same oversized call again. Unparseable on a response
             # that finished normally is a fact about the model and is still surfaced.
             if cut:
+                # Say what was thrown away. A stage once spent 16,384 tokens on one call's arguments
+                # and left nothing but this note on record; working out that the tokens had gone into
+                # a tool call rather than into reasoning took an hour of elimination, because the only
+                # party that saw the call discarded it in silence.
+                _dropped(fn.get("name", "?"), len(fn.get("arguments") or ""))
                 continue
             args = {"_unparsed": fn.get("arguments", "")}
         blocks.append({"type": "tool_use", "id": call.get("id") or "toolu_%s" % uuid.uuid4().hex[:16],
@@ -334,6 +346,7 @@ def stream_anthropic(chunks: Iterator[dict], model: str) -> Iterator[bytes]:
             json.loads(held["args"] or "{}")
         except ValueError:
             dropped = True
+            _dropped(held.get("name") or "?", len(held.get("args") or ""))
             continue
         index += 1
         tool_slot[slot] = index
