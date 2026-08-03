@@ -337,6 +337,22 @@ def contract_markdown(contract: Contract) -> str:
         "EVIDENCE: <path>:<first_line>-<last_line>",
         "QUOTE:",
         "<the exact lines, copied from the file as you read it>",
+        "",
+        # A schema of angle brackets was all this said, and stages filled it in eight different
+        # ways -- "line 212 of guard.py", "guard.py, line 208: \"...\"", the quote in the EVIDENCE
+        # sentence, the quote in a file, the whole ledger in a file with prose here. Each was
+        # correct work refused on form. A filled-in example is copied; a schema is paraphrased.
+        "Filled in, it looks exactly like this:",
+        "",
+        "CLAIM: The long-sleep rule inspects only Bash commands.",
+        "EVIDENCE: scripts/cc-context-guard.py:213-213",
+        "QUOTE:",
+        '    if tool == "Bash" and any(n > args.max_sleep for n in naps):',
+        "",
+        "The path carries a colon before its line numbers. The quote goes under its own QUOTE "
+        "header -- not inside the EVIDENCE sentence, not in a file you write, and never described "
+        "in prose. Begin with the first CLAIM: a sentence about what you are going to do is not an "
+        "answer, and the gate will read it as one.",
     ]
     extra = {
         COMMAND_RESULT: ("EVIDENCE: command: <the command you ran> -> <text it printed>",),

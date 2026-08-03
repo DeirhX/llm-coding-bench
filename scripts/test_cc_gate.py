@@ -635,3 +635,12 @@ def test_the_implement_rules_do_not_reach_other_adapters() -> None:
     for phrase in ("failed and then passed", "asserts only that a mock was called",
                    "is never passed by any caller", "commits to nothing"):
         assert phrase not in gaps, gaps
+
+
+def test_the_contract_shows_a_filled_in_block_not_only_a_schema() -> None:
+    """A schema of angle brackets was all it said, and stages filled it in eight different ways --
+    "line 212 of guard.py", the quote in the EVIDENCE sentence, the ledger in a file with prose in
+    the answer. Each was correct work refused on form."""
+    text = cc_ledger.contract_markdown(cc_ledger.contract_for("review"))
+    assert "EVIDENCE: scripts/cc-context-guard.py:213-213" in text, text
+    assert "carries a colon before its line numbers" in text, text
