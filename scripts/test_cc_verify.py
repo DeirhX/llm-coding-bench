@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -642,3 +643,93 @@ def test_silence_claimed_of_a_command_that_said_something_fails() -> None:
     ran = _call("pytest -q", "3 failed, 40 passed")
     verdict = vf.command_result([ran], "pytest -q", "no failures, nothing printed")
     assert not verdict.ok, verdict
+
+
+def test_three_quotes_on_one_header_are_three_citations() -> None:
+    """A stage with three quotes for one claim wrote them on a single QUOTES line, each followed by
+    its line number. Nine correct findings were reported as citing nothing."""
+    with tempfile.TemporaryDirectory() as root:
+        src = Path(root, "guard.py")
+        src.write_text("import re\nVERBS = r\"(?:touch|mv)\"\nCALLS = r\"(?:open|Path)\"\n")
+        text = ('CLAIM: the verbs and the calls are two separate patterns\n'
+                'QUOTES: "VERBS = r"(?:touch|mv)"" (line 2); "CALLS = r"(?:open|Path)"" (line 3)\n')
+        claims, _ = vf.parse_ledger(text, root=root)
+        assert len(claims) == 1, claims
+        pieces = claims[0]["evidence"]
+        assert len(pieces) == 2, pieces
+        for piece in pieces:
+            verdict = vf.file_quote(root, "guard.py", piece["start"], piece["end"],
+                                    piece["quote"])
+            assert verdict.ok, (piece, verdict.kind)
+
+
+def test_a_quote_on_a_shared_header_still_has_to_be_in_the_file() -> None:
+    """The plural form is a spelling, not an exemption."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "guard.py").write_text("import re\nVERBS = r\"(?:touch|mv)\"\n")
+        text = ('CLAIM: two patterns\n'
+                'QUOTES: guard.py "VERBS = r"(?:touch|mv)"" (line 2); '
+                'guard.py "CALLS = whatever I like" (line 2)\n')
+        claims, _ = vf.parse_ledger(text, root=root)
+        verdicts = [vf.file_quote(root, "guard.py", p["start"], p["end"], p["quote"])
+                    for p in claims[0]["evidence"] if p.get("quote")]
+        assert any(not v.ok for v in verdicts), [v.kind for v in verdicts]
+
+
+def test_a_command_written_under_run_is_read_as_a_command() -> None:
+    ran, _ = vf.parse_ledger('CLAIM: the hook allows it\n'
+                             'RUN: echo x | python3 guard.py returns "allow"\n')
+    piece = ran[0]["evidence"][0]
+    assert piece["kind"] == "command", piece
+    assert piece["command"] == "echo x | python3 guard.py", piece
+    assert piece["expect"] == '"allow"', piece
+
+
+def test_a_command_under_run_that_nobody_ran_is_not_evidence() -> None:
+    """RUN is a shorter way to say what the contract asks for, not a way to skip the check."""
+    claims, _ = vf.parse_ledger('CLAIM: it allows it\n'
+                                'RUN: python3 guard.py returns "allow"\n')
+    piece = claims[0]["evidence"][0]
+    verdict = vf.command_result([], piece["command"], piece["expect"])
+    assert not verdict.ok, verdict.kind
+
+
+def test_a_quote_that_unescaped_a_double_quote_is_still_the_line() -> None:
+    """A stage writing JSON quotes gave the file's [^\\s'\\";|&] as [^\\s'";|&]. Eleven citations of
+    one regex could not be attributed to any file over that backslash."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text('import re\nname = r"(?:[^\\s\'\\";|&]*/)?" + rest\n')
+        verdict = vf.file_quote(root, "g.py", 2, 2, 'name = r"(?:[^\\s\'";|&]*/)?" + rest')
+        assert verdict.ok, verdict
+        assert verdict.kind == vf.ESCAPED, verdict
+
+
+def test_unescaping_does_not_make_a_different_line_match() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text('import re\nname = r"(?:[^\\s\'\\";|&]*/)?" + rest\n')
+        assert not vf.file_quote(root, "g.py", 2, 2, 'name = r"(?:[^x]*/)?" + rest').ok
+
+
+def test_a_near_miss_is_given_the_address_it_will_be_refused_at() -> None:
+    """A stage quoted two lines, dedenting the first and keeping the second, so the relative indent
+    changed and the quote is rightly refused. Unresolvable, it was refused as citing nothing -- which
+    sends it looking for a citation it had already written."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("def f(x):\n    if x:\n        return False\n")
+        _tracked_repo(root)
+        quote = "if x:\n        return False"
+        assert vf.file_quote(root, "g.py", 2, 3, quote).kind == vf.RETOUCHED
+        assert vf.resolve_path(root, 2, 3, quote) == "g.py"
+
+
+def test_the_address_is_still_not_an_approval() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("def f(x):\n    if x:\n        return False\n")
+        _tracked_repo(root)
+        assert vf.resolve_path(root, 2, 3, "if y:\n        return True") is None
+
+
+def _tracked_repo(root: str) -> None:
+    """resolve_path asks git what the tree holds, so a bare directory answers nothing."""
+    for command in (["git", "init", "-q"], ["git", "add", "-A"]):
+        subprocess.run(command, cwd=root, check=True, capture_output=True)

@@ -324,8 +324,13 @@ def file_quote(root: str, path: str, start: int, end: int, quote: str) -> Verdic
         return Verdict(CLIPPED, "%s:%d-%d, quoted without the line's opening text"
                        % (path, start, end))
 
-    if _unslashed_quotes(cited) == _unslashed_quotes(quoted):
-        return Verdict(ESCAPED, "%s:%d-%d, apostrophes escaped in the quote" % (path, start, end))
+    if (_unslashed_quotes(cited) == _unslashed_quotes(quoted)
+            or _unslashed_quotes(_dedented(cited)) == _unslashed_quotes(_dedented(quoted))):
+        # Dedented as well, because the two happen together: a stage quoting an indented line into
+        # JSON drops the indentation and unescapes a quote character in the same breath, and the
+        # escape tolerance never fired for any real citation until it allowed for that.
+        return Verdict(ESCAPED, "%s:%d-%d, quotes escaped differently in the quote"
+                       % (path, start, end))
 
     # Part of the range, quoted: a claim about a block cites the block and quotes what it turns on.
     needle = _dedented(quoted)
@@ -390,8 +395,14 @@ def path_named(root: str, raw: str) -> str | None:
 
 
 def _unslashed_quotes(lines: list[str]) -> list[str]:
-    """The same lines with a backslash before an apostrophe dropped, on both sides of a comparison."""
-    return [re.sub(r"\\+'", "'", line) for line in lines]
+    """The same lines with a backslash before a quote dropped, on both sides of a comparison.
+
+    Double quotes for the same reason as apostrophes, and from the same stage: writing its quotes as
+    JSON, it gave the file's `[^\\s\'\\";|&]` as `[^\\s\'";|&]`, having unescaped one character on the
+    way out. Eleven citations of a regex were unresolvable over that backslash -- not failed, which
+    would at least have named the line, but unattributable to any file at all.
+    """
+    return [re.sub(r"\\+(['\"])", r"\1", line) for line in lines]
 
 
 def _flat(lines: list[str]) -> str:
@@ -580,8 +591,13 @@ def absence(root: str, pattern: str, globs: str = "") -> Verdict:
 CLAIM_RE = re.compile(r"^CLAIM:\s*(?P<claim>.+?)\s*$", re.M)
 UNKNOWN_RE = re.compile(r"^UNKNOWN:\s*(?P<unknown>.+?)\s*$", re.M)
 _SAYS_UNKNOWN = re.compile(r"^\s*UNKNOWN\b\s*[:\u2014-]*\s*", re.I)
-HEADERS = ("CLAIM:", "EVIDENCE:", "QUOTE:", "UNKNOWN:", "SEVERITY:", "FALSIFICATION:",
-           "PREDICT:")
+# QUOTES and RUN are not in the contract; a stage reviewing the guard wrote both, having three
+# quotes to give for one claim and six commands it had actually run. Nine correct findings were
+# reported as citing nothing. Neither form is vaguer than the ones asked for -- a run of quoted
+# lines each carrying its own line number, and a command with what it printed -- so both are read,
+# and both are checked exactly as the canonical spelling is.
+HEADERS = ("CLAIM:", "EVIDENCE:", "QUOTES:", "QUOTE:", "UNKNOWN:", "SEVERITY:", "FALSIFICATION:",
+           "PREDICT:", "RUN:")
 
 # `QUOTE (lines 212-217):` -- the header with the range said in passing before the colon. Written
 # that way by a stage whose ledger was otherwise complete, and unrecognised as a header at all, so
@@ -889,6 +905,64 @@ def _unescaped(text: str) -> str:
     return "".join(out)
 
 
+# `"...text..." (line 229); "...more..." (line 246)` -- several quotes on one QUOTES line, each
+# followed by the line it came from. The split is only made where a citation's closing bracket meets
+# the next opening quote: the code being quoted is regex and shell, full of semicolons of its own,
+# and splitting on those tore three good quotes into six broken ones.
+_BETWEEN = re.compile(r"(?<=\))\s*[;,]\s*(?=[\"'`])")
+
+# What a stage writes when it has run something and wants to say so: the command, then what it did.
+# Nothing here is taken on the strength of the sentence -- the command still has to appear in the
+# transcript and the output still has to bear the description out.
+_DID = re.compile(r"\s+(?:->|returns|returned|prints|printed|outputs|output|gives|gave)\s+")
+
+
+_AFTERWARDS = re.compile(r"\s*\((?:[Ll]ines?\s+)(?P<start>\d{1,6})"
+                         r"(?:\s*[-\u2013]\s*(?P<end>\d{1,6}))?\)\s*$")
+
+
+def _spread(body: str) -> list[tuple[str, dict | None]]:
+    """Split a QUOTES body into its quotes, each with the citation written after it.
+
+    The quote runs from the first delimiter to the last, not to the next one: what is being quoted
+    here is regex and shell, and `"_VERBS = r"(?:touch|mv)\b""` read up to the second delimiter is
+    `_VERBS = r`, which matches nothing and reports a verbatim quote as absent. The line number
+    after it says where the quote ends, so there is no ambiguity to resolve.
+    """
+    out: list[tuple[str, dict | None]] = []
+    for piece in _BETWEEN.split(body):
+        piece = piece.strip()
+        if not piece:
+            continue
+        citation = None
+        where = _AFTERWARDS.search(piece)
+        if where:
+            citation = {"kind": "file_quote", "path": None,
+                        "start": int(where.group("start")),
+                        "end": int(where.group("end") or where.group("start"))}
+            piece = piece[:where.start()].strip()
+        else:
+            found = _classify_all(piece)
+            if found and found[0].get("start"):
+                citation = found[0]
+        if len(piece) > 1 and piece[0] in "\"'`" and piece[-1] == piece[0]:
+            piece = piece[1:-1]
+        elif _first_span(piece) is not None:
+            piece = _first_span(piece)
+        else:
+            return []
+        out.append((_unescaped(piece), citation))
+    return out
+
+
+def _ran(body: str) -> tuple[str, str | None]:
+    """Split a RUN line into the command and what the stage says it did."""
+    parts = _DID.split(body, maxsplit=1)
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip().rstrip(".")
+    return body.strip(), None
+
+
 def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
     """Split an answer into claims and declared unknowns.
 
@@ -956,6 +1030,8 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
     for line in text.split("\n"):
         seen = HEADER_RE.match(line)
         header = seen.group("name") + ":" if seen else None
+        if header == "QUOTES:":
+            header = "QUOTE:"
         if quote is not None and header is None:
             quote.append(line)
             continue
@@ -1004,8 +1080,39 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
                 cited = [sibling]
             quote = []
             rest = line[seen.end():].strip()
-            if rest:
+            spread = _spread(rest)
+            if len(spread) > 1:
+                if evidence is not None and not evidence.get("quote") and len(evidence) <= 1:
+                    # The branch above made an empty piece for a quote that had not arrived yet.
+                    # These several have, so it is not one of them.
+                    current["evidence"].remove(evidence)
+                # Several quotes on one header line, each with its own line number after it. Split
+                # only where a citation's closing bracket meets the next opening quote, because the
+                # code being quoted is full of semicolons of its own.
+                for text_, citation in spread:
+                    piece = dict(citation or {})
+                    piece.setdefault("kind", "file_quote")
+                    piece["quote"] = text_
+                    if piece.get("path") is None:
+                        # The same resolution a quote under its own header gets: the claim's file if
+                        # it named one, otherwise the tree, which answers only when exactly one file
+                        # holds that text at those lines.
+                        piece["path"] = claim_path
+                    if piece.get("path") is None and piece.get("start"):
+                        piece["path"] = resolve_path(root, piece["start"],
+                                                     piece.get("end") or piece["start"], text_)
+                    current["evidence"].append(piece)
+                evidence = current["evidence"][-1]
+                cited = [evidence]
+                quote = None
+            elif rest:
                 quote.append(rest)
+        elif header == "RUN:":
+            body = line[seen.end():].strip()
+            command, expect = _ran(body)
+            evidence = {"kind": "command", "command": command, "expect": expect}
+            current["evidence"].append(evidence)
+            cited = [evidence]
         elif header is None and evidence is not None and _classify_all(line.strip()):
             # A citation on a line of its own, under an EVIDENCE header that named another. Five
             # arrived that way in one block and only the first was read; the rest were dropped, and
@@ -1037,6 +1144,21 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
             path = resolve_path(root, start, end, piece["quote"])
             if path:
                 piece.update(kind="file_quote", path=path, start=start, end=end)
+
+    # Anything still holding lines and text but no file, whichever header shape it arrived in.
+    # The resolution was written three times, once per branch, and the fourth shape was refused for
+    # citing nothing while the two beside it resolved. Doing it once at the end is the same rule for
+    # every spelling, and it stays strict: the tree answers only when exactly one file holds that
+    # text at those lines.
+    if root:
+        for claim in claims:
+            for piece in claim["evidence"]:
+                if piece.get("quote") and piece.get("start") and not piece.get("path"):
+                    where = resolve_path(root, piece["start"],
+                                         piece.get("end") or piece["start"], piece["quote"])
+                    if where:
+                        piece["path"] = where
+                        piece["kind"] = "file_quote"
 
     # The single-file_quote view the verifier and its tests were written against.
     for claim in claims:
@@ -1096,7 +1218,18 @@ def resolve_path(root: str, start: int, end: int, quote: str) -> str | None:
     only accepted when exactly one file matches, so an ambiguous quote is still uncited.
     """
     hits = [path for path in _tracked(root) if file_quote(root, path, start, end, quote).ok]
-    return hits[0] if len(hits) == 1 else None
+    if len(hits) == 1:
+        return hits[0]
+    if hits:
+        return None
+    # Nothing matched cleanly. Finding the address is not the same as approving the quote, and a
+    # near-miss still has an address: a quote that dedented its first line and kept the second is
+    # refused either way, but "cites nothing" sends a stage looking for a citation it already wrote,
+    # while "reindented by -4" is a sentence it can act on. Only retouching is looked for, and still
+    # only when one file answers.
+    near = [path for path in _tracked(root)
+            if file_quote(root, path, start, end, quote).kind == RETOUCHED]
+    return near[0] if len(near) == 1 else None
 
 
 def verify_ledger(root: str, text: str) -> list[tuple[dict, Verdict]]:
