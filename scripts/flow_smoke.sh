@@ -39,7 +39,12 @@ CTX=${FLOW_CTX:-$(curl -fsS -m 5 http://127.0.0.1:8098/props 2>/dev/null |
   "$ROOT/.venv/bin/python" -c 'import json,sys; d=json.load(sys.stdin); print(d.get("n_ctx") or 0)' \
   2>/dev/null)}
 [[ -n "$CTX" && "$CTX" -gt 8192 ]] || CTX=98304
-DECLARED=$(( CTX - 8192 ))
+# A quarter, not the 8k that looked generous. Declaring 90,112 against a 98,304 window did not save
+# run 20: it died at 98,950 tokens, so the client believed it was inside a budget it was 10% past.
+# The two count differently -- Claude Code estimates, llama-server tokenises -- and the gap grows with
+# the prompt, which is exactly when it matters. The margin has to cover the disagreement, not the
+# rounding.
+DECLARED=$(( CTX * 3 / 4 ))
 
 mkdir -p "$OUT"
 SETTINGS="$OUT/settings.json"

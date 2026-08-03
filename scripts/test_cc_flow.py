@@ -943,3 +943,11 @@ def test_a_stage_may_be_given_a_shorter_leash_than_the_flow() -> None:
         decision, why = _edit(session, root, tool="Read", path="a.py", agent="ag1")
         assert decision == "deny", why
         assert "survey" in why, why
+
+
+def test_the_declared_window_leaves_room_for_the_two_token_counts_to_disagree() -> None:
+    """Declaring 90,112 against a 98,304 window did not save run 20: it died at 98,950 tokens, having
+    believed itself inside a budget it was 10% past. Claude Code estimates and llama-server tokenises,
+    and the gap grows with the prompt."""
+    text = (pathlib.Path(__file__).resolve().parent / "flow_smoke.sh").read_text()
+    assert "DECLARED=$(( CTX * 3 / 4 ))" in text, "the margin is back to a rounding allowance"
