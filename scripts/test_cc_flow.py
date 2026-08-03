@@ -1028,3 +1028,30 @@ def test_a_finding_restated_is_kept_twice_rather_than_risk_losing_one() -> None:
         kept = cc_flowstate.salvage(state, "claims")
         assert len(kept) == 2, kept
         assert kept[0]["cites"] == ["g.py:229", "g.py:231"], "the better-cited wording wins"
+
+
+def test_a_stage_the_flow_has_given_up_on_is_not_reopened() -> None:
+    """A refusal reopens a stage so a late verdict from the same worker still lands. Past the round
+    cap there is no later verdict anyone will read, and reopening spends what is left of the worker's
+    budget on it: run 22's abandoned claims stage ran another 54 calls over five minutes while the
+    session waited to write out the four findings that had survived."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a task", "s1", root)
+        for _ in range(cc_flowstate.ROUND_CAP):
+            cc_flowstate.record_launch(state, "claims", "agent-1")
+            cc_flowstate.record_verdict(state, "claims", ["claim 1 cites nothing"], agent="agent-1",
+                                        answer="CLAIM: something\nEVIDENCE: nothing")
+    assert cc_flowstate.exhausted(state, "claims")
+    assert not cc_flowstate.running(state), cc_flowstate.running(state)
+    assert not [e for e in state["stages"] if e.get("verdict") is None]
+
+
+def test_a_stage_still_short_of_the_cap_is_reopened() -> None:
+    """The reason the reopen exists in the first place has to keep working."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a task", "s1", root)
+        cc_flowstate.record_launch(state, "claims", "agent-1")
+        cc_flowstate.record_verdict(state, "claims", ["claim 1 cites nothing"], agent="agent-1",
+                                    answer="CLAIM: something\nEVIDENCE: nothing")
+    assert not cc_flowstate.exhausted(state, "claims")
+    assert cc_flowstate.running(state), state["stages"]

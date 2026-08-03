@@ -190,13 +190,26 @@ def record_verdict(state: dict, stage: str, gaps: list, agent: str = "", answer:
         if stood:
             entry["stood"] = list(stood)[:STOOD_KEPT]
         entry["rounds"] = int(entry.get("rounds", 1)) + (0 if pending else 1)
-        if gaps:
+        if gaps and not exhausted(state, stage):
             # A refusal is not the end of the subagent, so the stage is still in flight and must
             # still look it. Closing it here told the flow guard that nothing was running, and the
             # guard then read the working stage as an idle orchestrator and ordered it to delegate
             # its own work to a subagent. It obliged, reported nothing, and was refused again.
+            #
+            # Once the round cap is reached there is nothing left to reopen for. Run 22 reopened its
+            # claims stage on the third refusal, and the worker kept going for another 54 tool calls
+            # and five minutes towards a verdict the flow had already given up on reading, while the
+            # session waited on it to write the findings that had survived.
             record_launch(state, stage, entry.get("agent", ""))
             state["stages"][-1]["reopened"] = True
+        elif gaps:
+            # Earlier rounds left launches of their own outstanding, because a verdict lands on the
+            # oldest pending entry and a reopen adds another. Once the stage is given up on, none of
+            # them is in flight in any sense worth reporting, and leaving them there says a stage is
+            # running that nothing will read. Dropped rather than given a verdict of their own, so
+            # that what counts as refused, accepted or done is unchanged.
+            state["stages"] = [e for e in state.get("stages", [])
+                               if e.get("stage") != stage or e.get("verdict") is not None]
     return state
 
 
