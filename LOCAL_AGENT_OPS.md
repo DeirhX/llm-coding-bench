@@ -1220,6 +1220,71 @@ exist to catch -- would be excused too, and the planted-fabrication rate drops f
 prints whatever it is given.
 
 
+### Refusing correct work is the failure mode, not accepting wrong work
+
+Seventeen review runs against this harness, and the stage under test was substantively right in most
+of the ones it failed. Almost every refusal was the reader's fault. The tally, each from a real run:
+
+| The stage wrote | The gate said | What was actually wrong |
+|---|---|---|
+| `**CLAIM 1:** the rule is narrow.` | `claim 1 () cites nothing` | emphasis closing on the colon; the sentence was read as trailing prose and dropped |
+| `CLAIMS` then `**1. ...**` | `no claims were stated` | 188 findings parsed as none, so the cap they blew never applied |
+| `Evidence: guard.py:12-14` | `cites nothing` | headers were matched case-sensitively |
+| `... for the session. Evidence: line 280-281 of \`g.py\`.` | `cites nothing` | the word was only read at the start of a line |
+| `QUOTES: "a" (line 12); "b" (line 20)` | `cites nothing` | one header, several quotes, each with its own number |
+| `QUOTE: Line 246: \`code\`` | `missing a file and a line range` | the label was stripped before comparing and never read as the citation |
+| `RUN: echo ... | guard.py returns "allow"` | `cites nothing` | a header the contract does not name, as checkable as the one it does |
+| `` `touch /tmp/cc-guard-off` -- denied `` | `cites nothing` | a probe reported in a sentence rather than under a header |
+| `[^\s'";\|&]` for the file's `[^\s'\";\|&]` | `quote not present` | one backslash unescaped on the way into JSON |
+| a quote cited one line out | `missing a file and a line range` | resolution answered only on an exact match, so a near miss had no address at all |
+
+Two general lessons sit behind that list. **A refusal must name the defect, not the absence.** "Cites
+nothing" sends a stage looking for a citation it has already written; "text is at line 311, you cited
+312" is a sentence it can act on, and the same ledger that produced nine of the former produced nine
+of the latter after the resolution learned to answer for near misses.
+
+**And every limit must be stated where it is enforced.** The claim cap was checked by the gate and
+absent from the contract. A stage that found one class of bypass and enumerated 188 variants of it
+would have been refused against a number nobody told it -- which is the single thing this harness
+exists to prevent.
+
+### Bounding the generation, not the ceiling
+
+Runaway output here was never a ceiling problem. Raising the cap from 16,384 to 32,768 tokens simply
+moved the cut: the client asks for 32,000 and the model filled them, ten times in one run. The loops
+live in reasoning, and they do not appear at the start of a stage where there is something to work
+out -- they appear deep in one, where the context already holds everything and the model reasons in
+circles about how to phrase it. One turn spent 15,255 tokens redrafting a ledger it had already
+written, thirty repetitions deep.
+
+Eight turns of reasoning per stage, and none after that, took two runs from ten cuts to zero. Note
+what this is not: repetition sampling (DRY) was already on and could not see any of it, because the
+runaway that matters is not literal. A stage enumerating every way to name a file indirectly repeats
+no line at all -- it wrote 188 numbered findings, 58,812 characters, and had corrupted its own
+identifier to `_CALLDS` by the end. That is bounded by capping claims, not by sampling.
+
+Judge cuts by their size, too. Of 20 apparent cuts in one run, 12 were the client's own 158-token
+auxiliary calls and 2 were the stage: counting the notes rather than reading them overstated the
+problem tenfold.
+
+### A guard the reviewer cannot survive is not reviewable
+
+The most expensive single bug in this harness was found by pointing the harness at it. Told to review
+the off-switch rule, a stage did the only honest thing -- made switches, removed them, probed the hook
+with each -- and was refused 262 times, because removing a switch matched the same rule as creating
+one. Removal puts the guard *back*. The test that asserted otherwise was wrong along with the code.
+
+Two more came out of the same transcript. The call budget was invisible, because the context guard
+sat ahead of the flow guard in `PreToolUse` and its refusal arrived first: the stage spent 399 calls
+against a cap of 140 and never once saw the message telling it to stop. And a stage that only reads
+wrote six test files into the worktree it was reviewing -- caught after the fact by fingerprint in the
+scripted path, and not at all in the interactive one, where there is no after the fact.
+
+Which is the general point: **hook order is semantics, and the wiring is not what the source says it
+is.** Three fixes in a row went in behind matchers that never routed the tool they were about.
+`claude-gemma.sh --print-settings` now prints what a launch would register, and a test reads it.
+
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
