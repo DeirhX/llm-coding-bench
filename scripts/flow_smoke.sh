@@ -99,6 +99,9 @@ cd "${FLOW_CWD:-$ROOT}"
 # channel nothing here reads -- then finished on a prose summary the gate judged as citing nothing.
 DISALLOW="Workflow,ReportFindings,SendMessage,CronCreate,CronList,CronDelete,ScheduleWakeup"
 DISALLOW="$DISALLOW,EnterWorktree,ExitWorktree,AskUserQuestion,EnterPlanMode,ExitPlanMode,Skill"
+# And the poll. Run 25's parent called TaskOutput ten times, each returning 32,164 characters of the
+# stage's working record, and died of a full window with its last round still working.
+DISALLOW="$DISALLOW,TaskOutput"
 
 ANTHROPIC_BASE_URL="$BASE" ANTHROPIC_API_KEY=local \
   claude -p "$TASK" --model "$MODEL" --settings "$SETTINGS" \

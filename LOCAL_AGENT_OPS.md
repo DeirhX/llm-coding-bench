@@ -1771,6 +1771,27 @@ known for edits, where a read-only stage made nine successful ones, and it is eq
 So the survey no longer has a shell, enforced where enforcement actually happens: in the hook. An
 index needs a read, a glob and a grep.
 
+### The run died of watching itself work
+
+Run 25 ended at 86 turns with its last claims round still working: the client exited 1, the proxy
+logged `client_gone` mid-request, and nothing was collected. The cause was in the orchestrator's own
+transcript, 111 events holding 381,532 characters, of which 327,236 were 21 tool results.
+
+Ten of those results were `TaskOutput`, and each was exactly 32,164 characters:
+`<retrieval_status>timeout</retrieval_status>`, the task id, and everything the subagent had done up to
+that moment. Polling a stage copies the stage into the parent. Ten polls were 84% of a 98,304-token
+window, and the window was the thing the run needed in order to finish.
+
+The parent was polling because this harness told it to, in two places, both written to fix a livelock
+where a session said "I will wait" and then stopped: the Stop hook's wait message named the call, and
+the TaskStop refusal named it again. The livelock was real -- 84 stops in one run -- and the cure was
+worse, because a stop costs a short turn and a poll costs a third of the window.
+
+Waiting belongs in the hook, where it is a `time.sleep` in a process nobody is paying for. So the Stop
+hook now waits twelve minutes rather than ninety seconds, tells the parent to say one sentence and
+stop, and the poll is refused with its own price in the refusal. `TaskOutput` is no longer offered to a
+flow session at all: a tool that exists gets called, and a refusal still costs a turn.
+
 ### Two subagents, one window, and it belonged to neither
 
 Run 25 refused two different subagents inside a minute, both at "99% of the 98,304-token window", the

@@ -1215,3 +1215,30 @@ def test_a_gap_is_read_out_whole() -> None:
     said = status.findings({"flow": "review", "stages": [
         {"stage": "claims", "verdict": "refused", "calls": 4, "gaps": [long_gap]}]})
     assert " ".join(said.split()).count("reading the file") == 6, said
+
+
+def test_the_orchestrator_is_not_allowed_to_poll_the_stage() -> None:
+    """Run 25 died of a full window: ten TaskOutput calls, each returning exactly 32,164 characters of
+    the stage's working record, were 84% of the orchestrator's context -- and the last claims round was
+    still working when the window ran out, so its findings were never collected."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a review", "s-poll", root)
+        cc_flowstate.record_launch(state, "claims", "agent1")
+        cc_flowstate.save(state, "s-poll", root)
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "TaskOutput",
+                   "session_id": "s-poll", "cwd": root, "tool_input": {"task_id": "abc"}}
+        proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                              capture_output=True, text=True, timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        out = json.loads(proc.stdout)["hookSpecificOutput"]
+        said = out.get("permissionDecisionReason", "")
+        assert out.get("permissionDecision") == "deny", out
+        assert "Do not poll" in said, said
+        assert "32,164" in said, "the refusal should say what a poll costs"
+
+
+def test_the_wait_message_does_not_send_them_polling() -> None:
+    """The Stop hook told the parent to poll, which is what filled the window."""
+    gate = pathlib.Path(__file__).resolve().parent / "cc-depth-gate.py"
+    assert "Do not call TaskOutput" in gate.read_text(), "the wait message still sells the poll"
+    assert "TaskOutput tool for it with" not in gate.read_text()

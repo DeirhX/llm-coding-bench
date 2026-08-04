@@ -796,7 +796,11 @@ def _digest(text: str, limit: int = 1200) -> str:
 # How long the stop hook will sit waiting for a stage to report before answering the session. Long
 # enough to cover the gap between a session finishing its turn and its stage finishing its work,
 # short enough that a hook the client has given up on is not still sleeping.
-WAIT_FOR = float(os.environ.get("CC_FLOW_WAIT", "90"))
+# How long this hook waits for a stage before handing the turn back. Long, because waiting here is
+# nearly free -- a sleep in a hook process -- while waiting in the session costs a turn each time, and
+# a poll of the stage costs 32k characters of the window it has to answer in. Twelve minutes covers
+# most rounds on local weights; a round that outlives it costs one short turn and another wait.
+WAIT_FOR = float(os.environ.get("CC_FLOW_WAIT", "720"))
 
 
 def _await_stage(session: str, root: str, state: dict) -> tuple[dict, list[str]]:
@@ -909,9 +913,11 @@ def main() -> int:
             state["nudges"] = nudges + 1
             cc_flowstate.save(state, session, root)
             return block(
-                "The %s stage is still running. Call the TaskOutput tool for it with `block` "
-                "set to true and a timeout of several minutes -- that is how you wait; saying you "
-                "will wait and then stopping is not. It has not failed and it is not stuck."
+                "The %s stage is still running. It has not failed and it is not stuck. Say in one "
+                "short sentence that you are waiting for it, and stop -- this hook does the waiting, "
+                "and it will tell you the verdict. Do not call TaskOutput: each poll copies the "
+                "stage's whole working record into your context, and ten of them once filled the "
+                "window and ended the run before the stage could report."
                 % ", ".join(in_flight))
         given_up = [st.name for st in cc_flow.flow_for(state["flow"]) or []
                     if cc_flowstate.exhausted(state, st.name)

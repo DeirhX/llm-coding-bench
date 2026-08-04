@@ -123,8 +123,16 @@ def compose(stage, flow: str, task: str, prior: list[str], refused: str = "",
 # the user are not the work; reading the code is.
 EDITS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 
-CLERICAL = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput",
+CLERICAL = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet",
             "AskUserQuestion", "ExitPlanMode", "SlashCommand"}
+
+# TaskOutput is not clerical, whatever it looks like. Each call copies everything the stage has done
+# so far into the orchestrator's window: in run 25 every one of ten polls returned exactly 32,164
+# characters, `<retrieval_status>timeout</retrieval_status>` and the subagent's work to date. Those
+# ten were 84% of a 98,304-token window, and the run ended when the window ran out -- with the last
+# claims round still working and its findings never collected. The parent was polling because this
+# harness told it to.
+POLLING = {"TaskOutput"}
 
 
 def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = "",
@@ -136,6 +144,12 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
     not enough, which is the same lesson as every other rule here, so the tool call that does the
     work is refused until the stage that should be doing it has been launched.
     """
+    if tool in POLLING:
+        deny("Do not poll the stage. Each TaskOutput copies everything it has done so far into your "
+             "context -- 32,164 characters a time, measured -- and ten of those ended a run by "
+             "filling the window while the stage was still working. You do not need its output: "
+             "when it reports, its findings are judged and you are told the verdict. Say in one "
+             "short sentence that you are waiting, and stop. Stopping is how you wait here.")
     if tool in CLERICAL:
         allow()
     if tool == "TaskStop" and cc_flowstate.deaf(state):
@@ -155,12 +169,16 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
         # stage it had just launched on the grounds that it looked stuck, and went back to doing the
         # work itself. Waiting is what it is for; killing the stage is not clerical.
         # Told only to wait, a session alternated TaskStop with TaskOutput four times in nine
-        # minutes, each refusal costing a full turn. So the refusal now names the call to make.
+        # minutes, each refusal costing a full turn. So the refusal names what to do instead -- which
+        # for a while was TaskOutput, until that turned out to cost 32k characters of window a call.
+        # Stopping is the cheap way to wait: the Stop hook holds the turn for as long as the stage
+        # needs and hands back the verdict.
         deny("The %s stage is running. Do not call TaskStop again -- it will be refused every time "
-             "until the stage reports, and each attempt costs you a turn. Call TaskOutput with "
-             "task_id \"%s\", block true and timeout 600000, and wait there. A stage that has not "
-             "answered yet is working, not stuck, and stopping it leaves the flow with nothing to "
-             "judge." % (", ".join(cc_flowstate.running(state)), (tool_input or {}).get("task_id") or ""))
+             "until the stage reports, and each attempt costs you a turn. Do not poll it either. "
+             "Say in one short sentence that you are waiting, and stop: that is how waiting is done "
+             "here, and you will be told the verdict. A stage that has not answered yet is working, "
+             "not stuck, and stopping it leaves the flow with nothing to judge."
+             % ", ".join(cc_flowstate.running(state)))
     in_flight = cc_flowstate.running(state)
     if agent and not in_flight:
         # This call comes from a subagent, so a stage is working whatever the flow remembers. Run 19

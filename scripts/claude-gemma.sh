@@ -480,10 +480,13 @@ if (( LEAN_TOOLS )); then
   KEPT="$UNUSED_TOOLS"
   # A flow runs its stages as subagents, so the tools that launch one and show its progress are not
   # unused here whatever the lean list says.
+  # TaskOutput stays out: one call copies everything a stage has done so far into the orchestrator's
+  # window -- 32,164 characters each in run 25 -- and the flow tells it the verdict anyway. A tool that
+  # is offered gets called, and the refusal costs a turn.
   (( FLOWS )) && KEPT="${KEPT//Agent,/}" && KEPT="${KEPT//Task,/}" \
               && KEPT="${KEPT//TaskCreate,/}" && KEPT="${KEPT//TaskUpdate,/}" \
               && KEPT="${KEPT//TaskList,/}" && KEPT="${KEPT//TaskGet,/}" \
-              && KEPT="${KEPT//TaskOutput,/}" && KEPT="${KEPT//TaskStop,/}"
+              && KEPT="${KEPT//TaskStop,/}"
   TOOL_ARGS=(--disallowed-tools "$KEPT")
 fi
 
