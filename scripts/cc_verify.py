@@ -574,6 +574,15 @@ def _same_command(wanted: str, ran: str) -> bool:
         # was matched to twelve recorded probes carrying that payload, none of which set the
         # variable -- the one condition the claim was about. It passed, on a command nobody ran.
         return _settings(wanted) <= _settings(ran)
+    # `python3 -c "..."` is a complete experiment, not the name of a program buried in a larger
+    # probe. Run 26 cited long one-liners containing invented paths and misspelled module names; the
+    # old 70% bag-of-words rule matched each to a different successful heredoc that merely exercised
+    # cc_flowstate. A precise command must have been run as written. Whitespace may be rewrapped by
+    # the transcript, but its code and literals may not be substituted.
+    if re.search(r"\bpython(?:3(?:\.\d+)?)?\s+-c\b", wanted):
+        exact = " ".join(wanted.split())
+        recorded = " ".join(ran.split())
+        return exact in recorded
     words = set(_tokens(wanted))
     if len(words) < 4:
         return False
@@ -1512,6 +1521,7 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
             # under. The earlier ones are still checked, on their line numbers alone.
             evidence = found[-1]
         elif header == "QUOTE:":
+            inherited_address = False
             if evidence is None:
                 # A QUOTE with no EVIDENCE line above it. The citation it carries is the only
                 # address the claim has, and dropping the whole block on a missing header reports a
@@ -1530,14 +1540,16 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
                 current["evidence"].append(sibling)
                 evidence = sibling
                 cited = [sibling]
+                inherited_address = True
             quote = []
             # The citation between the header word and the colon, read with the same parser as
             # everywhere else. Only filled in where the EVIDENCE line above said nothing, so a stage
-            # that says where twice is not overruled by its own header.
+            # that says where twice is not overruled by its own header. A sibling quote is different:
+            # its address was copied only as a fallback, and its own complete header must replace it.
             aside = _path_lines(seen.group("said") or "")
             if aside and evidence is not None:
                 for key, value in aside[0].items():
-                    if key != "quote" and not evidence.get(key):
+                    if key != "quote" and (inherited_address or not evidence.get(key)):
                         evidence[key] = value
             rest = line[seen.end():].strip()
             spread = _spread(rest)

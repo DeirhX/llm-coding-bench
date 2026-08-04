@@ -1369,3 +1369,50 @@ def test_the_bounded_phrase_does_not_turn_a_sentence_into_a_header() -> None:
     for line in ("The quote from s.py shows that the limit depends on the entry",
                  "    QUOTE: indented, so part of a quoted block rather than a header of one"):
         assert not vf.HEADER_RE.match(line), line
+
+
+def test_each_quote_header_overrides_the_address_inherited_from_the_previous_quote() -> None:
+    """Run 26 put two independently addressed QUOTEs under one finding.
+
+    The second quote inherited the first one's path, then supplied only its own line range because
+    the parser treated the inherited path as explicit. A quote from cc_flowstate.py was consequently
+    checked against cc-flow-guard.py and refused, despite both header citations being complete.
+    """
+    import cc_ledger
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "first.py").write_text("guard = True\n")
+        pathlib.Path(root, "second.py").write_text("state = True\n")
+        ledger = ("CLAIM: both sites participate.\n"
+                  "QUOTE from `first.py` lines 1-1:\n"
+                  "```\n"
+                  "guard = True\n"
+                  "```\n"
+                  "QUOTE from `second.py` lines 1-1:\n"
+                  "```\n"
+                  "state = True\n"
+                  "```\n")
+        claims, _ = cc_ledger.claims_from_text(ledger, root)
+        assert len(claims) == 1, claims
+        assert [piece.path for piece in claims[0].evidence] == ["first.py", "second.py"]
+        assert all(vf.file_quote(root, piece.path or "", piece.start, piece.end,
+                                 piece.quote or "").ok
+                   for piece in claims[0].evidence)
+
+
+def test_a_long_python_c_citation_is_not_matched_to_a_different_experiment() -> None:
+    """Run 26 cited a precise one-line probe containing typos and invented paths.
+
+    Seventy-percent token overlap matched it to any of several later, working heredoc probes of the
+    same module. That upgrades a command nobody ran into evidence merely because somebody ran a
+    vaguely similar experiment, which is exactly the fabrication boundary the verifier exists for.
+    """
+    cited = ("python3 -c \"import sys, tempfile; sys.path.insert(0, '/private/tmp/z86'); "
+             "import cc_flowstate; s=c_flowstate.begin('review','t','s9',tempfile.mkdtemp()); "
+             "print(cc_flowstate.admits(s,'claims'))\"")
+    ran = ("python3 << 'PYEOF'\nimport sys, tempfile\nsys.path.insert(0, "
+           "'/private/tmp/r26tree/scripts')\nimport cc_flowstate\n"
+           "s = cc_flowstate.begin('review', 't', 'real', tempfile.mkdtemp())\n"
+           "print(cc_flowstate.admits(s, 'claims'))\nPYEOF")
+    call = _bash(ran, "(False, 'already running')", ok=True)
+    assert not vf._same_command(cited, ran)
+    assert vf.command_result([call], cited, "False").kind == vf.UNVERIFIED
