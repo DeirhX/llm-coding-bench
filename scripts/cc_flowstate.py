@@ -163,7 +163,7 @@ STOOD_KEPT = 12
 
 
 def record_verdict(state: dict, stage: str, gaps: list, agent: str = "", answer: str = "",
-                   stood: list | None = None) -> dict:
+                   stood: list | None = None, reopen: bool = True) -> dict:
     """Attach a gate verdict to the most recent launch of `stage`.
 
     A refusal does not end a subagent, it sends it round again, so the same launch reports twice --
@@ -190,7 +190,7 @@ def record_verdict(state: dict, stage: str, gaps: list, agent: str = "", answer:
         if stood:
             entry["stood"] = list(stood)[:STOOD_KEPT]
         entry["rounds"] = int(entry.get("rounds", 1)) + (0 if pending else 1)
-        if gaps and not exhausted(state, stage):
+        if gaps and reopen and not exhausted(state, stage):
             # A refusal is not the end of the subagent, so the stage is still in flight and must
             # still look it. Closing it here told the flow guard that nothing was running, and the
             # guard then read the working stage as an idle orchestrator and ordered it to delegate
@@ -202,6 +202,12 @@ def record_verdict(state: dict, stage: str, gaps: list, agent: str = "", answer:
             # session waited on it to write the findings that had survived.
             record_launch(state, stage, entry.get("agent", ""))
             state["stages"][-1]["reopened"] = True
+        elif gaps and not reopen:
+            # The worker is being killed as this is written, so there is nothing still in flight to
+            # keep a place for. Reopening it here left the flow reporting a stage in progress that
+            # had just been stopped on its own instruction, and the session was sent to wait on it.
+            state["stages"] = [e for e in state.get("stages", [])
+                               if e.get("stage") != stage or e.get("verdict") is not None]
         elif gaps:
             # Earlier rounds left launches of their own outstanding, because a verdict lands on the
             # oldest pending entry and a reopen adds another. Once the stage is given up on, none of
@@ -271,6 +277,54 @@ def spend(state: dict, stage: str) -> int:
             entry["calls"] = int(entry.get("calls", 0)) + 1
             entry["active"] = time.time()
             return entry["calls"]
+    return 0
+
+
+# How many refusals a stage may ignore before it is treated as gone rather than working. A stage
+# that has been told to answer twenty-five times running and is still calling tools is not going to
+# start: run 7's stage took 194 of them and never answered, run 10's took 246, run 24's took 220 of
+# a message it could not even see. Twenty-five is far enough past a stage that pauses to think and
+# well short of the hundreds these cost.
+DEAF_AFTER = 25
+
+
+def deaf(state: dict) -> list[str]:
+    """Stages that have gone on working through refusal after refusal.
+
+    The flow cannot stop a subagent -- no hook can, a refused call is just a call that returns a
+    refusal -- so a stage that will not stop has to be ended from outside, by the session that
+    launched it. This is what tells the session which one.
+    """
+    return [e["stage"] for e in state.get("stages", [])
+            if e.get("verdict") is None and int(e.get("denied", 0)) > DEAF_AFTER]
+
+
+def refused_once_more(state: dict, stage: str) -> int:
+    """Note that this stage was refused again, and say how many times it now has been."""
+    for entry in reversed(state.get("stages", [])):
+        if entry.get("stage") == stage and entry.get("verdict") is None:
+            entry["denied"] = int(entry.get("denied", 0)) + 1
+            return entry["denied"]
+    return 0
+
+
+def overspent(state: dict, stage: str) -> int:
+    """How far past its budget the round of `stage` now in flight has gone, or 0.
+
+    Read by both PreToolUse hooks, because only one of their refusals reaches the model and which
+    one is not documented. Run 24's flow guard denied 220 consecutive calls with `spent=280
+    allowed=60` in its own trace, and the survey saw the context guard's message every time -- 256
+    identical refusals of a command it kept rewriting to sneak past, while the message telling it
+    to stop and answer went to nobody. Ordering was tried as the fix once already, in the other
+    direction, on the same reasoning. Saying the same thing from both mouths does not depend on
+    knowing which one is heard.
+    """
+    import cc_flow
+    for entry in reversed(state.get("stages", [])):
+        if entry.get("stage") == stage and entry.get("verdict") is None:
+            known = cc_flow.stage_in(state.get("flow") or "", stage)
+            allowed = known.budget if known is not None and known.budget else CALL_BUDGET
+            return max(0, int(entry.get("calls", 0)) - allowed)
     return 0
 
 

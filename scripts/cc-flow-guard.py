@@ -18,6 +18,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -137,6 +138,18 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
     """
     if tool in CLERICAL:
         allow()
+    if tool == "TaskStop" and cc_flowstate.deaf(state):
+        # Normally killing a stage is the session avoiding the work. Not here: this one has been
+        # told to stop and answer more times than any working stage ever needs, and the flow has no
+        # other way to end it. The round is written off as it goes, so what it did establish is
+        # salvaged and the stage counts as having had its turn.
+        for stage_name in cc_flowstate.deaf(state):
+            cc_flowstate.record_verdict(
+                state, stage_name,
+                ["the stage went on calling tools through %d refusals and never answered, so the "
+                 "round was ended from outside" % cc_flowstate.DEAF_AFTER], "", reopen=False)
+        cc_flowstate.save(state, session, root)
+        allow()
     if tool == "TaskStop" and cc_flowstate.running(state):
         # Refused from doing the work itself, a session decided the guard was a sandbox, killed the
         # stage it had just launched on the grounds that it looked stuck, and went back to doing the
@@ -189,8 +202,21 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
         judged = cc_flow.stage_in(state.get("flow") or "", in_flight[0])
         allowed = (judged.budget if judged is not None and judged.budget else
                    cc_flowstate.CALL_BUDGET)
+        if os.environ.get("CC_FLOW_TRACE"):
+            # What a hook decided is otherwise unknowable: the client logs nothing, and a refusal
+            # that never reaches the model looks exactly like a hook that did not run. This is how
+            # run 24's invisible budget was found.
+            try:
+                with open(os.environ["CC_FLOW_TRACE"] + ".guard", "a") as fh:
+                    fh.write("%s tool=%s agent=%s flight=%s spent=%s allowed=%s\n"
+                             % (time.strftime("%H:%M:%S"), tool, agent[:8], in_flight, spent,
+                                allowed))
+            except OSError:
+                pass
         over = spent - allowed
         if over > 0:
+            cc_flowstate.refused_once_more(state, in_flight[0])
+            cc_flowstate.save(state, session, root)
             # The refusal has to get shorter as it repeats, because it is charged to the context it
             # is trying to protect. Run 18's second round spent 361 calls against a budget of 140 and
             # was refused for 220 of them; by the end the client had room for two tokens of output,

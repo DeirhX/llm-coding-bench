@@ -72,7 +72,45 @@ def allow():
     sys.exit(0)
 
 
+# After this many refusals with the same words, say different ones. Run 24's survey was told the
+# same thing about the off-switch 256 times and spent half an hour rewriting the command to get
+# past it -- `'(''?'':''t''o''u''c''h''...` was one attempt. A rule that keeps answering identically
+# reads as an obstacle with a trick to it, rather than as an answer.
+REPEAT_CAP = 4
+
+# Who is being refused, filled in once the payload is read. A file, because each hook call is its
+# own process and there is nowhere else to remember anything.
+_WHO: dict = {"agent": "", "ledger": None}
+
+
+def _repeats(reason: str) -> int:
+    """How many times running this caller has been refused with this same message."""
+    path = _WHO.get("ledger")
+    if path is None:
+        return 1
+    try:
+        seen = json.loads(path.read_text())
+    except (OSError, ValueError):
+        seen = {}
+    who = _WHO.get("agent") or "orchestrator"
+    before = seen.get(who) or {}
+    count = int(before.get("n", 0)) + 1 if before.get("reason") == reason[:90] else 1
+    seen[who] = {"reason": reason[:90], "n": count}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(seen))
+    except OSError:
+        pass
+    return count
+
+
 def deny(reason: str):
+    said = _repeats(reason)
+    if said > REPEAT_CAP:
+        reason = ("Refused, the same way, for the %dth time. The wording of the call is not what is "
+                  "being refused, so rewriting it will not get past this. Stop and answer with what "
+                  "you already have; anything you could not establish is an UNKNOWN, which is a "
+                  "complete answer. The refusal, in short: %s" % (said, " ".join(reason.split())[:180]))
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
@@ -285,6 +323,9 @@ def main():
     if OFF_SWITCH.exists() and os.environ.get("CC_GUARD_LIFTABLE") == "1":
         allow()
 
+    _WHO["ledger"] = Path("/tmp/cc-refusals-%s.json"
+                          % (os.environ.get("CLAUDE_SESSION_ID") or "session"))
+
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
@@ -293,6 +334,29 @@ def main():
     tool = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
     transcript = Path(payload.get("transcript_path") or "")
+    _WHO["agent"] = str(payload.get("agent_id") or "")
+    _WHO["ledger"] = Path("/tmp/cc-refusals-%s.json"
+                          % (payload.get("session_id") or "session"))
+
+    # Only one PreToolUse refusal reaches the model when two hooks refuse the same call, and which
+    # one is neither documented nor stable -- the order was changed once already to fix exactly this
+    # and fixed nothing. So the call budget is said here too, in the same words the flow guard uses.
+    # Run 24's survey spent 280 calls against a budget of 60 and was refused for 220 of them without
+    # ever being told why: what it saw, every time, was this guard talking about something else.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import cc_flowstate
+        state = cc_flowstate.peek(cc_flowstate.session_of(payload),
+                                  payload.get("cwd") or os.getcwd())
+        for stage in cc_flowstate.running(state):
+            over = cc_flowstate.overspent(state, stage)
+            if over > 0:
+                deny("You have spent %d tool calls past the budget of the %s stage. Stop reading "
+                     "and write your answer now from what you have already seen. Anything you "
+                     "could not establish is an UNKNOWN, which is a complete answer here -- going "
+                     "round the files again is not." % (over, stage))
+    except (ImportError, OSError, ValueError):
+        pass
 
     # --allowed-tools pre-approves; it does not forbid, and under
     # --dangerously-skip-permissions nothing does. A stage told to judge a change made nine

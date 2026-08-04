@@ -1121,3 +1121,34 @@ def test_a_stage_that_was_cut_off_is_not_accepted_as_its_own_map() -> None:
     assert decision == "block", decision
     assert not cc_flowstate.done(after), after
     assert [e for e in after["stages"] if e.get("verdict") == "refused"], after
+
+
+def test_a_stage_that_works_on_through_refusals_can_be_ended() -> None:
+    """No hook can stop a subagent: a refused call is a call that returns a refusal, and run 24's
+    survey answered 220 of them by making another call. It was still going when the run was killed
+    by hand half an hour later. The session that launched it can end it, and is told to."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey", "a1")
+        for _ in range(cc_flowstate.DEAF_AFTER + 1):
+            cc_flowstate.refused_once_more(state, "survey")
+        cc_flowstate.save(state, "s1", root)
+        assert cc_flowstate.deaf(state) == ["survey"], state
+        decision, reason = _stop("waiting on the survey", root)
+        assert decision == "block", reason
+        assert "TaskStop" in reason, reason
+        # And the call it is told to make is the one call normally refused while a stage runs.
+        assert run("", root, tool="TaskStop")[0] == "allow"
+        after = cc_flowstate.load("s1", root)
+        assert not cc_flowstate.running(after), after
+        assert [e for e in after["stages"] if e.get("verdict") == "refused"], after
+
+
+def test_task_stop_is_still_refused_for_a_stage_that_is_working() -> None:
+    """The ordinary case is a session killing a stage it has decided looks stuck, and going back to
+    doing the work itself. One did."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey", "a1")
+        cc_flowstate.save(state, "s1", root)
+        assert run("", root, tool="TaskStop")[0] == "deny"

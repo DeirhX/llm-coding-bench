@@ -745,6 +745,9 @@ def _await_stage(session: str, root: str, state: dict) -> tuple[dict, list[str]]
         in_flight = cc_flowstate.running(state)
         if not in_flight:
             return state, []
+        if cc_flowstate.deaf(state):
+            # Waiting on a stage that has worked through twenty-five refusals is waiting on nothing.
+            break
         time.sleep(2.0)
         # peek, not load: this loop runs for minutes, and the lock load() holds would stop every
         # other hook for the whole wait -- including the stage whose report we are waiting for.
@@ -823,6 +826,19 @@ def main() -> int:
         # survey had not.
         left = cc_flowstate.next_stage(state)
         nudges = int(state.get("nudges", 0))
+        gone_deaf = cc_flowstate.deaf(state)
+        if in_flight and gone_deaf and nudges < NUDGE_LIMIT:
+            # The one case where killing a stage is the right instruction. It has been told to stop
+            # reading and answer on every call for a long time and has gone on regardless -- run 24's
+            # survey made 280 calls that way, of which 220 were refused, and it was still going when
+            # the run was ended by hand. No hook can stop it; the session that launched it can.
+            state["nudges"] = nudges + 1
+            cc_flowstate.save(state, session, root)
+            return block(
+                "The %s stage has been refused on every call for a long time and is still calling "
+                "tools. It is not going to answer. Call TaskStop for it -- that is allowed now, and "
+                "only now -- and then carry on with the flow: the round counts as spent and "
+                "whatever it did establish is kept." % ", ".join(gone_deaf))
         if in_flight and nudges < NUDGE_LIMIT:
             # Stopping with a stage still reading is the ordinary shape of this: the launch returns
             # a task and the turn ends while the work goes on. What the session must not do is take
