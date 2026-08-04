@@ -230,3 +230,47 @@ def test_a_probe_of_the_hook_does_not_spend_the_sessions_counters() -> None:
             assert "for the" not in said, "a probe was escalated at like a session"
         after = cc_flowstate.peek("s-probe", root)
         assert [e.get("denied") for e in after["stages"]] == [None], after["stages"]
+
+
+def _transcript_with(runs: list) -> str:
+    """A transcript holding Bash calls and what each printed."""
+    import pathlib as pl
+    import tempfile as tf
+    rows = []
+    for i, (command, printed) in enumerate(runs):
+        rows.append(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "c%d" % i, "name": "Bash", "input": {"command": command}}]}}))
+        rows.append(json.dumps({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "c%d" % i, "content": printed}]}}))
+    path = pl.Path(tf.mkdtemp()) / "session.jsonl"
+    path.write_text("\n".join(rows) + "\n")
+    return str(path)
+
+
+def test_a_command_asked_and_answered_twice_is_not_asked_a_third_time() -> None:
+    """Run 25's third claims round ran one probe five times, alternating with the same grep, and got
+    the same two lines every time. Nothing refused it -- every call was legal -- and it spent a third
+    of its round on a question it had already answered."""
+    probe = "python3 -c 'print(1)'"
+    with tempfile.TemporaryDirectory() as root:
+        said = ask("Bash", {"command": probe}, root,
+                   transcript=_transcript_with([(probe, "_VERBS=False"), (probe, "_VERBS=False")]))
+        assert "printed the same thing" in said, said
+        assert "_VERBS=False" in said, "the refusal withheld the output it says to use"
+
+
+def test_a_command_whose_answer_keeps_changing_is_left_alone() -> None:
+    """git status between edits, a suite between fixes: a command watching something move."""
+    probe = "git status --short"
+    with tempfile.TemporaryDirectory() as root:
+        said = ask("Bash", {"command": probe}, root,
+                   transcript=_transcript_with([(probe, "M one.py"), (probe, "M one.py M two.py")]))
+        assert "printed the same thing" not in said, said
+
+
+def test_one_repeat_is_a_retry_and_not_a_loop() -> None:
+    probe = "pytest -q"
+    with tempfile.TemporaryDirectory() as root:
+        said = ask("Bash", {"command": probe}, root,
+                   transcript=_transcript_with([(probe, "1 passed")]))
+        assert "printed the same thing" not in said, said

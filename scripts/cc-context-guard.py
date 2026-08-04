@@ -334,6 +334,38 @@ _VERBS = r"(?:touch|mv|cp|dd|tee|install|ln|shred|truncate)\b[^;|&\n]*"
 _CALLS = r"(?:open|Path|write_text|writeFile)\s*\(\s*['\"]?"
 
 
+# Two runs of a command is a retry; three, with the same answer each time, is a loop. Run 25's third
+# claims round ran one probe of `_VERBS` five times, alternating with the same grep, and got the same
+# two lines every time. Nothing refused it -- every call was legal -- and it spent a third of its round
+# asking a question it had already answered.
+_LOOP_AFTER = 2
+
+
+def already_answered(transcript: Path, command: str) -> str:
+    """What this exact command printed, if it has been run before and kept printing the same thing.
+
+    The previous outputs have to be identical. A command whose answer changes -- git status between
+    edits, a suite between fixes -- is being used to watch something move, and stopping that would
+    break the ordinary way of working.
+    """
+    if not transcript.is_file() or not command.strip():
+        return ""
+    try:
+        import cc_evidence
+        calls = cc_evidence.collect(str(transcript))
+    except (ImportError, OSError, ValueError):
+        return ""
+    wanted = " ".join(command.split())
+    said = [c.text or "" for c in calls
+            if c.tool == "Bash" and " ".join((c.args.get("command") or "").split()) == wanted]
+    if len(said) < _LOOP_AFTER:
+        return ""
+    last = said[-_LOOP_AFTER:]
+    if any(" ".join(t.split()) != " ".join(last[0].split()) for t in last):
+        return ""
+    return last[0]
+
+
 def tampers(command: str) -> bool:
     """True if this command would create or remove a guard's off-switch.
 
@@ -443,6 +475,15 @@ def main():
     # and spent twenty minutes of a fifty-minute budget waiting for itself. The suite it was waiting
     # on takes under three seconds in the foreground. Nothing here needs to wait minutes for
     # anything, so a long sleep is always the wrong answer rather than sometimes.
+    if tool == "Bash":
+        again = already_answered(transcript, tool_input.get("command") or "")
+        if again:
+            deny("You have run this command %d times already in this round and it printed the same "
+                 "thing every time: %s. It will print that again. Use it -- write the finding it "
+                 "bears out, with this command and this output as its evidence -- or ask something "
+                 "you do not know the answer to."
+                 % (_LOOP_AFTER, " ".join(again.split())[:400] or "nothing at all"))
+
     naps = naps_in(tool_input.get("command") or "")
     if tool == "Bash" and any(n > args.max_sleep for n in naps):
         deny("Do not sleep for %ds. Run the command in the foreground and wait for it there: "
