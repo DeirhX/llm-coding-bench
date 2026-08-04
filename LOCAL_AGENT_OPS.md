@@ -1637,6 +1637,45 @@ in the same round that was later refused and abandoned. It is the concrete argum
 findings out of a refused stage, and the reason the fix carries a test named after the false positive
 rather than after the pattern.
 
+### Run 22 finished, and the last thing it wrote was not checked by anything
+
+The first review to run all the way to an answer: 75 minutes, 52 turns. Survey was accepted at 45 tool
+calls. Claims was refused three times -- 138 calls, 141, 96 -- the flow gave up on it, and the Stop hook
+handed back the four findings that had passed the gate in round two. The session wrote them out with an
+`Abandoned findings` section naming what was never established. That is the designed behaviour, working,
+and it is worth saying plainly because most of what follows is about what it does not cover.
+
+The four citations that were checked are command results. The QUOTE blocks beside them in the final
+answer were written after the hand-back, and nothing verifies those. Line 229 came back as
+
+```
+_VERBS = r"(?:touch|mv|cp|dd|tee|install|ln|shred|\b[^;|&\n]*"
+```
+
+against a file that says `install|ln|shred|truncate)`, and the three file paths degraded across the
+answer -- `scripts/cc-context-guard`, then `scripts/cc`, then `scripts/c`, none of which exist. The gate
+verifies a ledger; the closing message is prose it asked for and then trusted. A stage can be held to
+its evidence for an hour and fabricate in the last paragraph.
+
+### Four true findings, no defects, and the question nobody asked
+
+Every salvaged finding is of the form *`tampers()` does not match X*: not `rm`, not `mkfifo`, `mkdir`,
+`chmod`, `chown`, not Perl, Node or Ruby write calls, not names that merely resemble the switch. All
+four are true. None of them is a way past anything, because both switches are read as
+`OFF_SWITCH.exists() and os.environ.get("CC_GUARD_LIFTABLE") == "1"`, and a stage cannot set an
+environment variable for a hook process the client spawns. Creating the file by a route the regex misses
+gets you a file.
+
+So the review enumerated the holes in a pattern for an hour without once asking what the pattern is for
+-- one grep from the answer. `rm` is the sharpest case: it is absent deliberately, so that a stage can
+put the guard back, and it is reported as a gap. Meanwhile the sibling gate's docstring was still
+offering `touch /tmp/cc-depth-off` as its kill switch, years after the code began requiring
+`CC_DEPTH_LIFTABLE=1` beside it -- a real defect, in the file the review had open, that a reader would
+have followed straight into a gate that kept gating. It was not found.
+
+The gate can tell whether a claim is supported. It cannot tell whether the claims are worth making, and
+this run is the cleanest evidence of the difference: nine well-cited findings, zero actionable.
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
