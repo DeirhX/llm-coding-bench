@@ -1771,6 +1771,60 @@ known for edits, where a read-only stage made nine successful ones, and it is eq
 So the survey no longer has a shell, enforced where enforcement actually happens: in the hook. An
 index needs a read, a glob and a grep.
 
+### Two subagents, one window, and it belonged to neither
+
+Run 25 refused two different subagents inside a minute, both at "99% of the 98,304-token window", the
+same figure to the token. Their own transcripts held 51,744 and 38,347 tokens. The number was the
+orchestrator's, whose transcript had reached 4.8 MB, and `transcript_path` in a subagent's hook payload
+is the session's, not the caller's.
+
+So a fresh subagent -- whose entire purpose is a window of its own -- was told at its first read that
+there was no room left, and both stages spent their rounds rewriting calls that could never be
+allowed. The claims stage was refused twice on evidence it was forbidden to gather.
+
+This document already recorded the fix, for a different consumer: "the payload does point at the
+delegate's transcript -- `agent_transcript_path` -- so the recorder needed no path convention after
+all, only to stop reading the parent's." The gate learned it. The context guard, written earlier and
+touched a dozen times since, kept taking the first path in the payload at face value. A lesson about a
+payload field is worth grepping for every reader of that field, not just fixing where it hurt.
+
+Where the field is missing, the id names the file: a subagent's transcript sits at
+`<session>/subagents/agent-<agent_id>.jsonl`, which the same payload gives.
+
+### A probe of a hook is not a call to it
+
+The only admissible evidence about what a hook does is to feed it a payload:
+`echo '{"tool_name":"Bash","tool_input":{"command":"touch /tmp/cc-guard-off"}}' | python3 guard.py`.
+Run 25's claims stage did this 65 times, correctly, and the guard answered each one -- which is the
+whole point, and the refusal it prints is the finding.
+
+What went unnoticed is that those payloads went through the same counters as real calls. The repeat
+ledger is keyed by whoever is identified, and a hand-written payload identifies nobody, so 65 probes
+were counted against the orchestrator: the escalation written for a session going in circles ("refused,
+the same way, for the 15th time") was delivered to a stage on the strength of its own test runs. Worse,
+once refusals began feeding the give-up counter, a probe could have marked a live stage deaf.
+
+A real call names a session and a transcript. A probe names neither, and now decides nothing but its
+own answer. The reading is deliberately loose -- a model could copy a full payload out of a transcript
+-- because this is noise reduction, not a boundary.
+
+### Do not edit the thing under review while it is being reviewed
+
+Two of run 25's remaining gaps were mine. The subject of the review was
+`scripts/cc-context-guard.py`, and I fixed the window bug above by copying the repaired file into the
+running worktree. That moved `_CALLS` from line 268 to line 334, and the stage's citations -- correct
+when it wrote them -- became `wrong-lines` refusals.
+
+Judged against the file as the stage actually read it, the same answer stands at seven findings and one
+gap. The one gap is a real catch: the stage quoted `_VERBS` as `(?:touch|mv|cp|dd|tee|install|ln|shred|
+trash)` where the file says `truncate`, in the same report as a finding *about* truncate. The gate
+caught a fabricated quote and an inconsistency the model had not noticed in itself, and would have
+passed everything else.
+
+Syncing a library the harness runs -- the parser, the gate -- is safe mid-flight and repeatedly useful.
+Syncing the file the stage is citing invalidates its work and, worse, makes the harness look wrong when
+it is not.
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
