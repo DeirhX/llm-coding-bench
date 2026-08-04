@@ -870,3 +870,46 @@ def test_an_answer_of_neither_claims_nor_unknowns_is_still_refused() -> None:
     answer = "I looked at the rule and it seems broadly fine to me, on balance. " * 12
     gaps, _ = gate.evaluate(contract, [], [], [], ".", answer=answer)
     assert any("No claims were stated" in g for g in gaps), gaps
+
+
+def _closing_tree() -> str:
+    """A tiny tracked tree, since the check asks git what the tree holds."""
+    import pathlib as pl
+    import subprocess, tempfile
+    root = tempfile.mkdtemp()
+    pl.Path(root, "src.py").write_text("def keeper():\n    return OFF_SWITCH.exists()\n")
+    for args in (["init", "-q"], ["add", "-A"]):
+        subprocess.run(["git"] + args, cwd=root, capture_output=True)
+    return root
+
+
+def test_a_quotation_in_the_closing_message_that_is_nowhere_is_caught() -> None:
+    """Run 22 closed on four verified findings and three fenced blocks nobody wrote."""
+    gate = _load_gate()
+    root = _closing_tree()
+    text = "Here is the offending code:\n\n```python\n    return TAMPER_SWITCH.absent()\n```\n"
+    assert gate._fabricated_quotes(text, root), "a made-up quotation went unnoticed"
+
+
+def test_a_quotation_that_is_in_the_tree_is_left_alone() -> None:
+    gate = _load_gate()
+    root = _closing_tree()
+    text = "The check reads:\n\n```python\n    return OFF_SWITCH.exists()\n```\n"
+    assert gate._fabricated_quotes(text, root) == [], "an honest quotation was called invention"
+
+
+def test_a_quotation_that_was_rewrapped_or_elided_is_still_left_alone() -> None:
+    """A stage that elides or reindents has still quoted the file, and the closing message has to be
+    allowed to finish."""
+    gate = _load_gate()
+    root = _closing_tree()
+    text = ("```python\ndef keeper():\n    # ... elided ...\n    something new entirely here\n```\n")
+    assert gate._fabricated_quotes(text, root) == [], "elision was read as invention"
+
+
+def test_a_command_shown_in_the_closing_message_is_not_a_quotation() -> None:
+    """A command a stage typed is nowhere on disk by design."""
+    gate = _load_gate()
+    root = _closing_tree()
+    text = "I ran:\n\n```bash\ntouch /tmp/cc-guard-off && echo denied\n```\n"
+    assert gate._fabricated_quotes(text, root) == [], "a run was judged as a quotation"

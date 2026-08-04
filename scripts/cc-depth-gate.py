@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -172,6 +173,67 @@ def _invented_paths(text: str, root: str) -> list[str]:
         if not os.path.exists(os.path.join(root, inside)):
             missing.append(inside)
     return missing
+
+
+# A fenced block in the closing message, with whatever the fence was labelled. Labels that name a
+# shell are runs, not quotations of a file, and a command a stage typed is nowhere on disk by design.
+_FENCED = re.compile(r"```(?P<label>[A-Za-z0-9_+-]*)\n(?P<body>.*?)```", re.S)
+_A_SHELL = re.compile(r"^(?:bash|sh|zsh|shell|console|shellsession|term|output|text|txt|diff|json)$",
+                      re.I)
+# The line-number gutter a stage copies out of the Read tool, which is not part of the file.
+_A_GUTTER = re.compile(r"^\s{0,8}\d{1,6}(?:\s*[|:>]\s?|\s)")
+# How many blocks are looked at, and how many lines of each. A closing message is short; this is here
+# so that a pathological one cannot turn the last hook of a run into a full-tree scan.
+_BLOCKS, _LINES = 8, 6
+
+
+def _nowhere_in_the_tree(quote: str, root: str) -> bool:
+    """Whether not one line of this quotation can be found in any file under version control.
+
+    Deliberately the weakest question worth asking. A stage that elides the middle of a quotation, or
+    rewraps it, or reindents it, has still quoted the file, and refusing that would send back honest
+    work in the one message that has to be allowed to finish. A stage that made the passage up has
+    nothing anywhere.
+    """
+    lines = [l.strip() for l in quote.splitlines()]
+    lines = [_A_GUTTER.sub("", l) for l in lines if len(l.strip()) >= 12]
+    if not lines:
+        return False
+    for line in lines[:_LINES]:
+        try:
+            # -e, because a quoted line beginning with a dash is a quoted line, and the pattern goes
+            # before the pathspec separator or git reads it as a path and searches the whole tree.
+            found = subprocess.run(["git", "grep", "-F", "-q", "-e", line, "--"],
+                                   cwd=root, capture_output=True, timeout=20)
+        except (OSError, subprocess.SubprocessError):
+            # No git, or a search that would not finish. The check exists to catch invention, and
+            # failing it open is the only safe direction: this is the message that has to be allowed
+            # to finish.
+            return False
+        if found.returncode == 0:
+            return False
+    return True
+
+
+def _fabricated_quotes(text: str, root: str) -> list[str]:
+    """Passages the closing message presents as quotations of the tree that the tree does not have.
+
+    Every finding in the message has been through the gate; the sentences around them have not. Run
+    22 closed on four verified findings and three fenced blocks, each attributed to a file that does
+    not exist, each holding a line nobody wrote. The findings were true and the message was not, and a
+    reader cannot tell those apart -- the quotation is the part that looks like proof.
+    """
+    made_up = []
+    for found in _FENCED.finditer(text or ""):
+        if _A_SHELL.match(found.group("label") or ""):
+            continue
+        body = found.group("body")
+        if _nowhere_in_the_tree(body, root):
+            first = next((l.strip() for l in body.splitlines() if len(l.strip()) >= 12), "")
+            made_up.append(first[:120])
+        if len(made_up) >= _BLOCKS:
+            break
+    return made_up
 
 
 # The proxy's note, which is what arrives when a turn runs into the token ceiling.
@@ -888,6 +950,19 @@ def main() -> int:
             # thing not checked.
             invented = _invented_paths(text, root)
             tried = int(state.get("closing", 0))
+            if not invented and tried < CLOSING_LIMIT:
+                made_up = _fabricated_quotes(text, root)
+                if made_up:
+                    state["closing"] = tried + 1
+                    cc_flowstate.save(state, session, root)
+                    return block(
+                        "Your answer shows %d passage(s) as quotations of this tree, and no file "
+                        "here holds any line of them: %s. Everything you were held to is still "
+                        "held; this is the part nobody checked until now, and a made-up quotation "
+                        "reads exactly like a proved one. Write the answer again with those "
+                        "passages as they are on disk, or say the finding in your own words without "
+                        "a quotation. Keep every finding and its evidence otherwise unchanged."
+                        % (len(made_up), "; ".join("`%s`" % m for m in made_up[:3])))
             if invented and tried < CLOSING_LIMIT:
                 state["closing"] = tried + 1
                 cc_flowstate.save(state, session, root)
