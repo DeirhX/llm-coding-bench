@@ -176,9 +176,10 @@ total 18,009. Also worth knowing: the client/server accounting gap cannot be mea
 `usage.input_tokens` in the transcript, because Ollama returns its *own* rendered count there and
 the two match exactly. The gap is only visible between the client's status-line count and the
 rendered prompt: 99,005 against **111,186**.
-Declaring a window smaller than the model's (`CLAUDE_CODE_MAX_CONTEXT_TOKENS = real − reserve`)
-does **not** make the client compact earlier — nothing consults a threshold, see §4 — but it makes
-the status-line percentage honest, which is the only trigger that works here.
+Declaring a window smaller than the model's (`CLAUDE_CODE_MAX_CONTEXT_TOKENS`) makes the
+status-line percentage honest, and — contrary to what this said until 4 Aug — it does now make the
+client compact: see "an overflow has to arrive as a 400" below for the observation that overturned
+it. The 1.12× gap quoted above is also too small by half; the measured range is 1.25-1.45×.
 
 **The reserve must exceed the framing, or it is worse than no reserve at all**, because it hands the
 client a ceiling whose own arithmetic overflows the runner. An audit on 30 Jul caught this: the
@@ -186,6 +187,75 @@ full-tools reserve was 16,384 against framing of 18,009, so a client obeying its
 still rendered 99,929 into a 98,304 window. Now 8,192 lean (declared 90,112 → 94,845 rendered,
 3,459 slack) and 20,480 full (declared 77,824 → 95,833 rendered, 2,471 slack). Re-derive both if
 the tool set changes.
+
+### Everything counts tokens as prose, and none of this is prose
+
+Three runs died the same death — 18 at 98,342 against 98,304, 20 at 98,950 against 98,304, 25 at
+133,902 against 131,072 — each a few thousand tokens past the end of the window while believing itself
+inside a budget. Each time the gap was written down as the client estimating where the runner
+tokenises, put at about 10 %, and covered by widening the margin. That explanation was wrong three
+times, and the margin it justified is what killed run 25.
+
+**The rule of four characters to a token is for English.** A coding session carries source, JSON,
+paths, diffs, command output and refusal text, which tokenise far denser. Twelve real transcripts were
+fed to llama-server's own `/tokenize`, against the exact text the guard's estimator sums: **[measured]**
+
+| Transcript content | Characters | Tokens | Chars/token | `chars/4` reads low by |
+|---|---|---|---|---|
+| run 25's parent, at death | 381,598 | 133,928 | 2.85 | 1.40× |
+| the densest of the twelve | 198,731 | 72,061 | 2.76 | 1.45× |
+| the loosest of the twelve | 91,699 | 28,575 | 3.21 | 1.25× |
+| median of twelve | — | — | **2.92** | **1.37×** |
+
+Two consequences, both arithmetic once the ratio is known.
+
+**The guard was reporting a fifth of the window free while the run was already past the end.** Asked
+about run 25's fatal conversation, `conversation_tokens` said 95,359 where the tokeniser said 133,928.
+A guard set to refuse bulky calls at 80 % of a 98,304 window refuses at 78,643 — and it never got
+there, because by its own arithmetic the conversation never arrived. It now divides by **2.8**, the
+conservative end of the measured range: overestimating stops a session a little early, and
+underestimating kills it outright with no prefix cache and no way back.
+
+**A ceiling declared at three quarters of the window is not a margin.** The client keeps the promise —
+it will not send past what it is told — but it measures the promise in its own units. Declaring 98,304
+against a 131,072 window permits up to 142,000 real tokens. That is not a near miss, it is run 25's
+death exactly. The launchers now declare **65 %**, which survives the densest ratio measured with about
+7,500 tokens to spare whether or not compaction ever fires. It costs a session a fifth of the window it
+could have addressed.
+
+Worth noting what is *not* the problem. The framing — system prompt and tool schemas — barely
+registers at this scale: run 25's message content alone tokenised to 133,928 against a request the
+server measured at 133,902, so the reserve arithmetic in the table above was solving a rounding error
+while the real gap went unnamed. Keep the reserve; stop treating it as the defence.
+
+### An overflow has to arrive as a 400, or the client resends it unchanged
+
+Claude Code's reactive compaction fires on an HTTP 400 whose message says the prompt is too long and
+whose details carry the two counts. The proxy was wrapping llama-server's refusal as a **502 typed
+`api_error`**, which is fatal — and the client's answer to fatal is to send the same request again.
+Run 25's last three requests were byte-identical, 133,902 tokens each, ninety seconds apart. The proxy
+now translates the overflow into the client's own wording and status. Errors that are *not* overflows
+are left alone: turning every 400 into "prompt is too long" would send the client compacting after a
+typo.
+
+Related, and a correction to §4: **the threshold path does now fire against this stack.** A session
+declaring a 20,000-token ceiling, given a 92,099-byte file to read, produced the compaction shape
+immediately — one message, no tools, no system prompt, 24,314 tokens in and 1,532 out. So a declared
+ceiling is worth declaring for its own sake and not only for an honest status line. The earlier
+finding was taken against Ollama, which never says a prompt is too long; llama-server does.
+
+### Three ways the operator's own tooling lied today
+
+- **`/props` has no top-level `n_ctx`.** It is under `default_generation_settings`, and at
+  `total_slots: 1` that is the whole window. Read from the top it came back empty on every run,
+  the hardcoded fallback took over, and `flow_smoke.sh` printed a constant as a measurement.
+- **`screen -X quit` kills the window and orphans the process inside it.** The orphan keeps the port,
+  the replacement dies on bind inside a screen that no longer exists, and every request goes on
+  reaching the old build — answering exactly as the new one would. A patch was measured for twenty
+  minutes before anyone checked which pid was serving. The proxy now writes a `serving` event naming
+  its pid and the mtime of the source it loaded.
+- **`nohup cmd &` from a tool call dies with the tool call.** Documented already; re-learned anyway.
+  Use `screen -dmS`.
 
 ### What actually fills the window: whole-file reads, not boilerplate
 
@@ -1855,7 +1925,9 @@ Kept deliberately, because the wrong turns cost more than the right ones.
 | MLX gives a ~3.5× runtime speedup | Shared weights; the speedup is a draft model. Runtime worth <5 % | Comparing layer digests |
 | Slow turns were memory pressure | Partly cache restores, partly variant thrashing; memory peaks did not predict failures | Correlating peaks against stalls |
 | Auxiliary calls were evicting the cache | The real cause was stale `ANTHROPIC_*` in `~/.claude/settings.json` reaching every worker | A logging proxy naming the caller |
-| A smaller declared window would force compaction | Nothing consults a threshold; the reserve only fixes the status-line denominator | Reading the binary's gate logic |
+| A smaller declared window would force compaction | True against llama-server, false against Ollama, which never says a prompt is too long. The reading of the gate logic was correct and the conclusion was over-generalised | A 20,000-token ceiling producing a compaction on the next large read |
+| The client and the runner disagree about tokens by ~10 % | They agree: both count four characters to a token. That is the wrong number for source, JSON and diffs, which run 2.76-3.21. Believed three times, and fatal all three | Twelve transcripts through llama-server's `/tokenize` |
+| An overflow is a fatal error | It is a recoverable one, if it arrives as a 400 saying the prompt is too long. Wrapped as a 502, the client resends the same over-sized request forever | Three byte-identical 133,902-token requests |
 | Long quotes caused the edit failures | 47 edits, 0 failures, including 82-line quotes | The probe, in both arms |
 | A 5-minute unload was a keep-alive misconfiguration | The messages path ignores body `keep_alive` entirely | Watching the expiry reset each turn |
 | A second conversation destroys the first one's prefix cache | It survives, until the trie's paged-out snapshots exceed a budget; then the older is discarded whole | A → B → A at 2.4k (`matched=2371`) and at 55k (`matched=13`) |
