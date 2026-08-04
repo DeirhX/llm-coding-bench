@@ -78,6 +78,12 @@ def allow():
 # reads as an obstacle with a trick to it, rather than as an answer.
 REPEAT_CAP = 4
 
+# The flow this call belongs to, filled in before any rule may refuse, so that a refusal from here
+# counts towards the stage being given up on. Only the budget rule used to count, and a stage cornered
+# by any other rule -- run 25's was cornered by the off-switch rule and then by a window that was not
+# its own -- went on calling tools for the rest of its round with nothing keeping score.
+_FLOW: dict = {"state": None, "session": "", "root": ""}
+
 # Who is being refused, filled in once the payload is read. A file, because each hook call is its
 # own process and there is nowhere else to remember anything.
 _WHO: dict = {"agent": "", "ledger": None}
@@ -104,7 +110,29 @@ def _repeats(reason: str) -> int:
     return count
 
 
+def _counts_against_the_stage() -> None:
+    """Tell the flow that whoever is calling has been refused again.
+
+    A stage that ignores refusals is ended from outside, and that count is how the run knows to do
+    it. Refusals from here were not counted, so the mechanism only worked for the one rule that
+    happened to live in the other guard.
+    """
+    if not _FLOW.get("session"):
+        return
+    try:
+        import cc_flowstate
+        # Read, change and write under the file lock: the peeked copy taken for the budget rule is a
+        # snapshot, and writing it back would drop whatever another hook recorded in the meantime.
+        state = cc_flowstate.load(_FLOW["session"], _FLOW["root"])
+        for stage in cc_flowstate.running(state):
+            cc_flowstate.refused_once_more(state, stage)
+        cc_flowstate.save(state, _FLOW["session"], _FLOW["root"])
+    except (ImportError, OSError, ValueError):
+        pass
+
+
 def deny(reason: str):
+    _counts_against_the_stage()
     said = _repeats(reason)
     if said > REPEAT_CAP:
         reason = ("Refused, the same way, for the %dth time. The wording of the call is not what is "
@@ -117,6 +145,32 @@ def deny(reason: str):
         "permissionDecisionReason": reason,
     }}))
     sys.exit(0)
+
+
+def own_transcript(payload: dict) -> Path:
+    """The transcript of whoever is calling, which is not the one the payload names first.
+
+    `transcript_path` is the session's -- the orchestrator's -- and a subagent's calls carry it
+    unchanged. Run 25 refused two subagents at "99% of the 98,304-token window" within a minute of
+    each other, the same figure to the token, while their own transcripts held 51,744 and 38,347.
+    They were being charged for the parent's window, which is the one thing in the run neither of
+    them could do anything about, and both spent the rest of their rounds rewriting a call that was
+    never going to be allowed. A fresh subagent, whose whole point is a window of its own, was told
+    at its first read that there was no room left.
+
+    The client offers `agent_transcript_path` on some events and not others; where it is missing the
+    id names the file, since a subagent's transcript sits under the session directory as
+    `subagents/agent-<id>.jsonl`.
+    """
+    named = payload.get("agent_transcript_path") or payload.get("transcript_path") or ""
+    said = Path(named)
+    agent = str(payload.get("agent_id") or "")
+    if not named or not agent or said.name.startswith("agent-"):
+        # An empty path is a path to nothing, and `Path("").with_suffix("")` raises -- a hook that
+        # throws is worse than one that measures the wrong window, since the client sees no decision.
+        return said
+    mine = said.with_suffix("") / "subagents" / ("agent-%s.jsonl" % agent)
+    return mine if mine.is_file() else said
 
 
 def segment_records(transcript: Path):
@@ -333,7 +387,7 @@ def main():
 
     tool = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
-    transcript = Path(payload.get("transcript_path") or "")
+    transcript = own_transcript(payload)
     _WHO["agent"] = str(payload.get("agent_id") or "")
     _WHO["ledger"] = Path("/tmp/cc-refusals-%s.json"
                           % (payload.get("session_id") or "session"))
@@ -346,8 +400,10 @@ def main():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     try:
         import cc_flowstate
-        state = cc_flowstate.peek(cc_flowstate.session_of(payload),
-                                  payload.get("cwd") or os.getcwd())
+        session = cc_flowstate.session_of(payload)
+        root = payload.get("cwd") or os.getcwd()
+        state = cc_flowstate.peek(session, root)
+        _FLOW.update({"state": state, "session": session, "root": root})
         for stage in cc_flowstate.running(state):
             over = cc_flowstate.overspent(state, stage)
             if over > 0:

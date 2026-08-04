@@ -22,10 +22,10 @@ GUARD = str(Path(__file__).resolve().parent / "cc-context-guard.py")
 
 
 def ask(tool: str, tool_input: dict, root: str, session: str = "s1", agent: str = "",
-        args: list[str] | None = None) -> str:
+        args: list[str] | None = None, transcript: str = "") -> str:
     """The guard's decision on one call: the refusal it would send, or "" for allowed."""
     payload = {"hook_event_name": "PreToolUse", "session_id": session, "cwd": root,
-               "tool_name": tool, "tool_input": tool_input, "transcript_path": ""}
+               "tool_name": tool, "tool_input": tool_input, "transcript_path": transcript}
     if agent:
         payload["agent_id"] = agent
     proc = subprocess.run([sys.executable, GUARD] + (args or []), input=json.dumps(payload),
@@ -115,3 +115,96 @@ def test_a_long_sleep_is_refused_and_a_short_one_is_not() -> None:
     with tempfile.TemporaryDirectory() as root:
         assert "Do not sleep" in ask("Bash", {"command": "sleep 180 && tail -5 log"}, root)
         assert ask("Bash", {"command": "sleep 2 && echo done"}, root) == ""
+
+
+
+def _guard_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ctxguard", GUARD)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _session_tree(parent_lines: int, own_lines: int) -> tuple[str, str]:
+    """A session transcript and one subagent's, so that the two can be told apart by size."""
+    import pathlib as pl
+    import tempfile
+    home = pl.Path(tempfile.mkdtemp())
+    parent = home / "session.jsonl"
+    filler = "x" * 400
+
+    def rows(count: int) -> str:
+        return "\n".join(
+            json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "text", "text": "%d %s" % (i, filler)}]}}) for i in range(count)) + "\n"
+
+    parent.write_text(rows(parent_lines))
+    mine = home / "session" / "subagents"
+    mine.mkdir(parents=True)
+    own = mine / "agent-deadbeef01234567.jsonl"
+    own.write_text(rows(own_lines))
+    return str(parent), str(own)
+
+
+def test_a_subagent_is_charged_for_its_own_window_not_the_parents() -> None:
+    """Run 25 refused two subagents at "99% of the 98,304-token window" a minute apart, the same
+    figure to the token, while their own transcripts held 51,744 and 38,347 tokens: both were being
+    charged for the orchestrator's window, the one thing in the run neither could affect."""
+    guard = _guard_module()
+    parent, own = _session_tree(parent_lines=400, own_lines=4)
+    mine = guard.own_transcript({"transcript_path": parent, "agent_id": "deadbeef01234567"})
+    assert str(mine) == own, mine
+    theirs = guard.own_transcript({"transcript_path": parent})
+    assert str(theirs) == parent, theirs
+
+
+def test_the_client_naming_the_agents_transcript_is_believed() -> None:
+    guard = _guard_module()
+    parent, own = _session_tree(parent_lines=9, own_lines=2)
+    got = guard.own_transcript({"transcript_path": parent, "agent_transcript_path": own,
+                                "agent_id": "deadbeef01234567"})
+    assert str(got) == own, got
+
+
+def test_an_agent_with_no_transcript_of_its_own_falls_back_to_the_one_named() -> None:
+    """Better to measure the wrong window than to measure nothing and let a session run itself out."""
+    guard = _guard_module()
+    parent, _ = _session_tree(parent_lines=5, own_lines=1)
+    got = guard.own_transcript({"transcript_path": parent, "agent_id": "nosuchagentatall"})
+    assert str(got) == parent, got
+
+
+def test_a_full_parent_does_not_refuse_a_fresh_subagents_read() -> None:
+    """The refusal that cost run 25 both its claims rounds: a subagent's read, denied for a window
+    that belongs to somebody else."""
+    with tempfile.TemporaryDirectory() as root:
+        parent, own = _session_tree(parent_lines=900, own_lines=2)
+        said = ask("Read", {"file_path": GUARD, "limit": 40}, root,
+                   agent="deadbeef01234567", transcript=parent)
+        assert "window" not in said, said
+        theirs = ask("Read", {"file_path": GUARD, "limit": 40}, root, transcript=parent)
+        assert "window" in theirs, "the parent's own fullness stopped being noticed"
+
+
+def test_a_refusal_from_this_guard_counts_towards_giving_the_stage_up() -> None:
+    """A stage that ignores refusals is ended from outside, and the count is how the run knows to do
+    it. Run 25's survey was cornered by the off-switch rule, which lives here and counted nothing,
+    and it went on calling tools for the rest of its round with nobody keeping score."""
+    import cc_flowstate
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a review", "s-deaf", root)
+        cc_flowstate.record_launch(state, "survey", "agent1")
+        cc_flowstate.save(state, "s-deaf", root)
+        said = ask("Bash", {"command": "touch /tmp/cc-guard-off"}, root, session="s-deaf",
+                   agent="agent1")
+        assert "off-switch" in said, said
+        after = cc_flowstate.peek("s-deaf", root)
+        counted = [e.get("denied") for e in after["stages"] if e.get("stage") == "survey"]
+        assert counted and counted[-1] == 1, after["stages"]
+
+
+def test_a_payload_with_no_transcript_does_not_throw() -> None:
+    """A hook that raises gives the client no decision at all, which is worse than a wrong one."""
+    guard = _guard_module()
+    assert str(guard.own_transcript({"agent_id": "deadbeef01234567"})) in (".", "")
