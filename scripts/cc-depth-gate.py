@@ -793,6 +793,34 @@ def _digest(text: str, limit: int = 1200) -> str:
     return "\n".join(kept)[:limit]
 
 
+def _closing_answer(flow: str, proved: list[dict], abandoned: list[str] | None = None) -> str:
+    """The only closing text a flow may emit, assembled from already-judged state.
+
+    Run 28 reached the right verdict -- zero verified findings -- then the parent expanded two of
+    the refused claims into a detailed final answer containing invented line numbers and a false
+    explanation. Labelling a claim "Unverified" does not make the prose after it safe. The closing
+    answer is data we already have, so render it here and require it byte-for-byte instead of asking
+    the model to paraphrase one final time after every substantive check has finished.
+    """
+    abandoned = abandoned or []
+    named = ", ".join(abandoned)
+    if not proved:
+        answer = "The %s flow produced no verified findings." % flow
+        if abandoned:
+            answer += (" The %s stage was refused %d times and abandoned."
+                       % (named, cc_flowstate.ROUND_CAP))
+        return answer
+    lines = ["Verified findings:"]
+    for finding in proved[:cc_flowstate.STOOD_KEPT]:
+        claim = " ".join(str(finding.get("claim") or "").split())
+        cites = "; ".join(" ".join(str(c).split()) for c in finding.get("cites") or [])
+        lines.append("- %s%s" % (claim, " [%s]" % cites if cites else ""))
+    if abandoned:
+        lines.extend(("", "The %s stage was refused %d times and abandoned; no other findings "
+                           "were verified." % (named, cc_flowstate.ROUND_CAP)))
+    return "\n".join(lines)
+
+
 # How long the stop hook will sit waiting for a stage to report before answering the session. Long
 # enough to cover the gap between a session finishing its turn and its stage finishing its work,
 # short enough that a hook the client has given up on is not still sleeping.
@@ -923,60 +951,32 @@ def main() -> int:
                     if cc_flowstate.exhausted(state, st.name)
                     and st.name not in cc_flowstate.done(state)]
         if not left and given_up and not state.get("disclosed"):
-            # A flow that gave up on a stage still produces an answer, and without this the answer
-            # reads like any other: three refused rounds of claims are invisible to whoever asked
-            # for the review. The gaps are the most useful thing the flow learned, so they are made
-            # part of the reply rather than left in a state file nobody opens.
-            state["disclosed"] = True
-            cc_flowstate.save(state, session, root)
-            gaps = [g for e in cc_flowstate.refused(state) for g in e.get("gaps", [])]
+            # The final message is itself an output boundary. Run 28 correctly reached zero verified
+            # findings, then invented a detailed explanation while restating the rejected claims.
+            # Hand the client the complete safe answer rather than another prose-writing assignment.
             stood = [f for st in given_up for f in cc_flowstate.salvage(state, st)]
-            unestablished = " | ".join(g[:160] for g in gaps[:6]) or "nothing was recorded"
-            if not stood:
-                return block(
-                    "The %s stage was refused %d times and the flow has given up on it, so your "
-                    "answer must say so rather than reading like a finished review. Say which stage "
-                    "it was, and state plainly what was never established: %s. Then finish."
-                    % (", ".join(given_up), cc_flowstate.ROUND_CAP, unestablished))
-            # Everything the run proved goes into the answer, or the run was worth nothing to whoever
-            # asked for it. Run 21 abandoned its claims stage having verified six findings, disclosed
-            # only the failures, and delivered a review that named no defect it had actually caught.
-            return block(
-                "The %s stage was refused %d times and the flow has given up on it. %d of its "
-                "findings did pass the gate, and they are the answer: write each one out with the "
-                "citation beside it, as given here -- %s. Then say plainly, and separately, that the "
-                "stage was abandoned and what was never established: %s. Then finish."
-                % (", ".join(given_up), cc_flowstate.ROUND_CAP, len(stood),
-                   " | ".join("%s [%s]" % ((f.get("claim") or "")[:200],
-                                           "; ".join(f.get("cites") or [])[:120])
-                              for f in stood[:cc_flowstate.STOOD_KEPT]),
-                   unestablished))
+            expected = _closing_answer(state["flow"], stood, given_up)
+            state["disclosed"] = True
+            state["final_answer"] = expected
+            cc_flowstate.save(state, session, root)
+            return block("Reply with exactly the following text and nothing else:\n\n%s" % expected)
         if not left and not given_up and not state.get("handed"):
             # The parent has not seen a single finding. It launches stages, waits, and is told
-            # verdicts; the findings themselves live in the subagents' own transcripts, and the only
-            # way the parent ever got at them was to poll -- which cost 32k characters a call and
-            # ended run 25. So the flow hands them over here, once, and the closing answer is written
-            # from material that has already passed the gate rather than from the parent's memory of
-            # having delegated something.
+            # verdicts; the findings live in subagent state. Render that state once, here, so the
+            # closing turn cannot add findings that never passed.
             proved = [f for st in cc_flowstate.done(state) for f in cc_flowstate.salvage(state, st)]
+            expected = _closing_answer(state["flow"], proved)
             state["handed"] = True
+            state["final_answer"] = expected
             cc_flowstate.save(state, session, root)
-            if proved:
+            return block("Reply with exactly the following text and nothing else:\n\n%s" % expected)
+        if not left and state.get("final_answer"):
+            expected = str(state["final_answer"])
+            if text.strip() != expected:
                 return block(
-                    "The %s flow is finished and every stage passed. %d finding(s) carried evidence "
-                    "that was checked against the tree and the commands actually run, and they are "
-                    "the answer: write each one out with its citation beside it, as given here -- "
-                    "%s. Add nothing that is not in that list: a finding you remember but cannot see "
-                    "here did not pass, and the citations are the part a reader can follow up."
-                    % (state["flow"], len(proved),
-                       " | ".join("%s [%s]" % ((f.get("claim") or "")[:200],
-                                               "; ".join(f.get("cites") or [])[:120])
-                                  for f in proved[:cc_flowstate.STOOD_KEPT])))
-            return block(
-                "The %s flow is finished and every stage passed, and not one finding carried evidence "
-                "that could be checked -- so there is nothing here to report as established. Say that: "
-                "the stages ran, and what they claimed was either unverifiable or nothing was claimed. "
-                "Do not write findings of your own to fill the gap." % state["flow"])
+                    "That closing answer added or changed material after the verdict. Reply with "
+                    "exactly the following text and nothing else:\n\n%s" % expected)
+            return allow()
         if not left:
             # The last thing written is the only thing anybody reads, and until now it was the only
             # thing not checked.

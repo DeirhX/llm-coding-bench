@@ -1039,7 +1039,13 @@ def test_a_stage_given_up_on_hands_over_what_it_proved() -> None:
         assert decision == "block", reason
         assert "rm is not in the _VERBS regex" in reason, reason
         assert "guard.py:229" in reason, reason
-        assert "abandoned" in reason and "a seventh thing" in reason, reason
+        assert "abandoned" in reason, reason
+        assert "a seventh thing" not in reason, "an unverified claim leaked into the safe answer"
+        expected = cc_flowstate.load("s1", root)["final_answer"]
+        decision, refused = _stop(expected + "\n\nClaim 7 might still be a bug.", root)
+        assert decision == "block" and "exactly" in refused, refused
+        decision, _ = _stop(expected, root)
+        assert decision == "allow"
 
 
 def test_a_finding_restated_is_kept_twice_rather_than_risk_losing_one() -> None:
@@ -1305,7 +1311,10 @@ def test_a_finished_flow_that_proved_nothing_says_so_rather_than_inventing() -> 
         cc_flowstate.save(state, "s-none", root)
         decision, said = _stop("Here is my review.", root, session="s-none")
         assert decision == "block", said
-        assert "nothing here to report as established" in said, said
+        assert "The review flow produced no verified findings." in said, said
+        expected = cc_flowstate.load("s-none", root)["final_answer"]
+        assert _stop(expected + " But I suspect a race.", root, session="s-none")[0] == "block"
+        assert _stop(expected, root, session="s-none")[0] == "allow"
 
 
 def test_the_parents_own_tool_calls_are_not_charged_to_the_stage_it_is_waiting_on() -> None:
@@ -1397,3 +1406,39 @@ def test_the_parent_may_still_run_ordinary_commands_while_it_waits() -> None:
         for command in ("git status --short", "ls -la scripts/", "rg -n ROUND_CAP scripts/"):
             decision, why = _parent_bash("s1", root, command)
             assert "tasks/" not in why, (command, why)
+
+
+def test_an_abandoned_flow_cannot_expand_unverified_claims_in_its_final_answer() -> None:
+    """Run 28 got the verdict right and the deliverable wrong.
+
+    Claims proved nothing and were abandoned, then the parent wrote two detailed "Unverified"
+    findings anyway. One explanation was false and both carried invented line-numbered quotations.
+    A warning label is not verification; with nothing proved, the only safe result is that fact.
+    """
+    import cc_flowstate
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a review", "s-r28", root)
+        cc_flowstate.record_launch(state, "survey", "survey-agent")
+        cc_flowstate.record_verdict(state, "survey", [], "survey-agent")
+        for round_ in range(cc_flowstate.ROUND_CAP):
+            cc_flowstate.record_launch(state, "claims", "claims-agent")
+            cc_flowstate.record_verdict(
+                state, "claims", ["claim %d lacked its quoted lines" % round_],
+                "claims-agent", answer="CLAIM: unsupported")
+        for entry in state["stages"]:
+            if entry.get("verdict") is None:
+                entry["launched"] = time.time() - cc_flowstate.STALE_AFTER - 5
+        cc_flowstate.save(state, "s-r28", root)
+
+        decision, instruction = _stop("Here are two unverified findings.", root, session="s-r28")
+        assert decision == "block", instruction
+        expected = cc_flowstate.load("s-r28", root)["final_answer"]
+        assert expected == ("The review flow produced no verified findings. "
+                            "The claims stage was refused 3 times and abandoned.")
+
+        leaked = (expected + "\n\n**Claim 1:** A stage can reopen. Unverified.\n"
+                  "```\nif exhausted: clear_everything()\n```")
+        decision, reason = _stop(leaked, root, session="s-r28")
+        assert decision == "block", "post-gate analysis escaped into the deliverable"
+        assert expected in reason and "exactly" in reason, reason
+        assert _stop(expected, root, session="s-r28")[0] == "allow"
