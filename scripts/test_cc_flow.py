@@ -1152,3 +1152,30 @@ def test_task_stop_is_still_refused_for_a_stage_that_is_working() -> None:
         cc_flowstate.record_launch(state, "survey", "a1")
         cc_flowstate.save(state, "s1", root)
         assert run("", root, tool="TaskStop")[0] == "deny"
+
+
+def test_the_index_stage_is_not_allowed_to_run_commands() -> None:
+    """Run 24's survey was asked for a list of files and line ranges and went off to test the
+    off-switch rule instead: 280 tool calls, half an hour, one shell command rewritten over and over
+    against a refusal. The tool list it was handed said Read, Grep, Glob -- the client enforces none
+    of that under --dangerously-skip-permissions, so the flow does."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey", "a1")
+        cc_flowstate.save(state, "s1", root)
+        decision, reason, _ = run("", root, tool="Bash")
+        assert decision == "deny", reason
+        assert "does not run commands" in reason, reason
+        assert run("", root, tool="Grep")[0] == "allow"
+        assert run("", root, tool="Read")[0] == "allow"
+
+
+def test_a_stage_that_needs_a_shell_still_has_one() -> None:
+    """The claims stage settles what a program does by running it, which is the whole point of it."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "survey", "a1")
+        cc_flowstate.record_verdict(state, "survey", [], "a1")
+        cc_flowstate.record_launch(state, "claims", "a2")
+        cc_flowstate.save(state, "s1", root)
+        assert run("", root, tool="Bash")[0] == "allow"

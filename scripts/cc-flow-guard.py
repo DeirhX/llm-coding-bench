@@ -200,6 +200,12 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
                      "nothing reads it, and the stage after you sees the tree, not your scratch."
                      % in_flight[0])
         judged = cc_flow.stage_in(state.get("flow") or "", in_flight[0])
+        if tool == "Bash" and judged is not None and not judged.shell:
+            # The tool list handed to a subagent is advice: under --dangerously-skip-permissions the
+            # client enforces none of it, and a stage given Read,Grep,Glob ran 280 Bash calls.
+            deny("The %s stage does not run commands. Read, Grep and Glob are what it has, and an "
+                 "index needs nothing else -- what a command would tell you belongs to the stage "
+                 "after this one, which has to establish it for itself anyway." % in_flight[0])
         allowed = (judged.budget if judged is not None and judged.budget else
                    cc_flowstate.CALL_BUDGET)
         if os.environ.get("CC_FLOW_TRACE"):

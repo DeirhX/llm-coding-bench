@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 
 STAGE_TOOLS = "Read,Grep,Glob,Bash"
+READING_TOOLS = "Read,Grep,Glob"
 EDITING_TOOLS = STAGE_TOOLS + ",Edit,Write,MultiEdit"
 
 
@@ -40,9 +41,17 @@ class Stage:
     # in the first twenty. 0 means the flow's default.
     budget: int = 0
 
+    # Whether this stage runs commands at all. An index does not: run 24's survey was asked for a
+    # list of files and line ranges, decided to test the off-switch rule instead, and spent 280 tool
+    # calls and half an hour rewriting one refused shell command -- work belonging to a later stage,
+    # which would have had to redo it anyway. Everything a survey needs is a read, a glob or a grep.
+    shell: bool = True
+
     @property
     def tools(self) -> str:
-        return EDITING_TOOLS if self.writes else STAGE_TOOLS
+        if self.writes:
+            return EDITING_TOOLS
+        return STAGE_TOOLS if self.shell else READING_TOOLS
 
 
 DEFAULT_STAGES = [
@@ -51,6 +60,7 @@ DEFAULT_STAGES = [
         produces="survey.md",
         verify=False,     # an inventory makes no claims, so there is nothing to verify yet
         budget=60,
+        shell=False,
         stance=("Map the territory and stop. List the files, entry points and data that bear on "
                 "the question, each with the line range you actually opened. A file here can be "
                 "longer than one read allows, so say which part of it you saw and let the next "
