@@ -174,6 +174,29 @@ def _invented_paths(text: str, root: str) -> list[str]:
     return missing
 
 
+# The proxy's note, which is what arrives when a turn runs into the token ceiling.
+_CUT_NOTE = re.compile(r"\[This answer was cut off.*?\]", re.S)
+def _nothing_to_hand_on(text: str) -> str:
+    """Why the next stage cannot use this answer, if it cannot.
+
+    A stage that makes no claims is not verified -- an inventory held to a contract that wants claims
+    is refused for obeying -- and `not verify` was read as `accept whatever arrives`. Run 23's survey
+    ran into the 16,384-token ceiling on its first turn, and what reached the gate was the proxy's
+    truncation note and nothing else. It was accepted, recorded as the map of the territory, and the
+    claims stage was launched to work from it. Accepting a stage's silence is worse than refusing it:
+    the refusal costs a round, the acceptance costs the rest of the run.
+
+    Only silence counts. A length rule was tried first and refused two surveys that said where the
+    rule lives and what guards it in one line each -- which is the whole job, done briefly. What is
+    caught here is an answer consisting of the proxy saying there is no answer.
+    """
+    said = _CUT_NOTE.sub("", text or "").strip()
+    if not said:
+        return ("the turn was cut off at the token ceiling before anything was written, so the "
+                "next stage has nothing to read")
+    return ""
+
+
 def _cite_of(ev) -> str:
     """How a citation that held up is written down for whoever reads the finding later."""
     if ev.kind == cc_ledger.FILE_QUOTE and ev.path:
@@ -872,6 +895,15 @@ def main() -> int:
         # was told to do. Measured on the first flow that ran: refused at 59 seconds, for obeying.
         running = cc_flow.stage_in(state.get("flow", ""), stage)
         if running is not None and not running.verify:
+            empty = _nothing_to_hand_on(text)
+            if empty:
+                cc_flowstate.record_verdict(state, stage, [empty], agent, answer=text)
+                cc_flowstate.save(state, session, root)
+                return block(
+                    "This stage has produced nothing the next one can use: %s. Write it now, in "
+                    "the reply itself and nothing else -- one line per entry, no preamble, no "
+                    "reasoning, and stop at forty. Do not begin again from where you were cut off."
+                    % empty)
             cc_flowstate.record_verdict(state, stage, [], agent)
             state["nudges"] = 0
             for entry in reversed(state.get("stages", [])):

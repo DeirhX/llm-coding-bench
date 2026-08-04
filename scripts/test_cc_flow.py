@@ -1103,3 +1103,21 @@ def _gate_limit() -> int:
         if line.startswith("CLOSING_LIMIT"):
             return int(line.split("=")[1].split("#")[0])
     raise AssertionError("CLOSING_LIMIT is gone")
+
+
+def test_a_stage_that_was_cut_off_is_not_accepted_as_its_own_map() -> None:
+    """Run 23's survey hit the 16,384-token ceiling on its first turn and what reached the gate was
+    the proxy's truncation note, alone. A survey makes no claims, so it is not verified, and `not
+    verified` was reading as `accept whatever arrives`: the note was recorded as the map of the
+    territory and the claims stage was launched to work from it."""
+    cut = ("\n\n[This answer was cut off at 16384 tokens by the proxy, so what is above is "
+           "incomplete and any tool call it was about to make was dropped. Do not repeat it from "
+           "the start: write the short version now.]")
+    with tempfile.TemporaryDirectory() as root:
+        cc_flowstate.begin("review", "t", "s1", root)
+        run("STAGE: survey\nhave a look", root)
+        decision = _subagent_stop(cut, root)
+        after = cc_flowstate.load("s1", root)
+    assert decision == "block", decision
+    assert not cc_flowstate.done(after), after
+    assert [e for e in after["stages"] if e.get("verdict") == "refused"], after

@@ -109,6 +109,13 @@ DRY = {"dry_multiplier": 0.8, "dry_base": 1.75, "dry_allowed_length": 12, "dry_p
 NO_THINKING = ("This answer is not accepted yet", "cut off at", "Write the ledger now",
                "--- the refused ledger ---")
 
+# The survey stance, which is the one stage that is transcription from its first turn: list the files
+# and line ranges that bear on the question, draw no conclusions, name no defects. Run 23's survey
+# spent the whole 16,384-token ceiling on turn one and delivered the proxy's cut note as its map of
+# the territory. Matched anywhere in the conversation rather than in the last two messages, because
+# the stance is stated once and the stage is an index for the whole of its life.
+INDEXING = "Map the territory and stop"
+
 # How many turns of reasoning a stage gets before it is asked to work without it. The loop does not
 # appear at the start of a stage, when there is little in the context and something real to work
 # out; it appears deep in one, where the model has everything it needs and reasons in circles about
@@ -117,11 +124,16 @@ NO_THINKING = ("This answer is not accepted yet", "cut off at", "Write the ledge
 THINKING_TURNS = 8
 
 
+def _flat(message: dict) -> str:
+    content = message.get("content")
+    return (content if isinstance(content, str) else json.dumps(content)) or ""
+
+
 def _transcribing(messages: list) -> bool:
+    if any(INDEXING in _flat(m) for m in messages):
+        return True
     for message in messages[-2:]:
-        content = message.get("content")
-        text = content if isinstance(content, str) else json.dumps(content)
-        if any(mark in (text or "") for mark in NO_THINKING):
+        if any(mark in _flat(message) for mark in NO_THINKING):
             return True
     return sum(1 for m in messages if m.get("role") == "assistant") > THINKING_TURNS
 

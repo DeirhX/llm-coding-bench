@@ -351,3 +351,23 @@ def test_thinking_stops_once_a_stage_is_deep_in_its_work() -> None:
     deep = early + [{"role": "assistant", "content": "still reading"}] * 10
     assert ap.to_openai({"model": "m", "messages": deep})["chat_template_kwargs"] == {
         "enable_thinking": False}
+
+
+def test_the_indexing_stage_is_not_asked_to_reason() -> None:
+    """Run 23's survey spent the whole 16,384-token ceiling on its first turn and handed the gate the
+    proxy's cut note as its map. Listing files and line ranges, with conclusions forbidden by the
+    stance itself, is transcription from the start -- and the marker matched is the harness's own
+    words, so nothing the model writes can switch its reasoning off."""
+    import cc_flow
+    stance = [s for s in cc_flow.DEFAULT_STAGES if s.name == "survey"][0].stance
+    assert ap.INDEXING in stance, "the stance no longer says what the proxy matches"
+    survey = {"messages": [{"role": "user", "content": "STAGE: survey\n" + stance}],
+              "max_tokens": 500}
+    assert ap.to_openai(survey).get("chat_template_kwargs") == {"enable_thinking": False}
+
+
+def test_a_stage_that_makes_claims_still_reasons() -> None:
+    """The stage that has to work something out keeps the tokens to do it in."""
+    claims = {"messages": [{"role": "user", "content": "STAGE: claims\nmake the claims"}],
+              "max_tokens": 500}
+    assert ap.to_openai(claims).get("chat_template_kwargs") is None
