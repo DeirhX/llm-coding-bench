@@ -1719,6 +1719,58 @@ Three shapes of the same header have now cost three rounds between them. The les
 parser needs one more case -- it is that **every syntactic requirement on the model is a place the run
 can die**, and the cheap direction is to accept what models write rather than to keep explaining.
 
+### The refusal nobody heard
+
+Run 24's survey made 280 tool calls against a budget of 60. The flow guard refused 220 of them. The
+model never saw a single one of those refusals.
+
+Both PreToolUse hooks run on every call, and both refuse by printing
+`permissionDecision: deny` with a reason. When both refuse the same call, **only one reason reaches
+the model, and it is not the first hook's.** The survey read the context guard's off-switch message
+256 times -- and answered it by rewriting the command, once as `'(''?'':''t''o''u''c''h''`, trying to
+find a spelling that would slip past a rule that was not matching spellings.
+
+This is measurable across every run in the archive, by counting how many times the budget message
+appears in a subagent's transcript:
+
+| runs | flow guard position | budget refusals delivered |
+|------|--------------------|---------------------------|
+| r7, r10 | second | 194, 246 |
+| r12-r24 | first | 2, 4, 0, 1, 10, 0, 2, 0 |
+
+The order was changed to first on 2 August, in a commit whose message says it was done *so that its
+refusals are the ones the model reads*. It achieved the exact opposite and nothing noticed for four
+runs, because a refusal that is issued and discarded looks identical, from the outside, to a hook
+that never ran. The counter kept incrementing; the model kept reading.
+
+The fix is not to swap the order back. It is to stop depending on an undocumented client behaviour
+that has already changed once: **the budget is now stated by both hooks, in the same words, from one
+definition.** Whichever reason the client picks, it says the same thing.
+
+Three things follow from this that are worth more than the fix:
+
+- **A hook's decision is unobservable unless you make it observable.** There is no client log of what
+ a hook decided. `CC_FLOW_TRACE` now writes one, and it is what turned four runs of confusion into
+ one line: `tool=Bash agent=ad9685c8 flight=['survey'] spent=280 allowed=60`.
+- **A rule that repeats itself verbatim is read as an obstacle with a trick to it.** After four
+ identical refusals the guard now says something different, because 256 copies of the same sentence
+ taught a stage to look for a way around rather than a way out.
+- **A refused call is still a call.** No hook can stop a subagent; it can only make each call return
+ a refusal, and a model that answers refusals by calling again is in a loop nothing here can break.
+ A stage that works on through twenty-five refusals is now ended by the session that launched it,
+ with TaskStop permitted for that stage and no other.
+
+### The tool list handed to a subagent is advice
+
+The survey's whole job is to list files and line ranges. It is handed `Read,Grep,Glob,Bash` and, in
+run 24, spent every one of its 280 calls on Bash, testing a rule the next stage would have had to
+test for itself anyway.
+
+Under `--dangerously-skip-permissions` the client enforces no tool list at all -- this was already
+known for edits, where a read-only stage made nine successful ones, and it is equally true of Bash.
+So the survey no longer has a shell, enforced where enforcement actually happens: in the hook. An
+index needs a read, a glob and a grep.
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
