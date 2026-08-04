@@ -274,3 +274,63 @@ def test_one_repeat_is_a_retry_and_not_a_loop() -> None:
         said = ask("Bash", {"command": probe}, root,
                    transcript=_transcript_with([(probe, "1 passed")]))
         assert "printed the same thing" not in said, said
+
+
+def _guard_module():
+    """The guard imported as a module, for the parts that are arithmetic rather than a decision."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guard_under_test", GUARD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# The loosest ratio seen in twelve real transcripts fed to llama-server's tokeniser: 3.21 characters
+# per token, on the session that was mostly prose. Anything the estimator says must be at least the
+# count implied by that, or it is reading low on material denser than the friendliest case measured.
+LOOSEST_MEASURED = 3.21
+
+
+def test_the_window_estimate_errs_high_on_the_material_these_sessions_carry() -> None:
+    """Not chars/4. That rule is for English, and none of this is English.
+
+    Run 25's last request was 133,902 tokens against a window of 131,072. Asked about the same
+    conversation, this estimator said 95,359 -- so a guard set to refuse at 80% of the window was
+    reporting a fifth of it still free while the run was already past the end. Runs 18 and 20 died
+    the same way, and each time the gap was put down to the client counting differently.
+
+    The material is source, JSON, paths, diffs and command output, which tokenise near 2.8
+    characters each rather than 4. This asserts the direction of the error, which is the part that
+    decides whether a session stops early or dies.
+    """
+    guard = _guard_module()
+    body = (
+        'def _judged_quote(root: str, path: str, start: int, end: int, quote: str) -> Verdict:\n'
+        '    path = under_root(root, path)\n'
+        '    full = os.path.join(root, path)\n'
+        '    if not os.path.isfile(full):\n'
+        '        return Verdict(UNVERIFIED, "no such file: %s" % path)\n'
+    ) * 40
+    records = [{"message": {"role": "user", "content": [{"type": "text", "text": body}]}}]
+    said = guard.conversation_tokens(records)
+    assert said >= len(body) / LOOSEST_MEASURED, (
+        "estimated %d tokens for %d characters of source, which is %.2f chars per token -- looser "
+        "than the loosest real transcript measured" % (said, len(body), len(body) / said))
+    assert said <= len(body) / 2.0, (
+        "estimated %d tokens for %d characters, which overshoots far enough to stop sessions that "
+        "had room" % (said, len(body)))
+
+
+def test_every_kind_of_block_is_counted_at_the_measured_rate() -> None:
+    """A tool result is the biggest thing in these conversations and must not be counted cheaper."""
+    guard = _guard_module()
+    blob = "x" * 2800
+    kinds = [
+        {"type": "text", "text": blob},
+        {"type": "thinking", "thinking": blob},
+        {"type": "tool_result", "content": blob},
+    ]
+    for block in kinds:
+        records = [{"message": {"role": "user", "content": [block]}}]
+        said = guard.conversation_tokens(records)
+        assert said >= 2800 / LOOSEST_MEASURED, (block["type"], said)

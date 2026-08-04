@@ -946,24 +946,40 @@ def test_a_stage_may_be_given_a_shorter_leash_than_the_flow() -> None:
         assert "survey" in why, why
 
 
-def test_the_declared_window_leaves_room_for_the_two_token_counts_to_disagree() -> None:
-    """Declaring 90,112 against a 98,304 window did not save run 20: it died at 98,950 tokens, having
-    believed itself inside a budget it was 10% past. Claude Code estimates and llama-server tokenises,
-    and the gap grows with the prompt."""
+# The worst characters-per-token ratio measured across twelve real transcripts against
+# llama-server's own tokeniser. The client counts four to a token, so its estimate of a coding
+# session can be this far low, and a declared ceiling is only safe if it survives being believed.
+DENSEST_MEASURED = 2.76
+
+
+def test_the_declared_window_survives_the_client_counting_tokens_as_prose() -> None:
+    """Three quarters was not a margin, it was the cause of death.
+
+    A declared ceiling is a promise the client keeps: it will not send past it. But it measures the
+    promise in its own units, four characters to a token, and a session carrying source, JSON, diffs
+    and command output runs 2.76 to 3.21 characters per token. So 98,304 declared is up to 142,000
+    tokens offered to a 131,072-token window, and runs 18, 20 and 25 each died a few thousand tokens
+    past the end while believing themselves inside budget. It was blamed on a 10% disagreement three
+    times over; it is 45%.
+    """
     text = (pathlib.Path(__file__).resolve().parent / "flow_smoke.sh").read_text()
-    assert "DECLARED=$(( CTX * 3 / 4 ))" in text, "the margin is back to a rounding allowance"
+    assert "DECLARED=$(( CTX * 65 / 100 ))" in text, "the margin is back to a rounding allowance"
+    window = 131072
+    declared = window * 65 // 100
+    assert declared * (4 / DENSEST_MEASURED) < window, (
+        "declaring %d tokens is %d as the runner counts them, which does not fit %d"
+        % (declared, declared * 4 // DENSEST_MEASURED, window))
 
 
 def test_the_widest_window_is_declared_with_the_margin_the_counts_need() -> None:
-    """A framing reserve does not cover the second error. Run 20 declared 90,112 against a 98,304
-    window and died at 98,950 -- 9.8% past what it believed, because the client estimates tokens and
-    the runner tokenises them. At 128k a lean session's 8,192 reserve would declare 122,880, which is
-    about 135k as the runner counts it: outside a window we had just widened to fit it."""
+    """The same arithmetic where a person picks the window rather than the server reporting it."""
     done = subprocess.run(["zsh", str(HERE / "claude-gemma.sh"), "128k", "--print-settings"],
                           capture_output=True, text=True, timeout=180)
     printed = done.stdout[done.stdout.index("{"):]
     declared = int(json.loads(printed)["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"])
-    assert declared <= 131072 * 3 // 4, declared
+    assert declared * (4 / DENSEST_MEASURED) < 131072, (
+        "declared %d, which is %d tokens to the runner and past the window it was given"
+        % (declared, declared * 4 // DENSEST_MEASURED))
 
 
 def test_findings_that_held_are_gathered_across_the_rounds_that_were_refused() -> None:

@@ -282,7 +282,7 @@ def _sse(event: str, data: dict) -> bytes:
     return ("event: %s\ndata: %s\n\n" % (event, json.dumps(data))).encode()
 
 
-def stream_anthropic(chunks: Iterator[dict], model: str) -> Iterator[bytes]:
+def stream_anthropic(chunks: Iterator[dict], model: str, seen: dict | None = None) -> Iterator[bytes]:
     """Re-emit an OpenAI delta stream in Anthropic's event grammar.
 
     The client concatenates `input_json_delta` fragments without re-parsing, so a tool call's
@@ -308,6 +308,12 @@ def stream_anthropic(chunks: Iterator[dict], model: str) -> Iterator[bytes]:
 
     for chunk in chunks:
         usage = chunk.get("usage") or usage
+        if usage and seen is not None:
+            # Handed back to the caller so the completed request can be logged with the size of the
+            # prompt the tokeniser actually saw. Runs 18, 20 and 25 each died of a prompt too long
+            # for the window, and in every case the only record of how close the last few turns had
+            # come was the error that ended them.
+            seen.update(usage)
         choice = (chunk.get("choices") or [{}])[0]
         finish = choice.get("finish_reason") or finish
         delta = choice.get("delta") or {}
@@ -492,15 +498,19 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             self.send_header("connection", "close")
             self.end_headers()
             sent = 0
+            counted: dict = {}
             try:
-                for piece in stream_anthropic(iter_openai_sse(reply), body.get("model", "")):
+                for piece in stream_anthropic(iter_openai_sse(reply), body.get("model", ""),
+                                              counted):
                     self.wfile.write(piece)
                     sent += len(piece)
             except (BrokenPipeError, ConnectionResetError):
                 self.note(event="client_gone", ms=int((time.time() - started) * 1000))
                 return
             self.note(event="done", stream=True, bytes=sent,
-                      ms=int((time.time() - started) * 1000))
+                      ms=int((time.time() - started) * 1000),
+                      input_tokens=counted.get("prompt_tokens", 0),
+                      output_tokens=counted.get("completion_tokens", 0))
             self.close_connection = True
             return
 
@@ -541,6 +551,17 @@ def serve(port: int, upstream: str, log_path: str, force_model: str = "",
                          "lsof -nP -iTCP:%d -sTCP:LISTEN" % (port, exc, port))
     print("anthropic -> openai on 127.0.0.1:%d, upstream %s%s"
           % (port, upstream, ", forcing model %s" % force_model if force_model else ""), flush=True)
+    # Which code is answering, written where the operator already looks. `screen -X quit` kills the
+    # window and orphans the python inside it; the orphan keeps the port, the replacement dies on
+    # bind inside a screen that no longer exists, and every request goes on reaching the old build,
+    # answering exactly as the new one would. An afternoon was spent on a patch that was never live.
+    if Proxy.logfile:
+        Proxy.logfile.write(json.dumps({
+            "event": "serving", "pid": os.getpid(), "port": port,
+            "source": os.path.abspath(__file__),
+            "edited": int(os.path.getmtime(os.path.abspath(__file__))),
+            "t": time.time()}) + "\n")
+        Proxy.logfile.flush()
     server.serve_forever()
 
 

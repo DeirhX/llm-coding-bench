@@ -204,32 +204,49 @@ def segment_records(transcript: Path):
     return records[last:]
 
 
+# Characters per token in the material these sessions actually carry. Not four: four is the rule of
+# thumb for English prose, and none of this is prose. It is source, JSON, paths, diffs, command
+# output and refusal text, which tokenise far denser. Twelve real transcripts were fed to
+# llama-server's /tokenize endpoint against the exact text this function sums, and the ratio came
+# back between 2.76 and 3.21, median 2.92 -- so chars/4 was reading 25-45 % low on every one of them.
+#
+# It was not a rounding error, it was the cause of death. Run 25's last request was 133,902 tokens
+# against a 131,072 window; this function, asked about the same conversation, said 95,359. A guard
+# set to refuse at 80 % was still saying there was a fifth of the window left while the run was
+# already 2 % past the end of it. Runs 18 and 20 died the same way and the gap was blamed on the
+# client counting differently.
+#
+# 2.8 rather than the 2.92 median, because the failure is asymmetric: overestimating stops a session
+# a little early, and underestimating kills it outright with no prefix cache and no way back.
+CHARS_PER_TOKEN = 2.8
+
+
 def conversation_tokens(records) -> int:
-    """chars/4 over every block that ends up in the prompt.
+    """Roughly what the prompt costs, summed over every block that ends up in it.
 
     Deliberately approximate: a tokenizer call per tool call would add latency to every single one,
-    and the decision is a threshold, not a measurement. Measured against a real session this
-    underestimates by roughly 5 %, which the framing allowance below more than covers.
+    and the decision is a threshold, not a measurement. It now errs high -- see CHARS_PER_TOKEN,
+    which is measured rather than assumed -- because the cost of the two mistakes is not symmetric.
     """
-    total = 0
+    chars = 0
     for rec in records:
         msg = rec.get("message") or {}
         content = msg.get("content")
         if isinstance(content, str):
-            total += len(content) // 4
+            chars += len(content)
             continue
         for blk in (content if isinstance(content, list) else []):
             if not isinstance(blk, dict):
                 continue
             kind = blk.get("type")
             if kind in ("text", "thinking"):
-                total += len(blk.get("text") or blk.get("thinking") or "") // 4
+                chars += len(blk.get("text") or blk.get("thinking") or "")
             elif kind == "tool_use":
-                total += len(json.dumps(blk.get("input") or {})) // 4
+                chars += len(json.dumps(blk.get("input") or {}))
             elif kind == "tool_result":
                 body = blk.get("content")
-                total += len(body if isinstance(body, str) else json.dumps(body)) // 4
-    return total
+                chars += len(body if isinstance(body, str) else json.dumps(body))
+    return int(chars / CHARS_PER_TOKEN)
 
 
 def failed_tool_uses(records):
@@ -560,7 +577,7 @@ def main():
         if wants_everything and size > args.max_bytes:
             deny(
                 f"Context guard: {path.name} is {size:,} bytes in {line_count(path):,} lines, "
-                f"roughly {size // 4:,} tokens, and reading it whole would spend most of the "
+                f"roughly {int(size / CHARS_PER_TOKEN):,} tokens, and reading it whole would spend most of the "
                 f"window on one call. Long lines are why the line limit did not catch this. Use a "
                 f"search command to find what you need, or read a slice with offset and limit."
             )
@@ -574,7 +591,7 @@ def main():
                          else "an unbounded read")
                 deny(
                     f"Context guard: {path.name} is {lines:,} lines, roughly "
-                    f"{path.stat().st_size // 4:,} tokens, and {asked} of it stays in "
+                    f"{int(path.stat().st_size / CHARS_PER_TOKEN):,} tokens, and {asked} of it stays in "
                     f"the conversation for the rest of the session. Read at most "
                     f"{args.max_lines} lines with offset and limit, or find what you need with a "
                     f"search command and read around the hit."

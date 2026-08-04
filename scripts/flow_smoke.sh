@@ -35,16 +35,35 @@ fi
 # 98,304 -- 38 tokens over, after 135 turns and an hour of work -- and the refusal arrives as a 502
 # the client treats as fatal. Asked for rather than assumed, because the answer is whatever
 # llama-server was started with, and headroom because the two of them count tokens differently.
+#
+# `n_ctx` is not at the top of /props and never was: llama-server reports it inside
+# `default_generation_settings`, which is the one slot's window and, at total_slots=1, the whole
+# one. Read from the top level it came back empty on every run so far, the fallback below took
+# over, and the number this script printed as measured was a constant that happened to be right
+# once. So: both places, and say which one answered.
 CTX=${FLOW_CTX:-$(curl -fsS -m 5 http://127.0.0.1:8098/props 2>/dev/null |
-  "$ROOT/.venv/bin/python" -c 'import json,sys; d=json.load(sys.stdin); print(d.get("n_ctx") or 0)' \
-  2>/dev/null)}
-[[ -n "$CTX" && "$CTX" -gt 8192 ]] || CTX=98304
-# A quarter, not the 8k that looked generous. Declaring 90,112 against a 98,304 window did not save
-# run 20: it died at 98,950 tokens, so the client believed it was inside a budget it was 10% past.
-# The two count differently -- Claude Code estimates, llama-server tokenises -- and the gap grows with
-# the prompt, which is exactly when it matters. The margin has to cover the disagreement, not the
-# rounding.
-DECLARED=$(( CTX * 3 / 4 ))
+  "$ROOT/.venv/bin/python" -c 'import json,sys
+d = json.load(sys.stdin)
+gen = d.get("default_generation_settings") or {}
+print(d.get("n_ctx") or gen.get("n_ctx") or 0)' 2>/dev/null)}
+if [[ -z "$CTX" || "$CTX" -le 8192 ]]; then
+  CTX=98304
+  print -u2 "warning: llama-server did not say its window; assuming $CTX tokens"
+fi
+# Just under two thirds, and the number is derived rather than chosen. The client refuses to send
+# past what it is told, so this is the ceiling a session actually reaches -- but it counts the way
+# every estimator counts, four characters to a token, and none of this material is prose. Twelve real
+# transcripts measured against llama-server's own tokeniser came back between 2.76 and 3.21
+# characters per token, so an estimate can be 1.45x low.
+#
+# At three quarters that is fatal arithmetic: 98,304 declared, believed, is 142,000 tokens sent into
+# a 131,072-token window. Runs 18, 20 and 25 each died a few thousand tokens past the end while
+# believing themselves comfortably inside a budget, and each time it was written off as the client
+# and the runner disagreeing by 10%. They disagree by 45%.
+#
+# 65% survives the worst ratio measured with 7,500 tokens to spare, whether or not compaction ever
+# fires. It costs a session a fifth of the window it could have addressed. An overflow costs the run.
+DECLARED=$(( CTX * 65 / 100 ))
 
 mkdir -p "$OUT"
 SETTINGS="$OUT/settings.json"

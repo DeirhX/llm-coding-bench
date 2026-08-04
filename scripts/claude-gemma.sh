@@ -397,17 +397,21 @@ if (( LEAN_TOOLS )); then
 else
   CTX_RESERVE=20480
 fi
-# A fixed reserve covers the framing the client never counts. It does not cover the second error:
-# Claude Code estimates tokens where llama-server tokenises them, and run 20 died at 98,950 against
-# a 98,304 window while believing itself inside a declared 90,112 -- 9.8% out, a gap that grows with
-# the prompt instead of sitting still. So the ceiling is whichever is lower, the window less the
-# framing or three quarters of it. At 128k both roads lead to 98,304; a lean session gives up 24,576
-# tokens it could have addressed, against a 2-5x decode penalty for one overflow.
+# A fixed reserve covers the framing the client never counts. It does not cover the second error,
+# which is far larger than it was thought to be: the client counts four characters to a token, which
+# is the rule for prose, and a coding session carries source, JSON, paths, diffs and command output.
+# Twelve real transcripts put through llama-server's own tokeniser came back at 2.76 to 3.21
+# characters per token, so the client's estimate can be 1.45x low -- not the 10% written here before.
+#
+# Three quarters does not survive that: 98,304 declared, believed, is 142,000 tokens offered to a
+# 131,072-token window, and runs 18, 20 and 25 all died a few thousand tokens past the end. 65%
+# survives the worst measured ratio with room to spare even if compaction never fires. So the ceiling
+# is whichever is lower, the window less the framing or 65% of it.
 CTX_FRAMED=$(( CTX_TOKENS > CTX_RESERVE * 2 ? CTX_TOKENS - CTX_RESERVE : CTX_TOKENS ))
-CTX_COUNTED=$(( CTX_TOKENS * 3 / 4 ))
+CTX_COUNTED=$(( CTX_TOKENS * 65 / 100 ))
 CTX_DECLARED=$(( CTX_FRAMED < CTX_COUNTED ? CTX_FRAMED : CTX_COUNTED ))
 echo "window: $CTX_TOKENS tokens; Claude Code told $CTX_DECLARED, leaving room for the tools and"
-echo "        framing it never counts and for the 10% it counts differently from the runner"
+echo "        framing it never counts and for the 45% it counts differently from the runner"
 if (( LEAN_TOOLS )); then
   echo "tools:  6 sent, 21 withheld (sub-agents, tasks, cron, worktrees, plan mode,"
   echo "        skills, notebooks, structured questions). Framing is 4,477 tokens a turn"
