@@ -307,6 +307,7 @@ def test_a_finished_flow_may_end() -> None:
         for name in ("survey", "claims", "adversary"):
             cc_flowstate.record_launch(state, name)
             cc_flowstate.record_verdict(state, name, [])
+        state["handed"] = True      # the findings have already been given to the closing turn
         cc_flowstate.save(state, "s1", root)
         decision, _ = _stop("Here is what survived.", root)
     assert decision == "allow", decision
@@ -1069,6 +1070,7 @@ def test_a_closing_message_citing_a_file_that_is_not_there_is_sent_back() -> Non
         for stage in ("survey", "claims", "adversary"):
             cc_flowstate.record_launch(state, stage, "a0")
             cc_flowstate.record_verdict(state, stage, [], "a0")
+        state["handed"] = True      # this is about the message written after that hand-over
         cc_flowstate.save(state, "s1", root)
         decision, reason = _stop("The rule is at scripts/cc-context-guard line 229.", root)
         assert decision == "block", reason
@@ -1088,6 +1090,7 @@ def test_the_closing_message_is_sent_back_a_bounded_number_of_times() -> None:
         for stage in ("survey", "claims", "adversary"):
             cc_flowstate.record_launch(state, stage, "a0")
             cc_flowstate.record_verdict(state, stage, [], "a0")
+        state["handed"] = True      # this is about the message written after that hand-over
         cc_flowstate.save(state, "s1", root)
         bad = "It is in scripts/nowhere.py, honestly."
         limit = _gate_limit()
@@ -1242,3 +1245,34 @@ def test_the_wait_message_does_not_send_them_polling() -> None:
     gate = pathlib.Path(__file__).resolve().parent / "cc-depth-gate.py"
     assert "Do not call TaskOutput" in gate.read_text(), "the wait message still sells the poll"
     assert "TaskOutput tool for it with" not in gate.read_text()
+
+
+def test_a_finished_flow_hands_its_proved_findings_to_the_closing_answer() -> None:
+    """The parent never sees a finding: it launches stages, waits, and is told verdicts. The only way
+    it ever got at them was to poll, which cost 32k characters a call and ended run 25."""
+    import cc_flowstate
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a review", "s-hand", root)
+        for stage in ("survey", "claims", "adversary"):
+            cc_flowstate.record_launch(state, stage, "a1")
+            cc_flowstate.record_verdict(state, stage, [], "a1", answer="done", stood=[
+                {"claim": "the %s rule misses node writes" % stage,
+                 "cites": ["scripts/cc-context-guard.py:268-268"]}])
+        cc_flowstate.save(state, "s-hand", root)
+        decision, said = _stop("I reviewed it and it looks fine.", root, session="s-hand")
+        assert decision == "block", said
+        assert "the claims rule misses node writes" in said, said
+        assert "scripts/cc-context-guard.py:268-268" in said, said
+
+
+def test_a_finished_flow_that_proved_nothing_says_so_rather_than_inventing() -> None:
+    import cc_flowstate
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a review", "s-none", root)
+        for stage in ("survey", "claims", "adversary"):
+            cc_flowstate.record_launch(state, stage, "a1")
+            cc_flowstate.record_verdict(state, stage, [], "a1", answer="done")
+        cc_flowstate.save(state, "s-none", root)
+        decision, said = _stop("Here is my review.", root, session="s-none")
+        assert decision == "block", said
+        assert "nothing here to report as established" in said, said

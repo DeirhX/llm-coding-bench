@@ -913,3 +913,4 @@ def test_a_command_shown_in_the_closing_message_is_not_a_quotation() -> None:
     root = _closing_tree()
     text = "I ran:\n\n```bash\ntouch /tmp/cc-guard-off && echo denied\n```\n"
     assert gate._fabricated_quotes(text, root) == [], "a run was judged as a quotation"
+

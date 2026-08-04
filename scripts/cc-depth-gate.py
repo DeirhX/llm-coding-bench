@@ -951,6 +951,32 @@ def main() -> int:
                                            "; ".join(f.get("cites") or [])[:120])
                               for f in stood[:cc_flowstate.STOOD_KEPT]),
                    unestablished))
+        if not left and not given_up and not state.get("handed"):
+            # The parent has not seen a single finding. It launches stages, waits, and is told
+            # verdicts; the findings themselves live in the subagents' own transcripts, and the only
+            # way the parent ever got at them was to poll -- which cost 32k characters a call and
+            # ended run 25. So the flow hands them over here, once, and the closing answer is written
+            # from material that has already passed the gate rather than from the parent's memory of
+            # having delegated something.
+            proved = [f for st in cc_flowstate.done(state) for f in cc_flowstate.salvage(state, st)]
+            state["handed"] = True
+            cc_flowstate.save(state, session, root)
+            if proved:
+                return block(
+                    "The %s flow is finished and every stage passed. %d finding(s) carried evidence "
+                    "that was checked against the tree and the commands actually run, and they are "
+                    "the answer: write each one out with its citation beside it, as given here -- "
+                    "%s. Add nothing that is not in that list: a finding you remember but cannot see "
+                    "here did not pass, and the citations are the part a reader can follow up."
+                    % (state["flow"], len(proved),
+                       " | ".join("%s [%s]" % ((f.get("claim") or "")[:200],
+                                               "; ".join(f.get("cites") or [])[:120])
+                                  for f in proved[:cc_flowstate.STOOD_KEPT])))
+            return block(
+                "The %s flow is finished and every stage passed, and not one finding carried evidence "
+                "that could be checked -- so there is nothing here to report as established. Say that: "
+                "the stages ran, and what they claimed was either unverifiable or nothing was claimed. "
+                "Do not write findings of your own to fill the gap." % state["flow"])
         if not left:
             # The last thing written is the only thing anybody reads, and until now it was the only
             # thing not checked.
