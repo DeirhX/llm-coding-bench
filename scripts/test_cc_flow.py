@@ -1179,3 +1179,39 @@ def test_a_stage_that_needs_a_shell_still_has_one() -> None:
         cc_flowstate.record_launch(state, "claims", "a2")
         cc_flowstate.save(state, "s1", root)
         assert run("", root, tool="Bash")[0] == "allow"
+
+
+def _status_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "flowstatus", str(pathlib.Path(__file__).resolve().parent / "cc-flow-status.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_a_run_can_be_read_out_without_writing_python_at_a_shell() -> None:
+    """Every post-mortem began by hand-writing the same twenty lines against flow.json, and the part
+    a person wants -- what a given-up stage proved before it was given up on -- was in none of them."""
+    status = _status_module()
+    state = {"flow": "review", "stages": [
+        {"stage": "survey", "verdict": "accepted", "calls": 13},
+        {"stage": "claims", "verdict": "refused", "calls": 100,
+         "gaps": ["claim 4 (the rule misses node) cites nothing. Quote the lines it rests on."],
+         "stood": [{"claim": "the guard admits an off switch only when the launch allowed one",
+                    "cites": ["scripts/cc-context-guard.py:323-324"]}]}]}
+    said = status.findings(state)
+    assert "proved: the guard admits an off switch" in said, said
+    assert "scripts/cc-context-guard.py:323-324" in said, said
+    assert "cites nothing" in said, said
+    assert "survey: accepted, 13 tool calls" in said, said
+
+
+def test_a_gap_is_read_out_whole() -> None:
+    """A gap is a sentence, and a sentence cut at eighty columns is not one -- the summary line
+    already truncates, which is why post-mortems went to the JSON instead."""
+    status = _status_module()
+    long_gap = "claim 1 " + "which the stage established by reading the file " * 6
+    said = status.findings({"flow": "review", "stages": [
+        {"stage": "claims", "verdict": "refused", "calls": 4, "gaps": [long_gap]}]})
+    assert " ".join(said.split()).count("reading the file") == 6, said

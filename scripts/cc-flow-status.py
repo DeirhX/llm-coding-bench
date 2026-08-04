@@ -18,11 +18,52 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cc_flowstate     # noqa: E402
 
 
+def _wrapped(text: str, width: int = 96, indent: str = " " * 6) -> str:
+    """One paragraph, folded, because a gap is a sentence and a truncated sentence is not one."""
+    words, lines, line = " ".join((text or "").split()).split(), [], ""
+    for word in words:
+        if line and len(line) + 1 + len(word) > width:
+            lines.append(line)
+            line = word
+        else:
+            line = "%s %s" % (line, word) if line else word
+    if line:
+        lines.append(line)
+    return "\n".join(indent + l for l in lines)
+
+
+def findings(state: dict) -> str:
+    """What the run established and what it was refused for, round by round.
+
+    flow.json holds all of this and nothing read it out: every post-mortem this month began by
+    writing the same twenty lines of Python at a shell. A stage that was given up on has usually
+    proved something before it was, and that is exactly the part a person wants and the summary
+    line does not carry.
+    """
+    out = []
+    for entry in state.get("stages", []):
+        stood, gaps = entry.get("stood") or [], entry.get("gaps") or []
+        out.append("%s: %s, %s tool calls" % (entry.get("stage"), entry.get("verdict") or "running",
+                                              entry.get("calls", 0)))
+        for finding in stood:
+            out.append("    proved: %s" % " ".join((finding.get("claim") or "").split()))
+            for cite in finding.get("cites") or []:
+                out.append("            %s" % " ".join(str(cite).split()))
+        for gap in gaps:
+            out.append("    refused:")
+            out.append(_wrapped(gap))
+        if not stood and not gaps:
+            out.append("    nothing recorded against this round")
+    return "\n".join(out) or "no stage has reported"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--session", default=os.environ.get("CLAUDE_SESSION_ID", ""))
     ap.add_argument("--root", default=os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
     ap.add_argument("--short", action="store_true", help="one line, for a status bar")
+    ap.add_argument("--findings", action="store_true",
+                    help="every finding that carried its evidence, and every gap that refused one")
     args = ap.parse_args()
 
     if not args.session:
@@ -44,6 +85,9 @@ def main() -> int:
         return 0
 
     print(cc_flowstate.summary(state))
+    if args.findings:
+        print()
+        print(findings(state))
     return 0
 
 
