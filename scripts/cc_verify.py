@@ -1225,8 +1225,11 @@ _AFTERWARDS = re.compile(r"\s*\((?:[Ll]ines?\s+)(?P<start>\d{1,6})"
 # that has run four probes and is reporting them one to a sentence. Every one is checkable -- the
 # command has to be in the transcript and the outcome has to be borne out by what it printed -- and
 # every one was read as prose, so eight findings established by running the hook cited nothing.
+# The outcome may itself be backticked -- "`echo ... | python3 guard.py` -> `deny`" -- and then the
+# unquoted alternative could only match the arrow: three findings in run 25 were refused for a probe
+# whose expected output the parser read as ">".
 _PROBED = re.compile(r"`(?P<command>[^`]{4,400})`\s*(?:--|\u2014|->|:|,)?\s*"
-                     r"(?P<outcome>[^.;`]{2,120})")
+                     r"(?:`(?P<quoted>[^`]{1,200})`|(?P<outcome>[^.;`]{2,120}))")
 _LIKE_A_COMMAND = re.compile(r"^(?:\./)?[\w/~$]")
 # `EVIDENCE: python3 scripts/guard_test.py -- "expected deny got deny"` -- the command with neither
 # the header word nor backticks, which is how a stage writes it when it has just run the thing. Named
@@ -1269,7 +1272,8 @@ def _probes(body: str) -> list[dict]:
     out: list[dict] = []
     for found in _PROBED.finditer(body):
         command = found.group("command").strip()
-        outcome = _OUTCOME_ASIDE.sub("", found.group("outcome")).strip(" -\u2014:,")
+        outcome = _OUTCOME_ASIDE.sub("", found.group("quoted") or found.group("outcome") or "")
+        outcome = outcome.strip(" -\u2014:,")
         if not outcome or "/" not in command and " " not in command:
             # A backticked identifier with a word after it is prose about the code, not a command
             # somebody ran. `tampers()` is not a probe and neither is `rm`.

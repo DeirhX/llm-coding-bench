@@ -84,6 +84,18 @@ REPEAT_CAP = 4
 # its own -- went on calling tools for the rest of its round with nothing keeping score.
 _FLOW: dict = {"state": None, "session": "", "root": ""}
 
+# Whether this invocation is the client's, rather than a stage asking the hook what it does. The two
+# arrive as the same JSON on the same stdin: a review that probes this guard writes a payload by hand,
+# and it is right to do so -- feeding the hook the payload is the only admissible evidence about the
+# hook. What it must not do is move the accounting of the session it is asking about. Run 25's claims
+# stage sent the same payload fifteen times and was answered, correctly, with the escalation meant for
+# a session going in circles; the count behind that escalation was the orchestrator's own.
+_LIVE: dict = {"real": False}
+
+
+class _NotThisCall(Exception):
+    """Left the flow-state block because this invocation is a probe of the hook, not a call to it."""
+
 # Who is being refused, filled in once the payload is read. A file, because each hook call is its
 # own process and there is nowhere else to remember anything.
 _WHO: dict = {"agent": "", "ledger": None}
@@ -92,7 +104,7 @@ _WHO: dict = {"agent": "", "ledger": None}
 def _repeats(reason: str) -> int:
     """How many times running this caller has been refused with this same message."""
     path = _WHO.get("ledger")
-    if path is None:
+    if path is None or not _LIVE["real"]:
         return 1
     try:
         seen = json.loads(path.read_text())
@@ -117,7 +129,7 @@ def _counts_against_the_stage() -> None:
     it. Refusals from here were not counted, so the mechanism only worked for the one rule that
     happened to live in the other guard.
     """
-    if not _FLOW.get("session"):
+    if not _FLOW.get("session") or not _LIVE["real"]:
         return
     try:
         import cc_flowstate
@@ -388,6 +400,12 @@ def main():
     tool = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
     transcript = own_transcript(payload)
+    # A real call names a session and a transcript; a hand-written probe names neither, and that is
+    # the difference that keeps a probe from spending the session's counters. Named, not present: the
+    # first call of a session can arrive before the file is on disk, and a rule that turned itself off
+    # for that call would be off exactly when a run is cheapest to derail.
+    _LIVE["real"] = bool(payload.get("session_id")) and bool(payload.get("transcript_path")
+                                                             or payload.get("agent_transcript_path"))
     _WHO["agent"] = str(payload.get("agent_id") or "")
     _WHO["ledger"] = Path("/tmp/cc-refusals-%s.json"
                           % (payload.get("session_id") or "session"))
@@ -399,6 +417,9 @@ def main():
     # ever being told why: what it saw, every time, was this guard talking about something else.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     try:
+        # A probe belongs to no stage, so there is no budget to have spent and nothing to record.
+        if not _LIVE["real"]:
+            raise _NotThisCall
         import cc_flowstate
         session = cc_flowstate.session_of(payload)
         root = payload.get("cwd") or os.getcwd()
@@ -411,7 +432,7 @@ def main():
                      "and write your answer now from what you have already seen. Anything you "
                      "could not establish is an UNKNOWN, which is a complete answer here -- going "
                      "round the files again is not." % (over, stage))
-    except (ImportError, OSError, ValueError):
+    except (ImportError, OSError, ValueError, _NotThisCall):
         pass
 
     # --allowed-tools pre-approves; it does not forbid, and under

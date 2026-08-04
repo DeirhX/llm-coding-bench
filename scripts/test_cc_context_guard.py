@@ -25,7 +25,11 @@ def ask(tool: str, tool_input: dict, root: str, session: str = "s1", agent: str 
         args: list[str] | None = None, transcript: str = "") -> str:
     """The guard's decision on one call: the refusal it would send, or "" for allowed."""
     payload = {"hook_event_name": "PreToolUse", "session_id": session, "cwd": root,
-               "tool_name": tool, "tool_input": tool_input, "transcript_path": transcript}
+               "tool_name": tool, "tool_input": tool_input,
+               # A payload with no session and no transcript is a probe of the hook rather than a call
+               # to it, and the guard keeps its counters out of those. Tests that are about a session
+               # therefore have to look like one.
+               "transcript_path": transcript or "/tmp/cc-test-transcript.jsonl"}
     if agent:
         payload["agent_id"] = agent
     proc = subprocess.run([sys.executable, GUARD] + (args or []), input=json.dumps(payload),
@@ -208,3 +212,21 @@ def test_a_payload_with_no_transcript_does_not_throw() -> None:
     """A hook that raises gives the client no decision at all, which is worse than a wrong one."""
     guard = _guard_module()
     assert str(guard.own_transcript({"agent_id": "deadbeef01234567"})) in (".", "")
+
+
+def test_a_probe_of_the_hook_does_not_spend_the_sessions_counters() -> None:
+    """Feeding the hook a payload is the only admissible evidence about the hook, and run 25's claims
+    stage did it 65 times. What it must not do is move the accounting of the session it is asking
+    about: the escalation for a session going in circles was being counted against a probe."""
+    import cc_flowstate
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a review", "s-probe", root)
+        cc_flowstate.record_launch(state, "claims", "agent1")
+        cc_flowstate.save(state, "s-probe", root)
+        for _ in range(6):
+            said = ask("Bash", {"command": "touch /tmp/cc-guard-off"}, root, session="",
+                       transcript="none")
+            assert "off-switch" in said, said
+            assert "for the" not in said, "a probe was escalated at like a session"
+        after = cc_flowstate.peek("s-probe", root)
+        assert [e.get("denied") for e in after["stages"]] == [None], after["stages"]

@@ -1271,3 +1271,20 @@ def test_a_report_of_something_said_is_not_borne_out_by_silence() -> None:
     calls = [_bash("python3 guard.py", "", ok=True)]
     verdict = vf.command_result(calls, "python3 guard.py", "printed DENIED with the reason")
     assert not verdict.ok, verdict.detail
+
+
+def test_an_outcome_in_backticks_is_the_outcome() -> None:
+    """Three findings in run 25 were refused for a probe whose expected output the parser read as
+    ">": the unquoted alternative could only match the arrow when the outcome wore backticks."""
+    got = vf._probes('`echo \'{"tool_input":{"command":"echo x > /tmp/y"}}\' | python3 g.py` -> `deny`.')
+    assert [(g["kind"], g["expect"]) for g in got] == [("command_result", "deny")], got
+
+
+def test_an_aside_after_a_backticked_outcome_is_still_an_aside() -> None:
+    got = vf._probes('`shred /tmp/cc-guard-off` -> `deny` (false positive: the file survives).')
+    assert got and got[0]["expect"] == "deny", got
+
+
+def test_an_unbackticked_outcome_still_reads() -> None:
+    got = vf._probes('`echo p | python3 g.py` -> empty output (allowed: rm is not a verb here).')
+    assert got and got[0]["expect"] == "empty output", got
