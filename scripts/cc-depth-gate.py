@@ -141,6 +141,39 @@ def _session_asserted_something(calls: list, text: str) -> bool:
     return len(text.split()) > 120
 
 
+# How many times the closing message may be sent back. Two, because the session has to end: a gate
+# that will not let a run finish is worse than one that lets a bad sentence through, and by this
+# point every finding in the message has already been judged.
+CLOSING_LIMIT = 2
+# Something written as a path, loosely: anything with a slash in it and no spaces.
+_LOOKS_LIKE_A_PATH = re.compile(r"[A-Za-z0-9_.~-]*/[A-Za-z0-9_./-]+")
+
+
+def _invented_paths(text: str, root: str) -> list[str]:
+    """Paths the answer puts inside this tree that are not in it.
+
+    The closing message is written after the last verdict and nothing looked at it. Run 22's named
+    `scripts/cc-context-guard`, then `scripts/cc`, then `scripts/c` -- one path losing a character
+    each time it was cited -- with a misquoted line beside each, in the same message as four findings
+    that had passed the gate. A stage can be held to its evidence for an hour and invent in the last
+    paragraph, and this is the cheapest thing that catches it: a file either is in the tree or is not.
+
+    Only paths this tree could own are judged. `/tmp/cc-guard-off` is a real subject of a real review
+    and is not here; a directory the tree does not have is not a claim about the tree at all.
+    """
+    missing = []
+    for found in _LOOKS_LIKE_A_PATH.finditer(text or ""):
+        inside = cc_verify.under_root(root, found.group(0).rstrip(".,;:)"))
+        if os.path.isabs(inside) or inside in missing:
+            continue
+        parent = os.path.dirname(inside)
+        if not parent or not os.path.isdir(os.path.join(root, parent)):
+            continue
+        if not os.path.exists(os.path.join(root, inside)):
+            missing.append(inside)
+    return missing
+
+
 def _cite_of(ev) -> str:
     """How a citation that held up is written down for whoever reads the finding later."""
     if ev.kind == cc_ledger.FILE_QUOTE and ev.path:
@@ -803,6 +836,20 @@ def main() -> int:
                                            "; ".join(f.get("cites") or [])[:120])
                               for f in stood[:cc_flowstate.STOOD_KEPT]),
                    unestablished))
+        if not left:
+            # The last thing written is the only thing anybody reads, and until now it was the only
+            # thing not checked.
+            invented = _invented_paths(text, root)
+            tried = int(state.get("closing", 0))
+            if invented and tried < CLOSING_LIMIT:
+                state["closing"] = tried + 1
+                cc_flowstate.save(state, session, root)
+                return block(
+                    "Your answer cites %d file(s) this tree does not have: %s. A citation of a file "
+                    "that does not exist is worth less than no citation, because it reads like one. "
+                    "Write the answer again with the paths as they are on disk, or without them if "
+                    "you cannot name them; keep every finding and its evidence otherwise unchanged."
+                    % (len(invented), ", ".join(invented[:6])))
         if left and nudges < NUDGE_LIMIT:
             done = cc_flowstate.done(state)
             state["nudges"] = nudges + 1

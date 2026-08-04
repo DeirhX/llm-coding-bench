@@ -1185,3 +1185,33 @@ def test_the_emphasis_rule_does_not_swallow_a_sentence_that_merely_starts_with_a
     prose = "Claim inspection showed nothing. The evidence header, however, was absent.\n"
     claims, _ = vf.parse_ledger(prose, root=".")
     assert not claims, claims
+
+
+def test_a_bare_command_citation_is_refused_with_what_it_printed() -> None:
+    """Run 22's third claims round was refused thirteen times, every gap saying the same thing about
+    output it had on record and was not shown. A stage that ran the experiment and guessed the wrong
+    format loses the round to a formatting note, so the note carries the output it is asking for."""
+    calls = [_bash("python3 scripts/cc-context-guard.py < payload.json",
+                   "{\"permissionDecision\": \"deny\", \"reason\": \"off-switch\"}")]
+    verdict = vf.command_result(calls, "python3 scripts/cc-context-guard.py < payload.json", "")
+    assert not verdict.ok, verdict
+    assert "permissionDecision" in verdict.detail, verdict.detail
+    assert "printed:" in verdict.detail, verdict.detail
+
+
+def test_a_bare_citation_of_a_silent_command_says_it_was_silent() -> None:
+    """Silence is the result when the rule under test is one that lets things through, and a stage
+    told only that its citation lacks output will go looking for output that does not exist."""
+    calls = [_bash("touch /tmp/my-cc-guard-off", "")]
+    verdict = vf.command_result(calls, "touch /tmp/my-cc-guard-off", "")
+    assert not verdict.ok, verdict
+    assert "printed nothing" in verdict.detail, verdict.detail
+
+
+def test_a_bare_citation_of_a_command_nobody_ran_says_that_instead() -> None:
+    """Showing the output must not invent one: a citation of a command with no recorded call gets the
+    plain refusal, or the message would imply the run happened."""
+    calls = [_bash("ls", "notes.txt")]
+    verdict = vf.command_result(calls, "curl http://example.com", "")
+    assert not verdict.ok, verdict
+    assert "printed:" not in verdict.detail, verdict.detail

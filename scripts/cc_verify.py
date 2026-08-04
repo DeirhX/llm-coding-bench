@@ -600,6 +600,24 @@ _CLAIMS_REFUSAL = re.compile(r"\b(denied|denies|deny|refused|refuses|refusal|blo
 _SHELL_FAILURE = re.compile(r"\bexit code\s+\d+|command not found|No such file or directory", re.I)
 
 
+def _matching(calls, wanted: str):
+    """The recorded Bash calls a citation of `wanted` could be about."""
+    for call in calls:
+        if call.tool != "Bash":
+            continue
+        ran = " ".join(str(call.args.get("command", "")).split())
+        if wanted not in ran and ran not in wanted and not _same_command(wanted, ran):
+            continue
+        if not _settings(wanted) <= _settings(ran):
+            continue
+        yield call
+
+
+def _one_line(text: str, room: int = 200) -> str:
+    flat = " ".join((text or "").split())
+    return flat if len(flat) <= room else flat[:room - 3] + "..."
+
+
 def command_result(calls, command_fragment: str, expected: str) -> Verdict:
     """Did some command in this session run `command_fragment` and print `expected`?
 
@@ -607,14 +625,31 @@ def command_result(calls, command_fragment: str, expected: str) -> Verdict:
     them in one call, joined by semicolons or wrapped in a loop, and then cites them one at a time
     -- which is the right way round to report it and was reported as five commands nobody ran.
     """
+    wanted = " ".join(command_fragment.split())
     if not expected.strip():
         # `EVIDENCE: command: <cmd>` with no `-> <output>` asserts nothing a session can be held to,
         # and the blank sailed through every check because "" is a substring of anything. Run 21's
         # sixth claim passed that way, against a command that was never run.
+        #
+        # The output is on record, so the refusal shows it rather than describing what is missing.
+        # Run 22's third round was refused thirteen times for this, every gap reading the same, and
+        # a stage that has run the experiment and cannot guess the format it is wanted in will lose
+        # the round again. Quoting it back makes the correction mechanical -- and it is the stage's
+        # own transcript, so nothing here tells it anything it did not do.
+        ran = [_said(call.text or "") for call in _matching(calls, wanted)]
+        spoke = next((r for r in ran if r.strip()), "")
+        if spoke:
+            return Verdict(UNVERIFIED, "the citation says what was run and not what it printed. It "
+                                       "printed: %s -- put `-> ` and the part of that which bears "
+                                       "the claim out after the command"
+                           % _one_line(spoke))
+        if ran:
+            return Verdict(UNVERIFIED, "the citation says what was run and not what it printed. It "
+                                       "printed nothing at all -- write `-> ` and say so, if that "
+                                       "silence is what makes the claim true")
         return Verdict(UNVERIFIED, "the citation says what was run and not what it printed; add "
                                    "-> <text it printed> so there is something to check")
     seen = 0
-    wanted = " ".join(command_fragment.split())
     for call in calls:
         if call.tool != "Bash":
             continue
@@ -963,6 +998,14 @@ def normalise(text: str) -> str:
         if synonym and not HEADER_RE.match(line):
             line = "%sCLAIM:%s" % (synonym.group("lead"), line[synonym.end():])
         seen = _MARKED.match(line)
+        if seen and seen.group("lead").strip() and not seen.group("lead").strip(" 	>#-"):
+            # `## CLAIM: ...`, a header written as a markdown heading, which is how a stage writes a
+            # report it thinks of as a document. The emphasis path below cannot help -- there is no
+            # emphasis -- and nothing else takes the hashes off, so the header matcher never sees a
+            # header. Run 22's closing message was nine headings of exactly this shape and parsed as
+            # nought claims, which is also why the fabricated quotes in it went unnoticed.
+            line = line[seen.start("name"):]
+            seen = _MARKED.match(line)
         if not seen or not seen.group("lead").strip(" 	>#-"):
             # A citation on the line under a CLAIM, with no EVIDENCE header in front of it: the
             # shape every stage here writes when it has not been given the schema twice. It is a

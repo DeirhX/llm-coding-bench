@@ -1055,3 +1055,51 @@ def test_a_stage_still_short_of_the_cap_is_reopened() -> None:
                                     answer="CLAIM: something\nEVIDENCE: nothing")
     assert not cc_flowstate.exhausted(state, "claims")
     assert cc_flowstate.running(state), state["stages"]
+
+
+def test_a_closing_message_citing_a_file_that_is_not_there_is_sent_back() -> None:
+    """Run 22 delivered four findings that had passed the gate beside three citations of files that
+    do not exist -- `scripts/cc-context-guard`, then `scripts/cc`, then `scripts/c`, one path losing
+    a character each time it was written. Everything before the closing message was checked; the
+    closing message was not, so an hour of holding a stage to its evidence ended in invention."""
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "scripts").mkdir()
+        pathlib.Path(root, "scripts", "guard.py").write_text("_VERBS = 'touch'\n")
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        for stage in ("survey", "claims", "adversary"):
+            cc_flowstate.record_launch(state, stage, "a0")
+            cc_flowstate.record_verdict(state, stage, [], "a0")
+        cc_flowstate.save(state, "s1", root)
+        decision, reason = _stop("The rule is at scripts/cc-context-guard line 229.", root)
+        assert decision == "block", reason
+        assert "scripts/cc-context-guard" in reason, reason
+        # The real file, the switch it guards, and a URL are all left alone.
+        good = "See scripts/guard.py, run `touch /tmp/cc-guard-off`, see https://example.com/a/b."
+        decision, reason = _stop(good, root)
+        assert decision != "block", reason
+
+
+def test_the_closing_message_is_sent_back_a_bounded_number_of_times() -> None:
+    """A session has to be able to end. Every finding in the message has already been judged by the
+    time this runs, so a gate that will not let go is worse than one bad sentence."""
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "scripts").mkdir()
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        for stage in ("survey", "claims", "adversary"):
+            cc_flowstate.record_launch(state, stage, "a0")
+            cc_flowstate.record_verdict(state, stage, [], "a0")
+        cc_flowstate.save(state, "s1", root)
+        bad = "It is in scripts/nowhere.py, honestly."
+        limit = _gate_limit()
+        seen = [_stop(bad, root)[0] for _ in range(limit + 1)]
+    assert seen[:limit] == ["block"] * limit, seen
+    assert seen[-1] != "block", seen
+
+
+def _gate_limit() -> int:
+    """The gate is a hook script, run as a process by these tests, so its constants are read the
+    same way rather than imported."""
+    for line in open(GATE):
+        if line.startswith("CLOSING_LIMIT"):
+            return int(line.split("=")[1].split("#")[0])
+    raise AssertionError("CLOSING_LIMIT is gone")
