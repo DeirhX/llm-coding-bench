@@ -28,6 +28,11 @@ import cc_flowstate     # noqa: E402
 
 STAGE_LINE = re.compile(r"^\s*STAGE:\s*(?P<stage>[a-z-]+)\s*$", re.M | re.I)
 
+# A parent that ignores this many consecutive orders to launch the next stage is not recovering.
+# Run 29 alternated the same forbidden Write and impossible Edit for more than 200 turns; unlike a
+# stage, the parent had no deafness cap and could consume the entire window without changing state.
+PARENT_DEAF_AFTER = 25
+
 
 def allow() -> None:
     sys.exit(0)
@@ -39,6 +44,29 @@ def deny(reason: str) -> None:
         "permissionDecision": "deny",
         "permissionDecisionReason": reason}}))
     sys.exit(0)
+
+
+def halt(reason: str) -> None:
+    """Stop the whole turn when denying another call cannot change what the parent does."""
+    print(json.dumps({"continue": False, "stopReason": reason}))
+    sys.exit(0)
+
+
+def refuse_parent(state: dict, session: str, root: str, reason: str,
+                  short: str = "") -> None:
+    """Refuse one parent detour, then stop the turn if refusals plainly cannot recover it."""
+    state["balked"] = int(state.get("balked", 0)) + 1
+    stage = (cc_flowstate.running(state) or [cc_flowstate.next_stage(state) or "next"])[0]
+    if state["balked"] >= PARENT_DEAF_AFTER:
+        stopped = ("The %s flow was aborted after the parent ignored %d consecutive "
+                   "instructions while the %s stage was required. No final result was delivered."
+                   % (state["flow"], PARENT_DEAF_AFTER, stage))
+        state["aborted"] = stopped
+        state["final_answer"] = stopped
+        cc_flowstate.save(state, session, root)
+        halt(stopped)
+    cc_flowstate.save(state, session, root)
+    deny(short if short and state["balked"] > 3 else reason)
 
 
 # The subagent types this client will accept. Anything else is refused by the client itself, after
@@ -157,18 +185,27 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
     work is refused until the stage that should be doing it has been launched.
     """
     if tool in POLLING:
-        deny("Do not poll the stage. Each TaskOutput copies everything it has done so far into your "
-             "context -- 32,164 characters a time, measured -- and ten of those ended a run by "
-             "filling the window while the stage was still working. You do not need its output: "
-             "when it reports, its findings are judged and you are told the verdict. Say in one "
-             "short sentence that you are waiting, and stop. Stopping is how you wait here.")
+        reason = ("Do not poll the stage. Each TaskOutput copies everything it has done so far into "
+                  "your context -- 32,164 characters a time, measured -- and ten of those ended a "
+                  "run by filling the window while the stage was still working. You do not need "
+                  "its output: when it reports, its findings are judged and you are told the "
+                  "verdict. Say in one short sentence that you are waiting, and stop. Stopping is "
+                  "how you wait here.")
+        if not agent:
+            refuse_parent(state, session, root, reason,
+                          "Refused. Do not poll the stage. Stop now; the Stop hook waits for it.")
+        deny(reason)
     if _REACHING_ROUND.search(str((tool_input or {}).get("command") or "")
                               or str((tool_input or {}).get("file_path") or "")):
-        deny("The stage's working file is not how you find out what it did, and looking for it is how "
-             "a session spends a round on nothing: 206 calls went to invented paths under tasks/, none "
-             "of which existed, because that file is not where a report arrives. When the stage "
-             "reports, its claims are checked and you are told the verdict. Say in one short sentence "
-             "that you are waiting, and stop.")
+        reason = ("The stage's working file is not how you find out what it did, and looking for it "
+                  "is how a session spends a round on nothing: 206 calls went to invented paths "
+                  "under tasks/, none of which existed, because that file is not where a report "
+                  "arrives. When the stage reports, its claims are checked and you are told the "
+                  "verdict. Say in one short sentence that you are waiting, and stop.")
+        if not agent:
+            refuse_parent(state, session, root, reason,
+                          "Refused. Do not read task files. Stop now; the Stop hook waits for the stage.")
+        deny(reason)
     if tool in CLERICAL:
         allow()
     if tool == "TaskStop" and cc_flowstate.deaf(state):
@@ -192,12 +229,16 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
         # for a while was TaskOutput, until that turned out to cost 32k characters of window a call.
         # Stopping is the cheap way to wait: the Stop hook holds the turn for as long as the stage
         # needs and hands back the verdict.
-        deny("The %s stage is running. Do not call TaskStop again -- it will be refused every time "
-             "until the stage reports, and each attempt costs you a turn. Do not poll it either. "
-             "Say in one short sentence that you are waiting, and stop: that is how waiting is done "
-             "here, and you will be told the verdict. A stage that has not answered yet is working, "
-             "not stuck, and stopping it leaves the flow with nothing to judge."
-             % ", ".join(cc_flowstate.running(state)))
+        reason = ("The %s stage is running. Do not call TaskStop again -- it will be refused every "
+                  "time until the stage reports, and each attempt costs you a turn. Do not poll it "
+                  "either. Say in one short sentence that you are waiting, and stop: that is how "
+                  "waiting is done here, and you will be told the verdict. A stage that has not "
+                  "answered yet is working, not stuck, and stopping it leaves the flow with nothing "
+                  "to judge." % ", ".join(cc_flowstate.running(state)))
+        if not agent:
+            refuse_parent(state, session, root, reason,
+                          "Refused. Do not stop the worker. Stop your turn; the Stop hook waits.")
+        deny(reason)
     in_flight = cc_flowstate.running(state)
     if agent and not in_flight:
         # This call comes from a subagent, so a stage is working whatever the flow remembers. Run 19
@@ -213,6 +254,20 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
         else:
             allow()
     if in_flight:
+        # A parent waiting for a stage is still an orchestrator. Run 30's parent issued `sleep 120`
+        # over and over while claims worked: those calls correctly were not charged to claims, but
+        # they also bypassed the idle-parent cap below and consumed 46% of the parent's window. The
+        # Stop hook is the waiting primitive; any other non-clerical call here is another refusal in
+        # the same bounded streak.
+        if not agent:
+            reason = ("The %s stage is running. Do not call tools while it works: each call costs a "
+                      "parent turn and cannot reveal the stage's report. Say in one short sentence "
+                      "that you are waiting, then stop. The Stop hook waits and hands back the "
+                      "verdict." % in_flight[0])
+            refuse_parent(state, session, root, reason,
+                          "Refused. The %s stage is running. Stop now; the Stop hook waits for it."
+                          % in_flight[0])
+
         # A stage is in flight, and if this call carries an agent id it is that stage working -- but
         # only up to a point. Reading is charged against a budget because a claims stage once spent
         # 387 calls re-reading the files it was about to cite, announcing each time that it needed to
@@ -227,6 +282,11 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
         # on a round that had already finished until it was killed from outside.
         spent = cc_flowstate.spend(state, in_flight[0]) if agent else 0
         if agent:
+            # Productive worker activity breaks the parent's refusal streak. Run 30's parent made
+            # one forbidden wait call between nearly every claims call; counting those forever would
+            # abort at 25 while the worker was plainly progressing. The cap is for uninterrupted
+            # parent loops, not concurrent noise around useful work.
+            state["balked"] = 0
             # Bind the stage to the worker that is actually making the calls. Launches are recorded
             # before the client has said which agent it started, so the id only becomes knowable when
             # that agent calls a tool, and it is what lets anything later match a stage to a worker.
@@ -293,19 +353,17 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
     # and spent six turns on grep, python3 -c, a heredoc and a temp script, filling its window with
     # identical refusals until it announced it was hitting the token limit. Explanation is what it
     # was arguing with, so past a point it is not offered.
-    state["balked"] = int(state.get("balked", 0)) + 1
-    cc_flowstate.save(state, session, root)
-    if state["balked"] > 3:
-        deny("Refused. Call the Agent tool, prompt first line `STAGE: %s`. Nothing else is "
-             "permitted and no other phrasing will work." % nxt)
-    deny("Launch the %s stage now: call the Agent tool with a prompt whose first line is exactly "
-         "`STAGE: %s`. Its stance is filled in for you, so the rest of the prompt hardly matters. "
-         "This is not a sandbox to work around -- doing the reading here would answer without any "
-         "of the stances the %s flow exists to apply, and the answer would reach nobody, because "
-         "only what a stage reports is gated. Every other tool call will be refused exactly like "
-         "this one, however you phrase it: the refusal is not about the path, the tool or the "
-         "command, so grep, cat and python3 -c will each cost you a turn and return this text."
-         % (nxt, nxt, state["flow"]))
+    reason = ("Launch the %s stage now: call the Agent tool with a prompt whose first line is "
+              "exactly `STAGE: %s`. Its stance is filled in for you, so the rest of the prompt "
+              "hardly matters. This is not a sandbox to work around -- doing the reading here "
+              "would answer without any of the stances the %s flow exists to apply, and the answer "
+              "would reach nobody, because only what a stage reports is gated. Every other tool "
+              "call will be refused exactly like this one, however you phrase it: the refusal is "
+              "not about the path, the tool or the command, so grep, cat and python3 -c will each "
+              "cost you a turn and return this text." % (nxt, nxt, state["flow"]))
+    refuse_parent(state, session, root, reason,
+                  "Refused. Call the Agent tool, prompt first line `STAGE: %s`. Nothing else is "
+                  "permitted and no other phrasing will work." % nxt)
 
 
 # What the client says when the task a flow is waiting for no longer exists.
@@ -417,6 +475,7 @@ def main() -> int:
     stage = cc_flow.stage_in(state["flow"], stage_name)
     prior = [e.get("summary", "") for e in state.get("stages", []) if e.get("summary")]
     cc_flowstate.record_launch(state, stage_name)
+    state["balked"] = 0
     cc_flowstate.save(state, session, root)
 
     # The model asked for the right stage; the wording of it is not its business. Substituting the

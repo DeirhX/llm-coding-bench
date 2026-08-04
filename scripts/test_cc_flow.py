@@ -221,7 +221,7 @@ def test_a_stage_in_flight_may_read_whatever_it_likes() -> None:
         state = cc_flowstate.begin("review", "t", "s1", root)
         cc_flowstate.record_launch(state, "survey")
         cc_flowstate.save(state, "s1", root)
-        decision, _, _ = run("", root, tool="Read")
+        decision, _, _ = run("", root, tool="Read", agent="a1")
     assert decision == "allow"
 
 
@@ -801,7 +801,7 @@ def test_a_stage_that_only_reads_cannot_write_to_the_tree_it_judges() -> None:
         state = cc_flowstate.begin("review", "q", "writes", root)
         cc_flowstate.record_launch(state, "claims")
         cc_flowstate.save(state, "writes", root)
-        decision, why = _edit("writes", root)
+        decision, why = _edit("writes", root, agent="a1")
         assert decision == "deny", why
         assert "does not write" in why
 
@@ -811,7 +811,7 @@ def test_a_stage_that_is_meant_to_write_still_may() -> None:
         state = cc_flowstate.begin("change", "q", "allowed", root)
         cc_flowstate.record_launch(state, "implement")
         cc_flowstate.save(state, "allowed", root)
-        decision, why = _edit("allowed", root)
+        decision, why = _edit("allowed", root, agent="a1")
         assert decision != "deny", why
 
 
@@ -1202,11 +1202,11 @@ def test_the_index_stage_is_not_allowed_to_run_commands() -> None:
         state = cc_flowstate.begin("review", "t", "s1", root)
         cc_flowstate.record_launch(state, "survey", "a1")
         cc_flowstate.save(state, "s1", root)
-        decision, reason, _ = run("", root, tool="Bash")
+        decision, reason, _ = run("", root, tool="Bash", agent="a1")
         assert decision == "deny", reason
         assert "does not run commands" in reason, reason
-        assert run("", root, tool="Grep")[0] == "allow"
-        assert run("", root, tool="Read")[0] == "allow"
+        assert run("", root, tool="Grep", agent="a1")[0] == "allow"
+        assert run("", root, tool="Read", agent="a1")[0] == "allow"
 
 
 def test_a_stage_that_needs_a_shell_still_has_one() -> None:
@@ -1217,7 +1217,7 @@ def test_a_stage_that_needs_a_shell_still_has_one() -> None:
         cc_flowstate.record_verdict(state, "survey", [], "a1")
         cc_flowstate.record_launch(state, "claims", "a2")
         cc_flowstate.save(state, "s1", root)
-        assert run("", root, tool="Bash")[0] == "allow"
+        assert run("", root, tool="Bash", agent="a2")[0] == "allow"
 
 
 def _status_module():
@@ -1442,3 +1442,133 @@ def test_an_abandoned_flow_cannot_expand_unverified_claims_in_its_final_answer()
         assert decision == "block", "post-gate analysis escaped into the deliverable"
         assert expected in reason and "exactly" in reason, reason
         assert _stop(expected, root, session="s-r28")[0] == "allow"
+
+
+def test_a_parent_that_ignores_the_same_launch_order_is_stopped() -> None:
+    """Run 29 alternated Write and Edit for more than 200 parent turns.
+
+    Every Write got the same correct refusal; every Edit failed client-side because Write had been
+    refused. Neither outcome can make the next repetition useful. Stages already have a deafness cap;
+    the parent needs one too, and `continue: false` is the hook protocol's actual stop mechanism.
+    """
+    guard = _load_guard()
+    with tempfile.TemporaryDirectory() as root:
+        cc_flowstate.begin("review", "a review", "s-parent-deaf", root)
+        last = None
+        for _ in range(guard.PARENT_DEAF_AFTER):
+            payload = {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                       "session_id": "s-parent-deaf", "cwd": root,
+                       "tool_input": {"file_path": "/tmp/test.txt", "content": "hello"}}
+            proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                                  capture_output=True, text=True, timeout=30)
+            assert proc.returncode == 0, proc.stderr
+            last = json.loads(proc.stdout)
+        assert last and last.get("continue") is False, last
+        assert "No final result was delivered" in last.get("stopReason", ""), last
+        state = cc_flowstate.load("s-parent-deaf", root)
+        assert state.get("aborted"), state
+        assert state.get("final_answer") == state.get("aborted"), state
+
+
+def test_launching_the_ordered_stage_resets_the_parent_refusal_streak() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        cc_flowstate.begin("review", "a review", "s-reset", root)
+        for _ in range(8):
+            assert run("", root, session="s-reset", tool="Read")[0] == "deny"
+        assert cc_flowstate.load("s-reset", root)["balked"] == 8
+        assert run("STAGE: survey", root, session="s-reset")[0] == "allow"
+        assert cc_flowstate.load("s-reset", root)["balked"] == 0
+
+
+def test_an_aborted_flow_can_only_close_with_its_stored_safe_result() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a review", "s-aborted", root)
+        expected = ("The review flow was aborted after the parent ignored 25 consecutive "
+                    "instructions to launch the survey stage. No verified findings were delivered.")
+        state["aborted"] = expected
+        state["final_answer"] = expected
+        cc_flowstate.save(state, "s-aborted", root)
+        decision, reason = _stop("I found a likely race anyway.", root, session="s-aborted")
+        assert decision == "block" and expected in reason, reason
+        assert _stop(expected, root, session="s-aborted")[0] == "allow"
+
+
+def test_parent_tools_are_bounded_while_a_stage_is_in_flight() -> None:
+    """Run 30's worker was active while its parent spent dozens of turns polling with `sleep 120`.
+
+    Parent calls must neither spend the worker's budget nor escape the parent's own deafness cap.
+    """
+    guard = _load_guard()
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a review", "s-wait-deaf", root)
+        cc_flowstate.record_launch(state, "claims", agent="worker")
+        cc_flowstate.save(state, "s-wait-deaf", root)
+        last = None
+        for _ in range(guard.PARENT_DEAF_AFTER):
+            payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                       "session_id": "s-wait-deaf", "cwd": root,
+                       "tool_input": {"command": "sleep 120", "timeout": 130000}}
+            proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                                  capture_output=True, text=True, timeout=30)
+            assert proc.returncode == 0, proc.stderr
+            last = json.loads(proc.stdout)
+        assert last and last.get("continue") is False, last
+        after = cc_flowstate.load("s-wait-deaf", root)
+        assert after["stages"][-1].get("calls", 0) == 0, after
+        assert after.get("aborted"), after
+
+
+def test_a_fresh_reopened_stage_is_not_blocked_by_the_parent_stop_wait() -> None:
+    """Run 30's correction made six calls immediately after its parent's 12-minute wait ended.
+
+    The wait itself prevented the refused worker from resuming. Return quickly but preserve the entry;
+    deleting it as stale would let the parent launch a duplicate just as the original wakes up.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a review", "s-reopened-wait", root)
+        cc_flowstate.record_launch(state, "claims", agent="blocked")
+        state["stages"][-1]["reopened"] = True
+        cc_flowstate.save(state, "s-reopened-wait", root)
+        started = time.time()
+        decision, _ = _stop("waiting", root, session="s-reopened-wait")
+        elapsed = time.time() - started
+        after = cc_flowstate.load("s-reopened-wait", root)
+        assert decision == "block"
+        assert elapsed < 1.5, elapsed
+        assert cc_flowstate.running(after) == ["claims"], after
+
+
+def test_worker_progress_breaks_the_parent_refusal_streak() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a review", "s-progress-reset", root)
+        cc_flowstate.record_launch(state, "claims", agent="worker")
+        state["balked"] = 17
+        cc_flowstate.save(state, "s-progress-reset", root)
+        assert run("", root, session="s-progress-reset", tool="Read", agent="worker")[0] == "allow"
+        after = cc_flowstate.load("s-progress-reset", root)
+        assert after["balked"] == 0, after
+        assert after["stages"][-1]["calls"] == 1, after
+
+
+def test_a_refused_claims_worker_ends_and_a_fresh_one_gets_its_ledger() -> None:
+    """Run 30 repaired twelve citations in a worker already at 82% context.
+
+    Duplicate-read protection denied the source, so it reconstructed the quotes from memory and
+    changed nearly every one. A fresh worker gets the ledger and gaps without the exhausted transcript.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "a review", "s-fresh-claims", root)
+        cc_flowstate.record_launch(state, "survey", "survey-agent")
+        cc_flowstate.record_verdict(state, "survey", [], "survey-agent")
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.save(state, "s-fresh-claims", root)
+        answer = "CLAIM: a defect exists but this claim cites nothing"
+        assert _subagent_stop(answer, root, session="s-fresh-claims") == "allow"
+        after = cc_flowstate.load("s-fresh-claims", root)
+        assert not cc_flowstate.running(after), after
+        assert cc_flowstate.refused(after)[-1]["answer"] == answer, after
+        decision, _, amended = run("STAGE: claims", root, session="s-fresh-claims")
+        assert decision == "allow", decision
+        assert "--- the refused ledger ---" in amended["prompt"], amended["prompt"]
+        assert answer in amended["prompt"], amended["prompt"]
+        assert "cites nothing" in amended["prompt"], amended["prompt"]

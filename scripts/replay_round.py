@@ -58,9 +58,14 @@ def judge(entry: dict, tree: str, transcript: str) -> None:
                 said = cc_verify.command_result(calls, cited.command or "", cited.expect or "")
                 what = "command %r" % ((cited.command or "")[:44])
             else:
-                said = cc_verify.file_quote(tree, cited.path or "", cited.start, cited.end,
-                                            cited.quote or "")
                 what = "%s:%s-%s" % (cited.path, cited.start, cited.end)
+                if not cited.path or cited.start is None or cited.end is None:
+                    print("  %2d. %-11s %-58s %s" %
+                          (n, "INCOMPLETE", what,
+                           head if cited is claim.evidence[0] else ""))
+                    continue
+                said = cc_verify.file_quote(tree, cited.path, cited.start, cited.end,
+                                            cited.quote or "")
             print("  %2d. %-11s %-58s %s" % (n, said.kind, what, head if cited is claim.evidence[0] else ""))
             if said.kind != cc_verify.PASS:
                 print("      %s" % " ".join((said.detail or "").split())[:150])

@@ -842,6 +842,15 @@ def _await_stage(session: str, root: str, state: dict) -> tuple[dict, list[str]]
         if cc_flowstate.deaf(state):
             # Waiting on a stage that has worked through twenty-five refusals is waiting on nothing.
             break
+        pending = [e for e in state.get("stages", []) if e.get("verdict") is None]
+        if pending and all(e.get("reopened") and not e.get("calls") for e in pending):
+            # A SubagentStop refusal reopens the same worker. Run 30's parent entered its Stop hook
+            # before the client scheduled that worker's correction, and this wait then prevented the
+            # correction from starting for the full twelve minutes. The instant the hook returned,
+            # the worker made six calls. It was blocked, not stale. Return control while keeping the
+            # entry; the worker can now resume, and the next Stop will apply REOPENED_STALE normally
+            # if it truly exited instead.
+            break
         time.sleep(2.0)
         # peek, not load: this loop runs for minutes, and the lock load() holds would stop every
         # other hook for the whole wait -- including the stage whose report we are waiting for.
@@ -895,6 +904,15 @@ def main() -> int:
                                      "nudges": state.get("nudges")}) + "\n")
         except OSError:
             pass
+
+    # A parent that keeps doing stage work after repeated refusals is stopped by the flow guard.
+    # If the client gives it a closing turn anyway (or a person resumes the session), only the safe
+    # abort result stored at that boundary may leave the session.
+    if not agent and state.get("aborted"):
+        expected = str(state.get("final_answer") or state["aborted"])
+        if text.strip() != expected:
+            return block("Reply with exactly the following text and nothing else:\n\n%s" % expected)
+        return allow()
 
     # `stop_hook_active` is not consulted here. Its purpose is to stop a Stop hook looping, and a
     # bounded nudge count does that job better: the flag was already set on the parent's stop after
@@ -1067,10 +1085,17 @@ def main() -> int:
         return allow()          # a short factual answer is not a ledger-bearing one
 
     gaps, report = evaluate(contract, claims, unknowns, calls, root, answer=text)
+    # A refused native subagent used to be blocked in place and asked to repair itself. Run 30 showed
+    # why that is the wrong unit of retry: the claims worker was already at 82% context, duplicate-read
+    # protection denied the exact source again, and it reconstructed twelve quotes from memory --
+    # rewrapped, truncated and misspelt. End that worker. The parent launches a fresh round, and
+    # compose() gives it the refused ledger plus every gap without giving it the exhausted transcript.
+    fresh_retry = bool(stage and agent and gaps)
     if stage:
         # What the next stage may do turns on this verdict, so it is written where the hook that
         # admits the next launch can read it rather than left in the conversation.
-        cc_flowstate.record_verdict(state, stage, gaps, agent, text, report.get("stood"))
+        cc_flowstate.record_verdict(state, stage, gaps, agent, text, report.get("stood"),
+                                    reopen=not fresh_retry)
         state["nudges"] = 0     # a stage reported, so the budget for pushing is not being spent
         for entry in reversed(state.get("stages", [])):
             if entry.get("stage") == stage and not entry.get("summary"):
@@ -1081,7 +1106,7 @@ def main() -> int:
     report.update({
         "session": session,
         "agent": agent or None,
-        "blocked": bool(gaps) and not resumed,
+        "blocked": bool(gaps) and not resumed and not fresh_retry,
         "final_pass": resumed,
         "gaps": gaps,
         "ms": int((time.time() - started) * 1000),
@@ -1093,7 +1118,7 @@ def main() -> int:
     except OSError:
         pass
 
-    if resumed or not gaps:
+    if resumed or not gaps or fresh_retry:
         return allow()
     return block(refusal(gaps, claims_path))
 
