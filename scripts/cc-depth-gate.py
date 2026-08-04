@@ -25,7 +25,9 @@ Three findings from the measured spike are built in rather than assumed (LOCAL_A
   ranges the recorder saw.
 
 Fail open, exactly like `cc-context-guard.py`: any unexpected condition allows the stop. A gate that
-wedges a session because it crashed is worse than no gate. Kill switch: `touch /tmp/cc-depth-off`.
+wedges a session because it crashed is worse than no gate. Kill switch: `touch /tmp/cc-depth-off`
+in a session launched with `CC_DEPTH_LIFTABLE=1`, and nothing at all without it -- the file on its
+own stopped working when the switch was gated, and this line went on saying otherwise.
 
 On the pass that follows a block (`stop_hook_active`), the gate still verifies and still writes
 `gate.json` -- it just does not block. That is free observability: the final verdict of every gated
