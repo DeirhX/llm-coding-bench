@@ -13,6 +13,7 @@ import json
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -371,3 +372,72 @@ def test_a_stage_that_makes_claims_still_reasons() -> None:
     claims = {"messages": [{"role": "user", "content": "STAGE: claims\nmake the claims"}],
               "max_tokens": 500}
     assert ap.to_openai(claims).get("chat_template_kwargs") is None
+
+
+class RefusingUpstream(BaseHTTPRequestHandler):
+    """llama-server turning down a prompt that does not fit, in its own words."""
+
+    detail: str = ""
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *_a) -> None:
+        pass
+
+    def do_POST(self) -> None:  # noqa: N802
+        payload = self.detail.encode()
+        self.send_response(400)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+def test_a_prompt_that_does_not_fit_is_reported_the_way_the_client_can_act_on() -> None:
+    """An overflow has to arrive as a 400 saying the prompt is too long, or the run dies of it.
+
+    Claude Code has two ways to recover from a full window and this is the one that works here: an
+    HTTP 400 whose message says the prompt is too long and whose details carry the counts. A 502, or
+    a 400 typed `api_error`, is fatal, and the client's answer to fatal is to send the same request
+    again. Run 25 offered 133,902 tokens to a 131,072-token window three times without changing a
+    character, and the session ended with its last round still working.
+    """
+    RefusingUpstream.detail = json.dumps({"error": {
+        "code": 400, "type": "exceed_context_size_error",
+        "message": "request (133902 tokens) exceeds the available context size (131072 tokens), "
+                   "try increasing it",
+        "n_prompt_tokens": 133902, "n_ctx": 131072}})
+    up = _serve(RefusingUpstream, 8791)
+    ap.Proxy.upstream = "http://127.0.0.1:8791/v1/chat/completions"
+    ap.Proxy.logfile = None
+    proxy = ap.Threaded(("127.0.0.1", 8792), ap.Proxy)
+    threading.Thread(target=proxy.serve_forever, daemon=True).start()
+    time.sleep(0.1)
+    try:
+        try:
+            _post(8792, {"model": "m", "max_tokens": 8,
+                         "messages": [{"role": "user", "content": "hi"}]})
+            raise AssertionError("the proxy passed an over-long prompt off as a success")
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            said = json.loads(exc.read())
+    finally:
+        proxy.shutdown()
+        up.shutdown()
+    assert status == 400, "a 502 is fatal to the client; only a 400 starts a recovery"
+    assert said["error"]["type"] == "invalid_request_error", said
+    assert "prompt is too long" in said["error"]["message"], said["error"]["message"]
+    assert said["error"]["details"] == {"prompt_tokens": 133902, "max_tokens": 131072}, said
+
+
+def test_the_counts_are_recovered_from_the_prose_when_they_are_not_fielded() -> None:
+    """The client's recovery reads the numbers, and not every build fields them separately."""
+    said = ap.overflow_of(json.dumps({"error": {
+        "message": "request (133902 tokens) exceeds the available context size (131072 tokens)"}}))
+    assert said == (133902, 131072), said
+
+
+def test_an_upstream_failure_that_is_not_an_overflow_is_left_alone() -> None:
+    """Turning every 400 into "prompt is too long" would send the client compacting after a typo."""
+    assert ap.overflow_of(json.dumps({"error": {"message": "model not found"}})) is None
+    assert ap.overflow_of("") is None
+    assert ap.overflow_of("upstream closed the connection") is None

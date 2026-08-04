@@ -40,6 +40,7 @@ import argparse
 import http.server
 import json
 import os
+import re
 import socketserver
 import sys
 import threading
@@ -411,6 +412,36 @@ def iter_openai_sse(stream) -> Iterator[dict]:
             continue
 
 
+# llama-server's way of saying the prompt does not fit, and Anthropic's. They are not the same error
+# in the client's eyes, and the difference is the difference between a run that recovers and a run
+# that dies: Claude Code's reactive compaction fires on an HTTP 400 whose message says the prompt is
+# too long and whose details carry the two token counts. Anything else -- a 502, an api_error -- is
+# fatal, and the client's response to fatal is to resend the same over-sized request. Run 25 sent
+# 133,902 tokens into a 131,072-token window three times, unchanged, and then the session ended.
+_TOO_LONG = re.compile(r"exceed_context_size|exceeds the available context size|"
+                       r"context size.*exceed|prompt is too long", re.I)
+
+
+def overflow_of(detail: str) -> tuple[int, int] | None:
+    """The prompt size and the window, if this upstream error is the prompt not fitting."""
+    if not _TOO_LONG.search(detail or ""):
+        return None
+    try:
+        said = json.loads(detail).get("error") or {}
+    except ValueError:
+        said = {}
+    asked = said.get("n_prompt_tokens") or 0
+    window = said.get("n_ctx") or 0
+    if not (asked and window):
+        # The counts are what the client's recovery path reads, so dig them out of the prose when
+        # they are not fielded: "request (133902 tokens) exceeds the available context size (131072".
+        numbers = [int(n) for n in re.findall(r"\b(\d{4,7})\b", detail)]
+        if len(numbers) < 2:
+            return None
+        asked, window = max(numbers), min(numbers)
+    return int(asked), int(window)
+
+
 # --- server ----------------------------------------------------------------------------------
 
 class Proxy(http.server.BaseHTTPRequestHandler):
@@ -484,6 +515,18 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:600]
             self.note(event="upstream_error", status=exc.code, detail=detail)
+            overflow = overflow_of(detail)
+            if overflow:
+                asked, window = overflow
+                # Said the way the client can act on: its own wording, its own status, and the two
+                # counts where its recovery path looks for them. Answering "api_error" instead is
+                # what turned three overflows into three dead sessions.
+                self.note(event="too_long", asked=asked, window=window)
+                self._json(400, {"type": "error", "error": {
+                    "type": "invalid_request_error",
+                    "message": "prompt is too long: %d tokens > %d maximum" % (asked, window),
+                    "details": {"prompt_tokens": asked, "max_tokens": window}}})
+                return
             self._json(502, {"type": "error", "error": {"type": "api_error", "message": detail}})
             return
         except OSError as exc:
