@@ -914,3 +914,77 @@ def test_a_command_shown_in_the_closing_message_is_not_a_quotation() -> None:
     text = "I ran:\n\n```bash\ntouch /tmp/cc-guard-off && echo denied\n```\n"
     assert gate._fabricated_quotes(text, root) == [], "a run was judged as a quotation"
 
+
+
+def _read_of(path: Path, lines: list[str], first: int, count: int):
+    """A Read the client would have written, showing `count` lines from `first`."""
+    shown = lines[first - 1:first - 1 + count]
+    return cc_evidence.ToolCall(
+        agent="claims", tool="Read", call_id="r1",
+        args={"file_path": str(path), "offset": first, "limit": count},
+        text="\n".join("%6d|%s" % (first + i, line) for i, line in enumerate(shown)),
+        detail={"file": {"filePath": str(path), "startLine": first, "numLines": count}})
+
+
+def _judge_review(answer: str, calls: list, root: str):
+    claims, unknowns = cc_ledger.claims_from_text(answer, root)
+    return _load_gate().evaluate(cc_ledger.contract_for("review"), claims, unknowns, calls, root,
+                                 answer=answer)
+
+
+# The four ways a citation can be invented, run against the gate as one set. Each was a live failure
+# at some point, and each is cheap to reintroduce by loosening a check that looked over-strict.
+def test_the_four_ways_of_inventing_a_citation_are_all_refused() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        body = ["# one", "def f(x):", "    limit = SHORT if x else LONG", "    return limit"]
+        source = Path(root, "s.py")
+        source.write_text("\n".join(body) + "\n")
+        whole = [_read_of(source, body, 1, 4)]
+
+        wrong_lines = ("CLAIM 1: the limit depends on x.\n"
+                       "EVIDENCE: file_quote s.py lines 40-40\nQUOTE:\n%s\n" % body[2])
+        gaps, _ = _judge_review(wrong_lines, whole, root)
+        assert gaps and "outside" in gaps[0], gaps
+
+        absent = ("CLAIM 1: the limit is always LONG.\n"
+                  "EVIDENCE: file_quote s.py lines 3-3\nQUOTE:\n    limit = LONG\n")
+        gaps, _ = _judge_review(absent, whole, root)
+        assert gaps and "not present" in gaps[0], gaps
+
+        unread = ("CLAIM 1: the limit depends on x.\n"
+                  "EVIDENCE: file_quote s.py lines 3-3\nQUOTE:\n%s\n" % body[2])
+        gaps, _ = _judge_review(unread, [_read_of(source, body, 1, 1)], root)
+        assert gaps and "no read in this session covered" in gaps[0], gaps
+
+        unrun = ("CLAIM 1: the cap is three.\n"
+                 "EVIDENCE: command: rg -n SHORT s.py -> SHORT = 3\n")
+        gaps, _ = _judge_review(unrun, whole, root)
+        assert gaps and "no recorded command" in gaps[0], gaps
+
+
+def test_a_true_quote_carrying_a_false_claim_is_the_adversary_s_job_and_is_named_as_such() -> None:
+    """The one channel nothing mechanical closes, asserted so that nobody assumes it is closed.
+
+    A quote can be verbatim, in the named file, at the given lines, and read in this session, and
+    still not say what the claim says. `limit = SHORT if x else LONG` passes every check while
+    carrying "the limit is SHORT whenever x is set" -- which it happens to support -- or "the limit
+    is SHORT when x is unset", which it contradicts. The gate cannot tell those apart, so the
+    adversary stage is told to, and this pins both halves: the gate lets it through, and the
+    instruction to catch it exists.
+    """
+    import cc_flow
+    with tempfile.TemporaryDirectory() as root:
+        body = ["def f(x):", "    limit = SHORT if x else LONG"]
+        source = Path(root, "s.py")
+        source.write_text("\n".join(body) + "\n")
+        inverted = ("CLAIM 1: the limit is SHORT when x is unset.\n"
+                    "EVIDENCE: file_quote s.py lines 2-2\nQUOTE:\n%s\n" % body[1])
+        gaps, report = _judge_review(inverted, [_read_of(source, body, 1, 2)], root)
+        assert not gaps, ("the gate has learned to read code, which it has not -- if this now "
+                          "passes, the claim below about needing the adversary is out of date: %s"
+                          % gaps)
+        assert report["stood"], "a verified citation should still be recorded as having stood"
+
+        adversary = cc_flow.stage_in("review", "adversary")
+        assert "fit between each claim and its quote" in adversary.stance, (
+            "nothing mechanical catches this, so the adversary must be told to")

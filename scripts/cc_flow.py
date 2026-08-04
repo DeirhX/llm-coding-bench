@@ -114,7 +114,17 @@ DEFAULT_STAGES = [
                 "feeding the hook the payload that should trip it and showing what it decided; a "
                 "claim your attack kills is deleted, and a claim you cannot test becomes an "
                 "UNKNOWN with the reason. Do not add new findings. Do not soften the surviving "
-                "ones -- restate them with their evidence intact."),
+                "ones -- restate them with their evidence intact.\n"
+                "Attack the fit between each claim and its quote, not only the claim. Everything "
+                "upstream of you checks that a quote is real, in the right file, at the lines "
+                "given, and read in this session -- and a quote that passes all four can still be "
+                "carrying a claim it does not support. That is the one thing here nothing "
+                "mechanical can catch, so it is your job. Read the quoted line and ask what it "
+                "actually says: a line reading `limit = SHORT if reopened and not calls else LONG` "
+                "does not support `a stage making calls is dropped after the short limit` -- it "
+                "says the opposite, and the claim would have passed every check with that quote "
+                "attached. Where the quote proves less than the claim, cut the claim back to what "
+                "the quote proves, or move it to UNKNOWN."),
     ),
 ]
 
