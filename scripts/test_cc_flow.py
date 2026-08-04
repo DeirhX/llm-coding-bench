@@ -830,12 +830,21 @@ def test_the_budget_refusal_is_the_one_the_model_reads() -> None:
                           .replace("$GATE", "g"))
     order = [h["hooks"][0]["command"] for h in settings["hooks"]["PreToolUse"]]
     assert order[0] == "flow-guard", order
+    for event in ("Stop", "SubagentStop"):
+        # Run 27's claims stage was still working when the default 600-second hook timeout killed
+        # the 720-second wait. A timed-out Stop hook is ignored, so the parent exited successfully
+        # and the client cancelled the live stage. The hook's own wait must fit inside this timeout.
+        assert settings["hooks"][event][0]["hooks"][0]["timeout"] > 720, settings["hooks"][event]
 
     done = subprocess.run(["zsh", str(HERE / "claude-gemma.sh"), "--flows", "--print-settings"],
                           capture_output=True, text=True, timeout=120)
     printed = done.stdout[done.stdout.index("{"):]
-    hooks = json.loads(printed)["hooks"]["PreToolUse"]
+    interactive = json.loads(printed)
+    hooks = interactive["hooks"]["PreToolUse"]
     assert "cc-flow-guard" in hooks[0]["hooks"][0]["command"], hooks
+    for event in ("Stop", "SubagentStop"):
+        assert interactive["hooks"][event][0]["hooks"][0]["timeout"] > 720, \
+            interactive["hooks"][event]
 
 
 def test_the_budget_refusal_gets_shorter_as_it_repeats() -> None:

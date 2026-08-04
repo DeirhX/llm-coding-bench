@@ -699,8 +699,8 @@ if (( DEPTH )); then
   fi
   HOOK_EVENTS+=("\"SessionStart\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_CONTRACT\" } ] } ]")
   HOOK_EVENTS+=("\"UserPromptSubmit\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_CONTRACT\" } ] } ]")
-  HOOK_EVENTS+=("\"Stop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\" } ] } ]")
-  HOOK_EVENTS+=("\"SubagentStop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\" } ] } ]")
+  HOOK_EVENTS+=("\"Stop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\", \"timeout\": 900 } ] } ]")
+  HOOK_EVENTS+=("\"SubagentStop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\", \"timeout\": 900 } ] } ]")
 fi
 
 # The stage loop, for a session that runs its stages as subagents so you can watch them work. The

@@ -100,8 +100,8 @@ cat > "$SETTINGS" <<JSON
     "PostToolUse": [
       { "matcher": "Task|Agent|TaskList|TaskOutput", "hooks": [ { "type": "command", "command": "$FLOW" } ] }
     ],
-    "Stop": [ { "hooks": [ { "type": "command", "command": "$GATE" } ] } ],
-    "SubagentStop": [ { "hooks": [ { "type": "command", "command": "$GATE" } ] } ]
+    "Stop": [ { "hooks": [ { "type": "command", "command": "$GATE", "timeout": 900 } ] } ],
+    "SubagentStop": [ { "hooks": [ { "type": "command", "command": "$GATE", "timeout": 900 } ] } ]
   }
 }
 JSON
