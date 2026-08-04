@@ -104,6 +104,14 @@ ADAPTERS: dict[str, Contract] = {
                "A high-severity defect needs a probe that reproduces it, or it is not high.",
                "A claim that names no wrong behaviour is not a defect. That a design would be "
                "awkward to extend, quoted from a signature, is an opinion; leave it out.",
+               # Run 22's four findings all passed the gate and all read the same way: a pattern
+               # was shown not to match a thing. Every one was true, and a reader still had to
+               # work out for himself whether any of them mattered, which is the work he asked
+               # for. A mismatch is the evidence; the sentence has to say what it costs.
+               "Say the finding as what goes wrong, then what makes it go wrong: not `_VERBS does "
+               "not match node` but `a stage can create the off switch with node, because _VERBS "
+               "does not match it`. If you cannot finish that sentence, the mismatch is harmless "
+               "and does not belong in the answer.",
                "No defect found is a legal and complete answer."),
     ),
     "debug": Contract(
