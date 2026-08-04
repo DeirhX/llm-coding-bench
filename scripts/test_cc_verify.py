@@ -1288,3 +1288,18 @@ def test_an_aside_after_a_backticked_outcome_is_still_an_aside() -> None:
 def test_an_unbackticked_outcome_still_reads() -> None:
     got = vf._probes('`echo p | python3 g.py` -> empty output (allowed: rm is not a verb here).')
     assert got and got[0]["expect"] == "empty output", got
+
+
+def test_a_probe_that_spells_out_its_silence_is_read_as_silent() -> None:
+    """The stage wrote `... | python3 guard.py && echo "ALLOWED"` so that silence could be seen and
+    cited, reported it as "empty output (allowed)", and was refused because the words differed."""
+    calls = [_bash('echo p | python3 guard.py && echo "ALLOWED"', "ALLOWED", ok=True)]
+    verdict = vf.command_result(calls, "python3 guard.py", "empty output (allowed)")
+    assert verdict.ok, verdict.detail
+
+
+def test_a_probe_that_printed_a_refusal_is_not_read_as_silent() -> None:
+    """The same latitude must not turn a denial into an allowance."""
+    calls = [_bash('echo p | python3 guard.py && echo "ALLOWED"', "DENIED", ok=True)]
+    verdict = vf.command_result(calls, "python3 guard.py", "empty output (allowed)")
+    assert not verdict.ok, verdict.detail

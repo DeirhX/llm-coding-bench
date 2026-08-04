@@ -497,6 +497,13 @@ def _said(printed: str) -> str:
     return "\n".join(l for l in (printed or "").splitlines() if not _QUIET.match(l.strip())).strip()
 
 
+# What a probe prints when it was written to make silence visible: `... | python3 guard.py && echo
+# "ALLOWED"`. The stage did the right thing -- silence is hard to read and harder to cite -- and was
+# refused for it, its report of "empty output (allowed)" held against an output saying ALLOWED.
+_MEANT_NOTHING = re.compile(r"^(?:allowed|allow|allows|permitted|no\s+output|nothing|none|empty|ok)"
+                            r"[.!]?$", re.I)
+
+
 def _supports(printed: str, expected: str) -> bool:
     """Does what the command printed bear out how the stage described it?
 
@@ -517,6 +524,8 @@ def _supports(printed: str, expected: str) -> bool:
         return bool(_SILENCE.search(expected)) or not wanted
     if not wanted:
         return False
+    if _SILENCE.search(expected) and _MEANT_NOTHING.match(body.strip()):
+        return True
     low = body.lower()
     # "DENIED" of output that says `"permissionDecision": "deny"`, "ALLOWED" of one that says
     # allow: the stage described what it saw in the words a person uses for it. Long words are
