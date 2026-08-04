@@ -480,7 +480,12 @@ def _tokens(text: str) -> list[str]:
             if w not in _STOPWORDS and len(w) > 1]
 
 
-_SILENCE = re.compile(r"\b(no|nothing|silent|silence|empty|without)\b", re.I)
+# Words that describe an outcome by what did not happen. A probe of a rule that stops things reports
+# a stop by showing the refusal; a probe of the same rule letting something through has nothing to
+# show but silence, and says so in whatever words fit the sentence. "is not caught by _CALLS" was
+# four such reports in run 25, each against a hook that printed nothing, each judged a failure.
+_SILENCE = re.compile(r"\b(no|not|nothing|silent|silence|empty|without|allow(?:ed|s)?|permitted|"
+                      r"uncaught|unmatched)\b", re.I)
 # What a shell says when a command said nothing: the client's placeholder, and the exit marker a
 # stage adds to see the status. A probe of a hook that allows prints exactly this and nothing else.
 _QUIET = re.compile(r"^(?:\s*|-{2,}|EXIT:\s*\d+|\(?[Bb]ash completed with no output\)?|"
@@ -942,6 +947,24 @@ def _starts_with_citation(line: str) -> bool:
     return bool(PATH_LINES.match(bare) or LINES_PATH.match(bare) or FILE_EV_ANY.match(bare))
 
 
+# "`OFF_SWITCH.exists() and ...` at line 323", "`_VERBS = r\"...\"` at lines 267-270": the shape a
+# stage writes when it is explaining rather than filling in a form. The quote and the line are both
+# there, in the order a sentence puts them, and nothing read either.
+_QUOTED_AT_LINE = re.compile(r"`(?P<quote>[^`]{6,400})`[^`\n]{0,40}?\bat\s+lines?\s+"
+                             r"(?P<start>\d{1,6})(?:\s*[-\u2013]\s*(?P<end>\d{1,6}))?")
+
+
+def _quoted_at_line(body: str) -> list[dict]:
+    """Quotations of the file that say which line they came from, mid-sentence."""
+    out = []
+    for found in _QUOTED_AT_LINE.finditer(body):
+        start = int(found.group("start"))
+        out.append({"kind": "file_quote", "path": None, "start": start,
+                    "end": int(found.group("end")) if found.group("end") else start,
+                    "quote": found.group("quote")})
+    return out
+
+
 def _cites(rest: str) -> bool:
     """Whether what follows the word `evidence` in a sentence is a citation of any admissible kind.
 
@@ -949,7 +972,8 @@ def _cites(rest: str) -> bool:
     no output (ALLOW)` keeps the probe inside the claim, and eight findings that had each run their
     probe were refused for citing nothing.
     """
-    return bool(_classify_all(rest) or _bare_command(rest) or _probes(rest))
+    return bool(_classify_all(rest) or _bare_command(rest) or _probes(rest)
+                or _quoted_at_line(rest))
 
 
 def normalise(text: str) -> str:
@@ -1010,9 +1034,17 @@ def normalise(text: str) -> str:
             # A citation on the line under a CLAIM, with no EVIDENCE header in front of it: the
             # shape every stage here writes when it has not been given the schema twice. It is a
             # citation either way, and dropping it reports a cited finding as citing nothing.
-            if claimed and line.strip() and _starts_with_citation(line):
+            if (claimed and line.strip() and not HEADER_RE.match(line)
+                    and (_starts_with_citation(line) or _cites(line))):
+                # Run 25's claims round wrote eight findings as paragraphs -- "The guard checks two
+                # conditions: `OFF_SWITCH.exists() and ...` at line 323 ... I verified by running
+                # the hook directly: `touch /tmp/cc-guard-off` is denied, ..." -- and every one was
+                # reported as citing nothing, because a citation only counted when it opened the
+                # line. All eight had done the work and said where. The claim stays claimed, so a
+                # second sentence of the same paragraph is read too. A line that already carries
+                # a header is left alone: prefixing EVIDENCE to `EVIDENCE: command: rg -n 'a:1-2'`
+                # made the header part of the body, and the body then read as a file citation.
                 out.append("EVIDENCE: %s" % line.strip())
-                claimed = False
             else:
                 head = HEADER_RE.match(line)
                 said = _SAID_EVIDENCE.search(line, head.end() if head else 0)
@@ -1028,7 +1060,14 @@ def normalise(text: str) -> str:
                     claimed = False
                 else:
                     out.append(line)
-                    claimed = claimed and not line.strip()
+                    if head:
+                        # A plain `CLAIM:` line, with no emphasis to strip, never reached the branch
+                        # below that notes a claim has been stated -- only an emphasised one did. So
+                        # the sentences under the plainest possible header, the one the contract asks
+                        # for, were the only ones never read as its evidence.
+                        claimed = head.group("name").upper() == "CLAIM"
+                    else:
+                        claimed = claimed and not line.strip()
             continue
         mark = _EMPHASIS.search(seen.group("lead"))
         body, extra = seen.group("body"), ""
@@ -1192,8 +1231,10 @@ _LIKE_A_COMMAND = re.compile(r"^(?:\./)?[\w/~$]")
 # `EVIDENCE: python3 scripts/guard_test.py -- "expected deny got deny"` -- the command with neither
 # the header word nor backticks, which is how a stage writes it when it has just run the thing. Named
 # programs only: an EVIDENCE line that opens on a sentence is a sentence.
-_OPENS_ON_A_PROGRAM = re.compile(r"^(?:python3?|pytest|bash|sh|zsh|echo|cat|grep|rg|git|make|node|"
-                                 r"npm|uv|\./\S+|\S+\.(?:py|sh))\b")
+_OPENS_ON_A_PROGRAM = re.compile(r"^(?:[A-Z_][A-Z0-9_]*=\S*\s+)*"
+                                 r"(?:python3?|pytest|bash|sh|zsh|echo|printf|cat|grep|rg|git|make|"
+                                 r"node|npm|uv|touch|mv|cp|rm|unlink|dd|tee|install|ln|shred|truncate|chmod|"
+                                 r"mkdir|rmdir|ls|find|sed|awk|curl|jq|\./\S+|\S+\.(?:py|sh|js))\b")
 
 
 def _bare_command(body: str) -> list[dict]:
@@ -1214,6 +1255,15 @@ def _bare_command(body: str) -> list[dict]:
 _OUTCOME_ASIDE = re.compile(r"\s*\([^)]*\)\s*$")
 
 
+# What tells a quotation of code from a command line: an assignment, a comparison, a keyword joining
+# two expressions, a call on an attribute. A shell command can contain any of these inside quotes,
+# which is why a leading program name wins over this.
+# The assignment must be spaced. `dd if=/dev/null of=/tmp/cc-guard-off` is a command with two
+# arguments, and an unspaced `=` read it as code and dropped a probe that had actually run.
+_READS_AS_CODE = re.compile(r"(?:==|!=|\bor\b|\band\b|\bnot\b|\bre\.|\bself\.|\w+ = [^=]"
+                            r"|\w+\.\w+\()")
+
+
 def _probes(body: str) -> list[dict]:
     """The commands a stage reported running in prose, with what it says each one did."""
     out: list[dict] = []
@@ -1223,6 +1273,20 @@ def _probes(body: str) -> list[dict]:
         if not outcome or "/" not in command and " " not in command:
             # A backticked identifier with a word after it is prose about the code, not a command
             # somebody ran. `tampers()` is not a probe and neither is `rm`.
+            continue
+        if not _OPENS_ON_A_PROGRAM.match(command):
+            # A command names a program. Without that the backtick scan reports the prose between two
+            # snippets as something the stage ran: run 25's round produced `r"(?:[^\s\'\";|&]*/)?`,
+            # `flag does NOT re`, `is denied but` and `function is only` as commands nobody could
+            # find, and each phantom refuses the round as surely as a fabrication would. A whitelist
+            # loses the odd real probe, which the stage is then told cites nothing and can restate --
+            # recoverable, where a phantom is not.
+            continue
+        if _READS_AS_CODE.search(command) and not _OPENS_ON_A_PROGRAM.match(command):
+            # `OFF_SWITCH.exists() and os.environ.get("CC_GUARD_LIFTABLE") == "1"` at line 323 is a
+            # quotation of the file, and reading it as a command run by the stage turned the one
+            # citation in the paragraph into an unverifiable one. A command names a program first;
+            # this names a value and does something to it.
             continue
         if not _LIKE_A_COMMAND.match(command):
             # Backticks alternate, so a scan that pairs them wrongly reads the prose between two
@@ -1402,7 +1466,12 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
             body = line[seen.end():].strip()
             found = _classify_all(body)
             if not found:
-                found = _probes(body) or _bare_command(body) or [{"kind": None, "raw": body}]
+                # A sentence can carry both kinds at once -- "the pattern `X` at line 267; `touch
+                # /tmp/y` is denied" -- and taking only the first left the rest of the paragraph
+                # uncited. Order matters only in that a quotation of the file is looked for first,
+                # since source read as a command cannot be checked at all.
+                found = (_quoted_at_line(body) + _probes(body)) or _bare_command(body) \
+                    or [{"kind": None, "raw": body}]
             current["evidence"].extend(found)
             cited = found
             # A QUOTE that follows attaches to the last citation named, which is the one it is

@@ -1215,3 +1215,59 @@ def test_a_bare_citation_of_a_command_nobody_ran_says_that_instead() -> None:
     verdict = vf.command_result(calls, "curl http://example.com", "")
     assert not verdict.ok, verdict
     assert "printed:" not in verdict.detail, verdict.detail
+
+
+def test_a_finding_written_as_a_paragraph_is_read_as_cited() -> None:
+    """Run 25's claims round wrote every finding as prose with the citation mid-sentence, and all
+    eight were refused for citing nothing."""
+    text = ("CLAIM: the guard admits an off switch only when the launch allowed one.\n"
+            "The check is `OFF_SWITCH.exists() and os.environ.get(\"CC_GUARD_LIFTABLE\")` at "
+            "line 323, so both have to hold.\n")
+    claims, _ = vf.parse_ledger(text)
+    quotes = [e for e in claims[0]["evidence"] if e.get("kind") == "file_quote"]
+    assert quotes and quotes[0]["start"] == 323, claims[0]["evidence"]
+
+
+def test_a_line_that_is_already_a_header_is_not_given_another() -> None:
+    """The promotion of prose to evidence fired on evidence lines too, and the doubled header made
+    the header part of the body: `EVIDENCE: command: rg -n 'a:1-2'` was read as a file citation."""
+    claims, _ = vf.parse_ledger(
+        "CLAIM: x\nEVIDENCE: command: rg -n 'a:1-2' src && echo done -> done\n")
+    assert [e["kind"] for e in claims[0]["evidence"]] == ["command_result"], claims[0]["evidence"]
+
+
+def test_source_quoted_in_a_sentence_is_not_read_as_a_command() -> None:
+    """A quotation of the file that happens to contain a comparison was reported as a command
+    nobody could find, which refuses the round as surely as a fabrication would."""
+    got = vf._probes('the test is `OFF_SWITCH.exists() and os.environ.get("X") == "1"` here')
+    assert got == [], got
+
+
+def test_prose_between_two_snippets_is_not_a_command() -> None:
+    """Backticks alternate, so a scan that pairs them wrongly reads the words in between as a run.
+    Run 25 produced `flag does NOT re`, `is denied but` and `function is only` this way."""
+    for phantom in ("`flag does NOT re`", "`is denied but`", "`function is only`"):
+        assert vf._probes("a %s b" % phantom) == [], phantom
+
+
+def test_a_command_that_names_a_program_is_still_a_command() -> None:
+    """The whitelist that turns phantoms away must not turn away the probes a stage really ran."""
+    got = vf._probes("I ran `CC_GUARD_LIFTABLE=1 python3 scripts/g.py` -- allowed.")
+    assert [g["kind"] for g in got] == ["command_result"], got
+    assert got[0]["command"].startswith("CC_GUARD_LIFTABLE=1 python3"), got
+
+
+def test_a_hook_that_printed_nothing_bears_out_a_report_of_nothing_caught() -> None:
+    """A rule letting something through has nothing to show but silence. Four such reports in run
+    25 said "is not caught by _CALLS" of a hook that printed nothing, and each was judged a
+    failure."""
+    calls = [_bash("echo '{\"command\": \"node -e x\"}' | python3 guard.py", "", ok=True)]
+    verdict = vf.command_result(calls, "python3 guard.py", "the node call is not caught by _CALLS")
+    assert verdict.ok, verdict.detail
+
+
+def test_a_report_of_something_said_is_not_borne_out_by_silence() -> None:
+    """The same latitude must not accept a description of output against no output at all."""
+    calls = [_bash("python3 guard.py", "", ok=True)]
+    verdict = vf.command_result(calls, "python3 guard.py", "printed DENIED with the reason")
+    assert not verdict.ok, verdict.detail
