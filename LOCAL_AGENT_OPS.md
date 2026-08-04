@@ -1676,6 +1676,49 @@ have followed straight into a gate that kept gating. It was not found.
 The gate can tell whether a claim is supported. It cannot tell whether the claims are worth making, and
 this run is the cleanest evidence of the difference: nine well-cited findings, zero actionable.
 
+### A refusal that withholds the thing it is asking for
+
+Run 22's third claims round was refused thirteen times, every gap reading *the citation says what was
+run and not what it printed*. The output was in the transcript. The gate had it, matched the cited
+command against it, and then declined to show a single character of it.
+
+That is a refusal a stage cannot act on except by guessing the format, and it had already guessed wrong
+twice. The gap now carries the recorded output -- `It printed: {"permissionDecision": "deny", ...} --
+put a -> and the part of that which bears the claim out` -- which is the stage's own transcript handed
+back to it, so nothing is disclosed that it did not do. Where nothing was printed the refusal says so,
+because silence is the result when the rule under test is one that lets things through, and a stage told
+only that output is missing will go looking for output that does not exist.
+
+The general shape: **a check that knows why it failed should say what would pass.** Withholding it does
+not make the evidence stronger, it makes the round more expensive.
+
+### A file either is in the tree or is not
+
+The closing message is the deliverable and was the one text nothing checked. Everything upstream of it
+is judged -- claims against a contract, quotes against the file, commands against the transcript -- and
+then the model is asked to write the findings out in prose and trusted completely.
+
+The rule now applied there is the cheapest one that means anything: a path the answer places inside this
+tree must be in this tree. It caught all three of run 22's inventions and nothing else, across a
+119 KB document and a sample deliberately stuffed with `/tmp/cc-guard-off`, a GitHub URL, `~/.ollama`
+and `node_modules/.bin/x`, none of which this tree could own. Paths outside the tree are somebody else's
+business; a directory the tree does not have is not a claim about the tree.
+
+It is bounded to two send-backs. Every finding in that message has already been judged by then, so a
+gate that will not let the session end is worse than a bad sentence getting through.
+
+### Nine headings, nought claims
+
+`## CLAIM: ...` kept its hashes through normalisation, and the header matcher is anchored with no lead
+allowed, so a report written as a document parsed as an empty one. Run 22's closing message was nine
+such headings; it is also why the fabricated paths in it were invisible to the parser that might have
+caught them. `**CLAIM 1**:` had failed the same way earlier the same day, for the two asterisks sitting
+on the other side of the colon.
+
+Three shapes of the same header have now cost three rounds between them. The lesson is not that the
+parser needs one more case -- it is that **every syntactic requirement on the model is a place the run
+can die**, and the cheap direction is to accept what models write rather than to keep explaining.
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
