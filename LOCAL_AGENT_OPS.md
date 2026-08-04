@@ -176,9 +176,10 @@ total 18,009. Also worth knowing: the client/server accounting gap cannot be mea
 `usage.input_tokens` in the transcript, because Ollama returns its *own* rendered count there and
 the two match exactly. The gap is only visible between the client's status-line count and the
 rendered prompt: 99,005 against **111,186**.
-Declaring a window smaller than the model's (`CLAUDE_CODE_MAX_CONTEXT_TOKENS = real − reserve`)
-does **not** make the client compact earlier — nothing consults a threshold, see §4 — but it makes
-the status-line percentage honest, which is the only trigger that works here.
+Declaring a window smaller than the model's (`CLAUDE_CODE_MAX_CONTEXT_TOKENS`) makes the
+status-line percentage honest, and — contrary to what this said until 4 Aug — it does now make the
+client compact: see "an overflow has to arrive as a 400" below for the observation that overturned
+it. The 1.12× gap quoted above is also too small by half; the measured range is 1.25-1.45×.
 
 **The reserve must exceed the framing, or it is worse than no reserve at all**, because it hands the
 client a ceiling whose own arithmetic overflows the runner. An audit on 30 Jul caught this: the
@@ -186,6 +187,75 @@ full-tools reserve was 16,384 against framing of 18,009, so a client obeying its
 still rendered 99,929 into a 98,304 window. Now 8,192 lean (declared 90,112 → 94,845 rendered,
 3,459 slack) and 20,480 full (declared 77,824 → 95,833 rendered, 2,471 slack). Re-derive both if
 the tool set changes.
+
+### Everything counts tokens as prose, and none of this is prose
+
+Three runs died the same death — 18 at 98,342 against 98,304, 20 at 98,950 against 98,304, 25 at
+133,902 against 131,072 — each a few thousand tokens past the end of the window while believing itself
+inside a budget. Each time the gap was written down as the client estimating where the runner
+tokenises, put at about 10 %, and covered by widening the margin. That explanation was wrong three
+times, and the margin it justified is what killed run 25.
+
+**The rule of four characters to a token is for English.** A coding session carries source, JSON,
+paths, diffs, command output and refusal text, which tokenise far denser. Twelve real transcripts were
+fed to llama-server's own `/tokenize`, against the exact text the guard's estimator sums: **[measured]**
+
+| Transcript content | Characters | Tokens | Chars/token | `chars/4` reads low by |
+|---|---|---|---|---|
+| run 25's parent, at death | 381,598 | 133,928 | 2.85 | 1.40× |
+| the densest of the twelve | 198,731 | 72,061 | 2.76 | 1.45× |
+| the loosest of the twelve | 91,699 | 28,575 | 3.21 | 1.25× |
+| median of twelve | — | — | **2.92** | **1.37×** |
+
+Two consequences, both arithmetic once the ratio is known.
+
+**The guard was reporting a fifth of the window free while the run was already past the end.** Asked
+about run 25's fatal conversation, `conversation_tokens` said 95,359 where the tokeniser said 133,928.
+A guard set to refuse bulky calls at 80 % of a 98,304 window refuses at 78,643 — and it never got
+there, because by its own arithmetic the conversation never arrived. It now divides by **2.8**, the
+conservative end of the measured range: overestimating stops a session a little early, and
+underestimating kills it outright with no prefix cache and no way back.
+
+**A ceiling declared at three quarters of the window is not a margin.** The client keeps the promise —
+it will not send past what it is told — but it measures the promise in its own units. Declaring 98,304
+against a 131,072 window permits up to 142,000 real tokens. That is not a near miss, it is run 25's
+death exactly. The launchers now declare **65 %**, which survives the densest ratio measured with about
+7,500 tokens to spare whether or not compaction ever fires. It costs a session a fifth of the window it
+could have addressed.
+
+Worth noting what is *not* the problem. The framing — system prompt and tool schemas — barely
+registers at this scale: run 25's message content alone tokenised to 133,928 against a request the
+server measured at 133,902, so the reserve arithmetic in the table above was solving a rounding error
+while the real gap went unnamed. Keep the reserve; stop treating it as the defence.
+
+### An overflow has to arrive as a 400, or the client resends it unchanged
+
+Claude Code's reactive compaction fires on an HTTP 400 whose message says the prompt is too long and
+whose details carry the two counts. The proxy was wrapping llama-server's refusal as a **502 typed
+`api_error`**, which is fatal — and the client's answer to fatal is to send the same request again.
+Run 25's last three requests were byte-identical, 133,902 tokens each, ninety seconds apart. The proxy
+now translates the overflow into the client's own wording and status. Errors that are *not* overflows
+are left alone: turning every 400 into "prompt is too long" would send the client compacting after a
+typo.
+
+Related, and a correction to §4: **the threshold path does now fire against this stack.** A session
+declaring a 20,000-token ceiling, given a 92,099-byte file to read, produced the compaction shape
+immediately — one message, no tools, no system prompt, 24,314 tokens in and 1,532 out. So a declared
+ceiling is worth declaring for its own sake and not only for an honest status line. The earlier
+finding was taken against Ollama, which never says a prompt is too long; llama-server does.
+
+### Three ways the operator's own tooling lied today
+
+- **`/props` has no top-level `n_ctx`.** It is under `default_generation_settings`, and at
+  `total_slots: 1` that is the whole window. Read from the top it came back empty on every run,
+  the hardcoded fallback took over, and `flow_smoke.sh` printed a constant as a measurement.
+- **`screen -X quit` kills the window and orphans the process inside it.** The orphan keeps the port,
+  the replacement dies on bind inside a screen that no longer exists, and every request goes on
+  reaching the old build — answering exactly as the new one would. A patch was measured for twenty
+  minutes before anyone checked which pid was serving. The proxy now writes a `serving` event naming
+  its pid and the mtime of the source it loaded.
+- **`nohup cmd &` from a tool call dies with the tool call.** Documented already; re-learned anyway.
+  Use `screen -dmS`.
 
 ### What actually fills the window: whole-file reads, not boilerplate
 
@@ -1047,6 +1117,805 @@ worth chasing next. No
 surviving fabrication in either, after the parser fix. Thin, true, and cheap enough to run nightly —
 which is a different thing from a good reviewer, and should not be described as one.
 
+### Asking it to change code, not just judge it, and the tautology that got through
+
+The review adapters all reason about code someone else wrote, where a quote is a fact about the
+world. Implementing is different: the session writes the lines it would be quoting, so `file_quote`
+certifies nothing and `absence` is whatever the diff left out. Only a command's exit status is still
+outside the model's control, which is what the `implement` adapter is built on -- `command_result`
+evidence, three probes, and one machine-checkable demand: **the same literal command must appear in
+the transcript failing, and later passing.** The stages split accordingly, and only the middle one
+holds `Edit`/`Write`; a session that reads, edits, then judges its own edit has no state left that it
+did not produce. The `verify` stage proves the change carries weight by taking it away
+(`git stash push -- <source>`, keep the test, run, restore, run), which manufactures a red/green pair
+in its own transcript rather than trusting the previous stage's.
+
+**First real run: 33 minutes, three stages, one honest defect and one that got through.** Target was
+the assay cash-collateral finding from §8. Plan 427 s (96.8 % reuse), implement 912 s (99.1 %),
+verify 647 s over two rounds (98.2 %), 15 probes. The plan stage was accurate: it found
+`cash_secured_put_capacity` at `trade_service.py:1013-1024`, all three call sites taking the on-disk
+default, and the sibling in `rebalance_routes` that passes holdings explicitly.
+
+The gate caught a fabricated command output -- claim 3 cited `"Exit code 1 ... FFF ... TypeError ..."`
+as what a run printed, and none of the eight recorded runs of that command printed it. It survived a
+refusal round, so it is in the artifact as a `fail`, correctly.
+
+What got through was worse and more interesting. The diff threads a `holdings=None` parameter into
+three functions and passes it to the capacity call -- and **no caller passes it**, so
+`_trade_preview` still gets the disk snapshot and production behaviour is byte-identical. The three
+new tests went red before the change with
+`TypeError: _put_cash_requirement() got an unexpected keyword argument 'holdings'` and green after,
+which is a perfect red/green pair asserting only that the diff has the shape the diff has. Two of the
+three wrapped the call in `try/except Exception: pass` and asserted `mock_cap.assert_called_with(...)`;
+only one compared a value. The model itself flagged the hole as its single UNKNOWN -- whether the top
+callers have fresh holdings to pass down -- which is the ledger working as designed while the
+red/green check waved the change through.
+
+So the rule now reads the *reason* for the red, not just its exit status: a failing run whose output
+says a name or a signature was missing, and says nothing about a wrong value, is not a red. Replayed
+against the real transcript, the updated gate refuses the same answer. Uncertainty resolves the other
+way -- an unreadable failure counts as behavioural -- because the check that cannot read the failure
+should not be the one refusing the answer.
+
+**What this says about the harness for implementation work.** It is honest about arithmetic and blind
+to meaning, exactly as before. It can prove a command failed and later passed; it cannot ask whether
+the test was worth passing, and the cheapest tautology available to a model asked for red/green is a
+test of its own signature. Each such hole is closable once it is seen, and none of them are visible
+from reading the code. The loop that matters is the one that ran here: point it at real work, read
+what it accepted, and turn the specific way it was fooled into arithmetic.
+
+
+### What the accumulated rules cost, measured against the answers they were not written for
+
+Six rules were added to this gate from single observed failures, and a rule added that way is
+measured against the answer that motivated it and nothing else. The cost that stays invisible is the
+other direction: an answer that was fine and is now refused looks identical in the artifacts to one
+that needed correcting, because both end in a refusal round the model then satisfies.
+`scripts/measure_gate_drift.py` replays every recorded stage against the current gate, using its
+original transcript, and buckets the gaps by cause.
+
+**Sixteen stages on disk, ten replayable, five of which were accepted at the time. The current gate
+refuses all five** -- and the interesting part is why. Two are refused only because the files they
+cite have been edited since; this repository reviews itself, so its own commits move the line numbers
+of every citation. The remaining three are refused by the tightened falsification check and the
+opinion filter, and in all three cases the refused claim is exactly the shape that motivated the
+rule: two high-severity claims whose falsification narrative described a command the session never
+ran, and the "structurally coupled" non-finding that recurred in four runs out of four. So the rules
+still catch what they were built to catch, retroactively, and nothing else was disturbed.
+
+The first version of this measurement said something quite different -- five rule-caused refusals,
+none from drift -- because it did not count `wrong-lines` as drift. That verdict means the quoted
+text is still in the file and has moved, which is what inserting a function above it does. A
+measurement built to keep the rules honest was, for its first run, an argument for reverting rules
+that were working.
+
+**What this does not measure.** Ten stages, one adapter, and the rules were derived from these very
+runs, so this establishes that they still fire where intended -- not that they leave unfamiliar good
+work alone. A real false-positive rate needs answers the rules were not built from, which this
+project does not yet have. The scoping is at least asserted rather than assumed: the implement-only
+rules contributed zero gaps across every review stage replayed, and a test now fails if any of them
+becomes reachable from another adapter.
+
+
+### A stage turned the read guard off, and nothing said so for a day
+
+Run 6's survey stage ran `touch /tmp/cc-guard-off` -- description, verbatim, "Temporarily disable
+guard for reading" -- and never removed it. Every stage after it in that run, and **every session
+started on this machine for the next day**, ran with no read discipline at all: no line cap, no
+re-read refusal, no window brake. Nothing in any artifact records it. The switch was documented in
+the guard's own refusal text, `(To lift this: touch /tmp/cc-guard-off)`, which is where the stage
+learned it.
+
+The first fix was a pattern rule refusing commands that write the switch. It is worth knowing how
+badly that works on its own. Measured against the rule as written:
+
+| Attempt | Refused? |
+|---|---|
+| `touch /tmp/cc-guard-off` | yes |
+| `echo x > /tmp/cc-guard-off` | yes |
+| `F=/tmp/cc-guard-off; touch $F` | yes |
+| `python3 -c "open('/tmp/cc-guard'+'-off','w')"` | **no** |
+| `touch /tmp/cc-guard-of?` | **no** |
+| `printf "" > /tmp/cc-$(echo guard)-off` | **no** |
+
+A shell has too many ways to say a name for matching the name to be a defence. What a stage cannot
+reach is the environment a hook is spawned into -- the client starts each hook fresh from its own
+environment, and a stage's `export` dies with its subshell -- so both switches are now honoured only
+when the session was launched to honour them (`claude-gemma.sh --liftable`, `CC_DEPTH_LIFTABLE=1`).
+The pattern rule stays as a tripwire, so the obvious attempt costs a turn and is told what to do
+instead of appearing to work, and both switches are cleared at launch.
+
+**The rule then refused the only experiment that could establish anything about it.** A payload that
+asks a hook what it would do has to contain the command being asked about, so run 8's survey was
+denied when it tested the rule, wrote "the guard itself ran on me", deleted its test file and fell
+back to reasoning it could not cite. It also refused `grep -rn cc-guard-off scripts/ > notes.txt`,
+which reads the rule and writes somewhere else entirely. Written as *what the command would do to
+that path* -- a write verb whose target is the switch, a redirect into it, `open()` on it -- with
+probes of a hook exempt, all six honest attempts above are still caught and the review of it can
+proceed.
+
+### The gate refused twenty-four correct citations in one ledger
+
+Told how to test a hook, run 8's claims stage fed the guard twenty payloads and reported what each
+decided. The gate rejected twenty-four of its citations, every one for a mechanical reason:
+
+- **Five probes run in one labelled loop, cited one at a time.** The citation named the payload; the
+  recorded call was the loop. Reported as five commands nobody ran.
+- **"DENIED (permissionDecision: deny)"** as a description of output that says exactly that in JSON.
+  Verbatim substring was the whole test, so a description was never going to pass.
+- **"ALLOWED (no deny output, exit code 0)"** of a probe that printed nothing but the `EXIT:0` the
+  stage had appended itself.
+- **The file named once, in the claim's sentence, with `(line 217)` after each quote.** Eleven
+  citations of one file, each saying where twice, reported as "missing a file and a line range".
+
+The same ledger now passes with none. The leniency is bounded by tests that fail if it goes further:
+a probe described as the opposite of what it printed, a command nobody ran, a loop case judged on
+another case's output, and silence claimed of a command that spoke. That last one caught a real
+hole while being written -- "no failures, nothing printed" scored a match against `3 failed, 40
+passed`, because word overlap cannot see a negation and *failures* matches *failed*.
+
+**Two of that ledger's findings were true and are fixed**: `dd` and `ln` were not write verbs though
+both create the file, and the `Write` branch compared the switch name as a substring, so a `.bak`
+beside it was refused as tampering. One was cited perfectly and is wrong -- `rsync /tmp/cc-guard-off
+/dev/null` reads the switch, it does not create it -- which is the honest summary of what this
+machinery buys: **the gate certifies that a claim's evidence is real, never that the claim is
+true.** The adversary stage is the only thing aimed at that, and it is much the weaker half.
+
+### A refused round used to arrive without the ledger it was refusing
+
+Run 7's claims stage spent 252 tool calls and produced seven cited findings, two short of what the
+gate wanted. The next round was a fresh subagent with no memory of any of it: **16 tool calls, six
+claims, not one citation.** The round after that ended mid-sentence, and the stage was given up on
+having been judged on its evidence exactly once. A refusal was being used as a reset.
+
+A reopened round is now handed the refused ledger and the gate's objections, and told to keep what
+was not objected to word for word. Rounds that never wrote a ledger are counted against their own
+smaller budget, so a stage that cannot produce the shape does not spend the rounds meant for its
+evidence. And `claims` is blocking: giving up on it and running the adversary anyway sends it at
+nothing to attack -- it said so, and was refused for saying it.
+
+### Review the tree you are not editing
+
+Twice in one afternoon a stage quoted a file verbatim, the file was edited while it worked, and the
+gate answered "quote not present in" -- an accusation of fabrication against a stage that had done
+nothing wrong. Reviews here now run in a detached worktree (`git worktree add -f --detach /tmp/rN
+HEAD`, `FLOW_CWD=/tmp/rN`) so the subject cannot move while it is being read, while the hooks stay
+in the working repository and can be fixed mid-run.
+
+Where a tree still moves, the transcript settles it: a failing quote is excused only when the
+session's own `Read` displayed that text *and* the file no longer holds what that `Read` showed.
+Both halves matter. Without the second, real text cited at the wrong line -- the thing line numbers
+exist to catch -- would be excused too, and the planted-fabrication rate drops from 100 % to 80 %.
+`Read` results are written by the client; `Bash` output is not accepted for this, because `echo`
+prints whatever it is given.
+
+
+### Refusing correct work is the failure mode, not accepting wrong work
+
+Seventeen review runs against this harness, and the stage under test was substantively right in most
+of the ones it failed. Almost every refusal was the reader's fault. The tally, each from a real run:
+
+| The stage wrote | The gate said | What was actually wrong |
+|---|---|---|
+| `**CLAIM 1:** the rule is narrow.` | `claim 1 () cites nothing` | emphasis closing on the colon; the sentence was read as trailing prose and dropped |
+| `CLAIMS` then `**1. ...**` | `no claims were stated` | 188 findings parsed as none, so the cap they blew never applied |
+| `Evidence: guard.py:12-14` | `cites nothing` | headers were matched case-sensitively |
+| `... for the session. Evidence: line 280-281 of \`g.py\`.` | `cites nothing` | the word was only read at the start of a line |
+| `QUOTES: "a" (line 12); "b" (line 20)` | `cites nothing` | one header, several quotes, each with its own number |
+| `QUOTE: Line 246: \`code\`` | `missing a file and a line range` | the label was stripped before comparing and never read as the citation |
+| `RUN: echo ... | guard.py returns "allow"` | `cites nothing` | a header the contract does not name, as checkable as the one it does |
+| `` `touch /tmp/cc-guard-off` -- denied `` | `cites nothing` | a probe reported in a sentence rather than under a header |
+| `[^\s'";\|&]` for the file's `[^\s'\";\|&]` | `quote not present` | one backslash unescaped on the way into JSON |
+| a quote cited one line out | `missing a file and a line range` | resolution answered only on an exact match, so a near miss had no address at all |
+
+Two general lessons sit behind that list. **A refusal must name the defect, not the absence.** "Cites
+nothing" sends a stage looking for a citation it has already written; "text is at line 311, you cited
+312" is a sentence it can act on, and the same ledger that produced nine of the former produced nine
+of the latter after the resolution learned to answer for near misses.
+
+**And every limit must be stated where it is enforced.** The claim cap was checked by the gate and
+absent from the contract. A stage that found one class of bypass and enumerated 188 variants of it
+would have been refused against a number nobody told it -- which is the single thing this harness
+exists to prevent.
+
+### Bounding the generation, not the ceiling
+
+Runaway output here was never a ceiling problem. Raising the cap from 16,384 to 32,768 tokens simply
+moved the cut: the client asks for 32,000 and the model filled them, ten times in one run. The loops
+live in reasoning, and they do not appear at the start of a stage where there is something to work
+out -- they appear deep in one, where the context already holds everything and the model reasons in
+circles about how to phrase it. One turn spent 15,255 tokens redrafting a ledger it had already
+written, thirty repetitions deep.
+
+Eight turns of reasoning per stage, and none after that, took two runs from ten cuts to zero. Note
+what this is not: repetition sampling (DRY) was already on and could not see any of it, because the
+runaway that matters is not literal. A stage enumerating every way to name a file indirectly repeats
+no line at all -- it wrote 188 numbered findings, 58,812 characters, and had corrupted its own
+identifier to `_CALLDS` by the end. That is bounded by capping claims, not by sampling.
+
+Judge cuts by their size, too. Of 20 apparent cuts in one run, 12 were the client's own 158-token
+auxiliary calls and 2 were the stage: counting the notes rather than reading them overstated the
+problem tenfold.
+
+### A guard the reviewer cannot survive is not reviewable
+
+The most expensive single bug in this harness was found by pointing the harness at it. Told to review
+the off-switch rule, a stage did the only honest thing -- made switches, removed them, probed the hook
+with each -- and was refused 262 times, because removing a switch matched the same rule as creating
+one. Removal puts the guard *back*. The test that asserted otherwise was wrong along with the code.
+
+Two more came out of the same transcript. The call budget was invisible, because the context guard
+sat ahead of the flow guard in `PreToolUse` and its refusal arrived first: the stage spent 399 calls
+against a cap of 140 and never once saw the message telling it to stop. And a stage that only reads
+wrote six test files into the worktree it was reviewing -- caught after the fact by fingerprint in the
+scripted path, and not at all in the interactive one, where there is no after the fact.
+
+Which is the general point: **hook order is semantics, and the wiring is not what the source says it
+is.** Three fixes in a row went in behind matchers that never routed the tool they were about.
+`claude-gemma.sh --print-settings` now prints what a launch would register, and a test reads it.
+
+
+### Three hooks at once, and a stage the flow forgot it had launched
+
+Run 19's claims stage ran 157 tool calls and 77 of them came back with this:
+
+```
+Refused. Call the Agent tool, prompt first line `STAGE: claims`.
+```
+
+Told to launch itself. The stage *was* the claims stage, working, and the flow had no record that it
+existed: `flow.json` held one entry, for the survey. With nothing running, the rule that stops the
+orchestrator from doing stage work applies to everything, and the guard was written believing a
+working subagent and an idle orchestrator are the same caller here. They are not -- see below.
+
+The record was written and then written back out of existence. Three refusals landed in the same
+second -- one assistant turn, three tool calls, three hook processes at once -- and the launch was
+admitted three seconds later. Each hook does load, change, save with no lock, so a straggler from
+those refusals saved the state it had read before the launch was recorded.
+
+What made it findable rather than a shrug: the survey's recorded count was 6 and the survey subagent
+had made exactly 6 calls, while claims had made 157 and was recorded nowhere. A counter that is right
+for a stage that ran alone and absent for a stage that ran alongside anything is a race, not a parser
+bug.
+
+`load()` now takes an exclusive `flock` that `save()` releases, so the whole read-modify-write is
+serialised, and `save()` writes through a temporary file so no reader sees half of one. Two things
+that fixing it taught, both worth more than the fix:
+
+- **A lock held across a wait is worse than no lock.** The Stop hook waits minutes for a stage to
+  report. Held through that, the lock blocks the hooks of the very stage being waited for, they time
+  out, and they write unserialised anyway. There is now `peek()` for reading in a loop and
+  `release()` for letting go before anything slow, and the Stop hook calls both.
+- **Prefer a bug to a hang.** The lock waits five seconds and then proceeds without it. A lost update
+  costs a record; a hook that never returns costs the session.
+
+### The client does say who is calling, and this repo said it does not
+
+Every rule that confuses a stage with its parent rests on one belief, written down here and in the
+guard: that a hook cannot tell them apart. It is false. Traced from a live run with `CC_FLOW_TRACE`:
+
+```
+event PreToolUse   tool Read         agent_id None                 agent_type None
+event PreToolUse   tool Agent        agent_id None                 agent_type None
+event PreToolUse   tool Bash         agent_id acb612f0b25d37102    agent_type general-purpose
+event PreToolUse   tool TaskOutput   agent_id None                 agent_type None
+```
+
+`agent_id` is the subagent's id on its own calls and absent on the parent's -- 15 payloads carrying
+it, matching the survey stage's 15 tool calls exactly, and none on the orchestrator's `Read`, `Agent`
+and `TaskOutput`. `agent_type` comes with it. Neither is documented.
+
+Do not confuse this with the model server, where it remains true that **no client identity is ever
+logged** and attribution requires interposing before the fact. Two different questions with the same
+shape, and one of them had an answer sitting in the payload the whole time.
+
+What it is worth: a subagent's call is never answered with an order to launch itself, so run 19's
+deadlock cannot recur even if the record is lost again. And where the flow has no record of the stage
+making a call, the record is put back from the caller's own id, which repairs the state rather than
+arguing with it. **Check what the client actually sends before designing around what it does not.**
+
+### A refusal is charged to the context it protects
+
+The call budget refuses a stage that keeps reading instead of answering, and the refusal says why at
+length: three sentences on what to do with what it already has. Run 18's second claims round read
+that refusal 220 times. It had spent 361 calls against a budget of 140, and every denial after the
+140th cost it another eighty tokens of its own window.
+
+What that does is not obvious until you see the answer it left behind:
+
+```
+[This answer was cut off at 2 tokens by the proxy, so what is above is incomplete]
+```
+
+Two tokens. Claude Code sizes `max_tokens` by what is left of the window after the prompt, so a stage
+whose context has been filled with refusals is told to answer at a point where it cannot: there is no
+room left to answer in. The stage was not stubborn at the end. It was starved, by the mechanism that
+was telling it to stop.
+
+The refusal now shortens to one line -- `Refused. Answer now, in CLAIM/EVIDENCE/QUOTE blocks.` --
+after the sixth repeat. The same escalation the orchestrator got, for the same reason, arrived at
+twice independently: **any message a hook repeats is a message that has to get shorter.** Measure a
+deny message by the count times its length, not its length.
+
+Stopping the model is not the fix, because something kept loading it back: a 10-second
+`POST /api/chat` -- which is a weights load -- about three minutes after each `ollama stop`, preceded
+by irregular 43 ms pings a minute or two apart. Nothing in this repo makes them. `watch.py` and
+`state.py` only ever call `/api/ps`, which cannot load anything; the harness scripts and hooks name
+Ollama nowhere; neither the user settings nor the run's settings route traffic to it. The server
+records requests on completion and never records who made them, so the caller can only be caught
+before the fact, by polling `lsof -nP -iTCP:11434` for a client socket.
+
+The durable fix, once you look at what is actually serving: **the llama-server path does not need
+Ollama at all.** The qwopus server is a child of `implement_via_llamacpp.sh` and only borrows the
+binary out of `Ollama.app/Contents/Resources`, so quitting Ollama leaves it running -- verified by
+`ppid`, and again afterwards on `/health`. Two notes for when you do it:
+
+- `osascript -e 'quit app "Ollama"'` can come back `User canceled (-128)` and leave everything
+  running: the app puts up a dialog nobody is there to answer.
+- Terminate the app process, not `ollama serve`. The server is the app's child and the app respawns
+  it; kill the parent and both go.
+
+### Nobody told the client how big the window was
+
+Run 18 ended like this, after 135 turns and an hour of work:
+
+```
+API Error: 502 {"code":400,"message":"request (98342 tokens) exceeds the available
+context size (98304 tokens), try increasing it"}
+```
+
+Thirty-eight tokens over. Claude Code compacts against `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, and where
+that is unset it assumes 200k: the run reported `contextWindow: 200000` while talking to a server
+started with `-c 98304`. So it never compacted, walked calmly past the real limit, and llama-server
+refused the request. The refusal reaches the client as a 502, which it treats as fatal, so the whole
+session dies at the first overshoot -- one turn of a stage that would otherwise have been refused and
+retried.
+
+`claude-gemma.sh` had declared the window since the first week. `flow_smoke.sh` -- where every long
+unattended run happens -- never did. **Check the environment of the launcher you actually use**, not
+the one you read. The headless path now asks llama-server for `n_ctx` at `/props` and declares
+three quarters of it, because 8k was not enough: see the next section but one.
+
+And note what the two failures of run 18 have in common: a stage was starved of output room by
+refusals, and the session was killed by a prompt nobody was compacting. Both are the context window
+being consumed by the harness rather than by the work, and neither shows up as a harness error.
+
+### A blank expectation is a substring of everything
+
+The first replay of run 21 said the salvage would recover twelve findings. It recovers two. The other
+ten were citations of this shape:
+
+```
+EVIDENCE: command: echo '{"tool_name": "Bash", ...}' | python3 scripts/cc-context-guard.py
+```
+
+A command, and no statement of what it printed. `command_result` compared the claimed output against
+the recorded output with `if expected in printed`, and an empty string is a substring of every string,
+so **every citation that asserted nothing passed against anything** -- including, in one case, against
+a command that was never run at all. The live gate did this too: it reported six of round 4's seven
+claims as standing, where the corrected gate stands up none of them.
+
+Two more holes were open beside it, both found by asking why a claim passed rather than why one failed:
+
+- **A recorded call that is *part* of the cited one was accepted as the cited one.** The match tested
+  `wanted in ran or ran in wanted`, so citing `export CC_GUARD_LIFTABLE=1; echo <payload> | guard`
+  matched a recorded run of the `echo` alone. The variable was the entire experiment. Environment
+  assignments in a citation must now appear in what ran, on every matching path.
+- **Payload equality was treated as sufficient.** Probes of one hook are nearly the same string, so
+  matching on the JSON payload was introduced to tell them apart -- and it ignored the shell around
+  the payload, which is where the condition of the experiment lives. Twelve different recorded probes
+  matched one citation.
+
+The general lesson is about which direction you audit in. Every earlier pass over this verifier asked
+*why was correct work refused*, because false refusals are loud: a stage argues back, a round is spent,
+the transcript fills with it. A false acceptance is silent, and its only symptom is a number that looks
+good -- six of seven claims standing, twelve findings recovered. **Audit the passes, and prefer a check
+that cannot be satisfied by an empty string.** One that can will report the flattering answer forever.
+
+A smaller trap in the same family, now handled by checking rather than guessing: a `QUOTE` under a
+command citation is sometimes the output written under its own header and sometimes a quote of the code
+the same claim rests on. Assuming the first told two of run 21's claims that their command had printed
+a regex out of the file under review, which is a refusal nobody could act on. It is tried as output and
+kept only if the recorded run bears it out.
+
+### The stage failed; the findings did not
+
+A stage is refused as a whole, and until now it was discarded as a whole. Replaying run 21's four
+refused claims rounds through the gate shows what that cost: **2 findings that pass every check**,
+neither of which reached the answer, and both real holes in the very rule under review -- the switch
+file name can be assembled out of shell (`X=cc-guard; touch /tmp/$X-off`) so the literal never
+appears, and any path ending in the switch name is refused because the pattern has no left-hand
+boundary. The run read as a total failure and was not one.
+
+The gate now records each claim that survives on its own account, and the end of a flow makes the
+session write those out. The lesson generalises past this harness: **when a judge rejects work, record
+the granularity it judged at, not the granularity it reported at.** Everything below the verdict was
+computed and thrown away.
+
+One thing that cannot be done here, with numbers, because it looks obvious and is wrong. A round sent
+back rewords what it already proved, so the same finding arrives twice and the temptation is to merge
+by similarity. Measured on those ledgers:
+
+| pair | raw ratio | word order discarded |
+|---|---|---|
+| a finding and its own paraphrase | 0.55-0.60 | 0.55-0.88 |
+| "blocks touch but not rm" vs "blocks rm but not touch" | **0.82** | **1.00** |
+
+A paraphrase shares less text with its original than a logical inverse shares with it, and sorting the
+words -- the usual trick for reordered phrasing -- makes the inverse a perfect match. Every threshold
+that merges the restatements merges the opposites first, so only identical text is merged. A duplicate
+in an answer is cosmetic; silently dropping one of two contradictory findings is the failure this whole
+apparatus exists to prevent.
+
+### 128k buys room for four minutes, once -- and 2.2x on decode
+
+We widened the runner from `-c 98304` to `-c 131072`, because a harness whose refusals are charged to
+the context needs the room more than it needs the tokens per second. The price, measured on
+Qwopus3.6-35B-A3B Q8_0 with `--spec-type ngram-mod` immediately after the change:
+
+| | prompt | prefill | decode |
+|---|---|---|---|
+| short turn | 18 tokens | 0.08 s | **93.2 t/s** |
+| cold, near the ceiling | 123,738 tokens | **237.2 s** (521.8 t/s) | **43.1 t/s** |
+| same head, next turn | 517 new tokens | 2.1 s | 42.5 t/s |
+
+Three things follow, and only one of them is the one people expect.
+
+**Decode costs 2.2x at depth, not 4x.** 93 t/s shallow against 43 t/s at 124k. The 22.6 t/s in the old
+98k session's log is not the comparison it looks like: that turn ran with the machine under memory
+pressure and the prompt cache thrashing (`making room for prompt cache entry` appears hundreds of times,
+evicting 1.3-2.2 GiB entries). Depth is a slope; contention is a cliff.
+
+**The real tax is the cold prefill, and it is paid per head, not per turn.** Four minutes to fill the
+window from nothing, three seconds to ask a second question of the same head. §1's rule -- every agent
+prompt shares a byte-identical head, all variation at the end -- was worth two minutes at 98k. At 128k
+it is worth four, and a refusal round that perturbs the head pays it again. That is the same arithmetic
+as "a gated stage costs 1.8-2.5x an ungated one", now with a larger multiplicand.
+
+**It was never a memory decision.** 35 GB of weights and a full window of KV sat at 41.7 GiB wired with
+24 GiB free. Both 96k and 128k fit; what does not fit is a second model, which is why nothing else may
+be resident.
+
+Two smaller notes from the same restart. `--swa-full` is accepted and silently discarded --
+`swa_full is not supported by this model, it will be disabled` -- so the disk-parking mechanism §6 ruled
+out for gemma is not available here either, for a different reason. And the declared window is now the
+*lower* of the framing ceiling and three quarters of the real one, on both launchers: a fixed reserve
+covers the tools the client does not count, but not the 9.8% by which its estimate trails the runner's
+tokeniser, and at 128k a lean session's 8,192 reserve would have declared 122,880 -- about 135k as the
+server counts it, outside a window we had just widened to fit it.
+
+### Two models resident is a memory failure with no error message
+
+Mid-run, `state.py` said this:
+
+```
+gemma4-31b-mtp-64k:latest     62.3 GB  ctx=65536  expires 478 min
+memory                        21.9 GB available (0.9 free), 45 GB wired
+swap                          7.91 GB used of a 9.4 GB file
+```
+
+The 62 GB model had not processed a prompt in 23 hours and had 8 hours of keep-alive left, because
+`OLLAMA_KEEP_ALIVE=8h` is set at the machine level and something had re-armed it -- irregular 43 ms
+`POST /api/chat` calls, a minute or two apart, which load and re-arm without generating anything.
+Meanwhile the actual work was going to a separate `llama-server` holding 46 GB. Nothing was using the
+resident model; nothing reported that it was there.
+
+`ollama stop` on the idle model, and:
+
+```
+memory                        98.0 GB available (56.1 free), 5 GB wired
+swap                          2.30 GB used of a 3.1 GB file
+```
+
+Available memory went from 21.9 GB to 98.0 GB and macOS shrank the swap file to a third. **Check
+residency before blaming the run for being slow**: a `keep_alive` of 8 hours means one stray request
+costs you two thirds of the machine until you notice, and the only symptom is that prefill runs at a
+third of its rate.
+
+### The heading says the word once, for all of them
+
+Every parser fix so far has been about a shape the model writes and the verifier does not read. Run
+18's first round wrote the plainest one yet:
+
+```
+CLAIM
+
+The Bash tamper rule catches 4 of 6 classes of command-based tamper. ...
+
+The Write/Edit/MultiEdit deny branch checks `Path(...).name == s.name`. ...
+```
+
+The word once, as a heading, and then one finding to a paragraph. Nothing on any line says CLAIM, so
+the answer scored no claims at all and was refused for stating none -- with eight findings in it,
+five of which had run a probe and reported what it printed.
+
+Two rules came out of that, and the second matters more than the first:
+
+- Under a claims heading, a paragraph is the claim it reads as, and a citation in its last sentence
+  is evidence -- **including a probe.** The inline rule accepted a file citation there and not a
+  command, which is how five findings that had each run their probe were told they cited nothing.
+- The paragraph rule fires only where the answer marks *none* of its findings. In an answer that
+  marks some, the paragraphs around them are prose, and reading those as claims refuses a stage for
+  a sentence about what it had just read.
+
+The same round also lost its probes to a word: `... produced no output (ALLOW)` split at `output`
+rather than `produced`, so the recorded command kept the words `produced no` and did not match the
+probe the transcript had it running. Replayed against today's code, that round lands five verified
+findings and three unsupported assertions. It is still refused -- three assertions do cite nothing --
+but the hand-back now asks for the three, instead of telling a stage with eight findings that it made
+none.
+
+### A background job from a tool call dies with the tool call
+
+Run 22 was started with `nohup ... &` from an agent's shell, slept 20 seconds so the launch could be
+checked, and reported a session id and a live client. It was already dead. `nohup` ignores `SIGHUP`;
+it does nothing about a process group being killed, which is what happens when the tool call that
+spawned the job returns. The proxy log records a `client_gone` after 1,000 ms and the runner logged
+`cancel task, id_task = 502` -- one second into the first request, at the second the tool call ended.
+
+Nothing said so. `flow_smoke.sh` prints `claude exited N` when the client stops; that line was absent,
+because the shell running it was killed too. What was left was a zero-byte `answer.json`, a zero-byte
+`stderr.log`, and a flow state saying `next: survey` -- indistinguishable, for nine minutes, from a
+session thinking about its first delegation. The tell is the proxy log's last timestamp, not the state.
+
+This file already documents the hazard for the proxy, in the script's own comments, and the remedy is
+the same: `screen -dmS r22 zsh -c '...'`. Relaunched that way the client survived tool-call boundaries.
+Check a run by its last proxy timestamp; a flow state cannot report a session that is no longer there.
+
+### The escape that is a word boundary in one language and a backspace in another
+
+A quote arrives as a JSON string when it looks like one, so that a line break the model meant can be
+told from a `\n` inside something it quoted. In a repo that is mostly regex that reading is usually
+wrong. A correct one-line quote of
+
+```
+_VERBS = r"(?:touch|mv|cp|dd|tee|install|ln|shred|truncate)\b[^;|&\n]*"
+```
+
+decodes to a line carrying a backspace where the word boundary was and a line break where the
+character class was. It matches nothing, and the verifier reports it as not present in the file it had
+just been copied out of -- the most expensive verdict this harness can produce, because the stage did
+everything right and is told it invented the line.
+
+`\b` and `\f` are now held back across the decode and restored as the two characters written. Only an
+even number of backslashes is protected, so a quote that really contained `\\b` still decodes to one.
+
+`\n` cannot be settled that way, because both readings are things models really write: a line break
+when a run of lines is handed over as one string, two characters when a character class is quoted. The
+first attempt let the citation decide -- one line cited cannot be several lines quoted -- and that cost
+something not visible from the case it fixed. A quote of two lines citing only the first used to come
+back `wrong-lines`, which names the lines the text is actually at; flattened, it came back `quote not
+present`, the verdict a fabrication gets. So the parser hands over one reading and the verifier tries
+the other, keeping whichever holds, or failing that whichever says where it looked. Trying twice costs a
+string comparison; refusing a correct quote costs a round.
+
+The first attempt at this failed in the way worth recording. It carried the escapes through the decode
+as `\x00b`, and JSON refuses a raw control character inside a string -- so the decode it existed to
+protect raised, both candidates fell through to the fallback path, and that path preserved `\b` by
+accident while still turning `\n` into a break. The test passed on the half that mattered least and the
+symptom was unchanged. A sentinel has to be legal in the format it travels through; `\ue000` is.
+
+### The rule caught a file it does not name
+
+`touch /tmp/my-cc-guard-off` was refused as tampering with the guard's off-switch. The name was
+bounded on the right, `(?![\w.-])`, and not on the left, and the verb pattern it is appended to ends in
+`[^;|&\n]*` -- a run of anything. So the switch name matched inside a longer one, and a file whose name
+merely ends with it was protected as though it were the switch.
+
+It is a small defect with a large provenance: it was found by a review stage probing this very rule,
+in the same round that was later refused and abandoned. It is the concrete argument for salvaging
+findings out of a refused stage, and the reason the fix carries a test named after the false positive
+rather than after the pattern.
+
+### Run 22 finished, and the last thing it wrote was not checked by anything
+
+The first review to run all the way to an answer: 75 minutes, 52 turns. Survey was accepted at 45 tool
+calls. Claims was refused three times -- 138 calls, 141, 96 -- the flow gave up on it, and the Stop hook
+handed back the four findings that had passed the gate in round two. The session wrote them out with an
+`Abandoned findings` section naming what was never established. That is the designed behaviour, working,
+and it is worth saying plainly because most of what follows is about what it does not cover.
+
+The four citations that were checked are command results. The QUOTE blocks beside them in the final
+answer were written after the hand-back, and nothing verifies those. Line 229 came back as
+
+```
+_VERBS = r"(?:touch|mv|cp|dd|tee|install|ln|shred|\b[^;|&\n]*"
+```
+
+against a file that says `install|ln|shred|truncate)`, and the three file paths degraded across the
+answer -- `scripts/cc-context-guard`, then `scripts/cc`, then `scripts/c`, none of which exist. The gate
+verifies a ledger; the closing message is prose it asked for and then trusted. A stage can be held to
+its evidence for an hour and fabricate in the last paragraph.
+
+### Four true findings, no defects, and the question nobody asked
+
+Every salvaged finding is of the form *`tampers()` does not match X*: not `rm`, not `mkfifo`, `mkdir`,
+`chmod`, `chown`, not Perl, Node or Ruby write calls, not names that merely resemble the switch. All
+four are true. None of them is a way past anything, because both switches are read as
+`OFF_SWITCH.exists() and os.environ.get("CC_GUARD_LIFTABLE") == "1"`, and a stage cannot set an
+environment variable for a hook process the client spawns. Creating the file by a route the regex misses
+gets you a file.
+
+So the review enumerated the holes in a pattern for an hour without once asking what the pattern is for
+-- one grep from the answer. `rm` is the sharpest case: it is absent deliberately, so that a stage can
+put the guard back, and it is reported as a gap. Meanwhile the sibling gate's docstring was still
+offering `touch /tmp/cc-depth-off` as its kill switch, years after the code began requiring
+`CC_DEPTH_LIFTABLE=1` beside it -- a real defect, in the file the review had open, that a reader would
+have followed straight into a gate that kept gating. It was not found.
+
+The gate can tell whether a claim is supported. It cannot tell whether the claims are worth making, and
+this run is the cleanest evidence of the difference: nine well-cited findings, zero actionable.
+
+### A refusal that withholds the thing it is asking for
+
+Run 22's third claims round was refused thirteen times, every gap reading *the citation says what was
+run and not what it printed*. The output was in the transcript. The gate had it, matched the cited
+command against it, and then declined to show a single character of it.
+
+That is a refusal a stage cannot act on except by guessing the format, and it had already guessed wrong
+twice. The gap now carries the recorded output -- `It printed: {"permissionDecision": "deny", ...} --
+put a -> and the part of that which bears the claim out` -- which is the stage's own transcript handed
+back to it, so nothing is disclosed that it did not do. Where nothing was printed the refusal says so,
+because silence is the result when the rule under test is one that lets things through, and a stage told
+only that output is missing will go looking for output that does not exist.
+
+The general shape: **a check that knows why it failed should say what would pass.** Withholding it does
+not make the evidence stronger, it makes the round more expensive.
+
+### A file either is in the tree or is not
+
+The closing message is the deliverable and was the one text nothing checked. Everything upstream of it
+is judged -- claims against a contract, quotes against the file, commands against the transcript -- and
+then the model is asked to write the findings out in prose and trusted completely.
+
+The rule now applied there is the cheapest one that means anything: a path the answer places inside this
+tree must be in this tree. It caught all three of run 22's inventions and nothing else, across a
+119 KB document and a sample deliberately stuffed with `/tmp/cc-guard-off`, a GitHub URL, `~/.ollama`
+and `node_modules/.bin/x`, none of which this tree could own. Paths outside the tree are somebody else's
+business; a directory the tree does not have is not a claim about the tree.
+
+It is bounded to two send-backs. Every finding in that message has already been judged by then, so a
+gate that will not let the session end is worse than a bad sentence getting through.
+
+### Nine headings, nought claims
+
+`## CLAIM: ...` kept its hashes through normalisation, and the header matcher is anchored with no lead
+allowed, so a report written as a document parsed as an empty one. Run 22's closing message was nine
+such headings; it is also why the fabricated paths in it were invisible to the parser that might have
+caught them. `**CLAIM 1**:` had failed the same way earlier the same day, for the two asterisks sitting
+on the other side of the colon.
+
+Three shapes of the same header have now cost three rounds between them. The lesson is not that the
+parser needs one more case -- it is that **every syntactic requirement on the model is a place the run
+can die**, and the cheap direction is to accept what models write rather than to keep explaining.
+
+### The refusal nobody heard
+
+Run 24's survey made 280 tool calls against a budget of 60. The flow guard refused 220 of them. The
+model never saw a single one of those refusals.
+
+Both PreToolUse hooks run on every call, and both refuse by printing
+`permissionDecision: deny` with a reason. When both refuse the same call, **only one reason reaches
+the model, and it is not the first hook's.** The survey read the context guard's off-switch message
+256 times -- and answered it by rewriting the command, once as `'(''?'':''t''o''u''c''h''`, trying to
+find a spelling that would slip past a rule that was not matching spellings.
+
+This is measurable across every run in the archive, by counting how many times the budget message
+appears in a subagent's transcript:
+
+| runs | flow guard position | budget refusals delivered |
+|------|--------------------|---------------------------|
+| r7, r10 | second | 194, 246 |
+| r12-r24 | first | 2, 4, 0, 1, 10, 0, 2, 0 |
+
+The order was changed to first on 2 August, in a commit whose message says it was done *so that its
+refusals are the ones the model reads*. It achieved the exact opposite and nothing noticed for four
+runs, because a refusal that is issued and discarded looks identical, from the outside, to a hook
+that never ran. The counter kept incrementing; the model kept reading.
+
+The fix is not to swap the order back. It is to stop depending on an undocumented client behaviour
+that has already changed once: **the budget is now stated by both hooks, in the same words, from one
+definition.** Whichever reason the client picks, it says the same thing.
+
+Three things follow from this that are worth more than the fix:
+
+- **A hook's decision is unobservable unless you make it observable.** There is no client log of what
+ a hook decided. `CC_FLOW_TRACE` now writes one, and it is what turned four runs of confusion into
+ one line: `tool=Bash agent=ad9685c8 flight=['survey'] spent=280 allowed=60`.
+- **A rule that repeats itself verbatim is read as an obstacle with a trick to it.** After four
+ identical refusals the guard now says something different, because 256 copies of the same sentence
+ taught a stage to look for a way around rather than a way out.
+- **A refused call is still a call.** No hook can stop a subagent; it can only make each call return
+ a refusal, and a model that answers refusals by calling again is in a loop nothing here can break.
+ A stage that works on through twenty-five refusals is now ended by the session that launched it,
+ with TaskStop permitted for that stage and no other.
+
+### The tool list handed to a subagent is advice
+
+The survey's whole job is to list files and line ranges. It is handed `Read,Grep,Glob,Bash` and, in
+run 24, spent every one of its 280 calls on Bash, testing a rule the next stage would have had to
+test for itself anyway.
+
+Under `--dangerously-skip-permissions` the client enforces no tool list at all -- this was already
+known for edits, where a read-only stage made nine successful ones, and it is equally true of Bash.
+So the survey no longer has a shell, enforced where enforcement actually happens: in the hook. An
+index needs a read, a glob and a grep.
+
+### The run died of watching itself work
+
+Run 25 ended at 86 turns with its last claims round still working: the client exited 1, the proxy
+logged `client_gone` mid-request, and nothing was collected. The cause was in the orchestrator's own
+transcript, 111 events holding 381,532 characters, of which 327,236 were 21 tool results.
+
+Ten of those results were `TaskOutput`, and each was exactly 32,164 characters:
+`<retrieval_status>timeout</retrieval_status>`, the task id, and everything the subagent had done up to
+that moment. Polling a stage copies the stage into the parent. Ten polls were 84% of a 98,304-token
+window, and the window was the thing the run needed in order to finish.
+
+The parent was polling because this harness told it to, in two places, both written to fix a livelock
+where a session said "I will wait" and then stopped: the Stop hook's wait message named the call, and
+the TaskStop refusal named it again. The livelock was real -- 84 stops in one run -- and the cure was
+worse, because a stop costs a short turn and a poll costs a third of the window.
+
+Waiting belongs in the hook, where it is a `time.sleep` in a process nobody is paying for. So the Stop
+hook now waits twelve minutes rather than ninety seconds, tells the parent to say one sentence and
+stop, and the poll is refused with its own price in the refusal. `TaskOutput` is no longer offered to a
+flow session at all: a tool that exists gets called, and a refusal still costs a turn.
+
+### Two subagents, one window, and it belonged to neither
+
+Run 25 refused two different subagents inside a minute, both at "99% of the 98,304-token window", the
+same figure to the token. Their own transcripts held 51,744 and 38,347 tokens. The number was the
+orchestrator's, whose transcript had reached 4.8 MB, and `transcript_path` in a subagent's hook payload
+is the session's, not the caller's.
+
+So a fresh subagent -- whose entire purpose is a window of its own -- was told at its first read that
+there was no room left, and both stages spent their rounds rewriting calls that could never be
+allowed. The claims stage was refused twice on evidence it was forbidden to gather.
+
+This document already recorded the fix, for a different consumer: "the payload does point at the
+delegate's transcript -- `agent_transcript_path` -- so the recorder needed no path convention after
+all, only to stop reading the parent's." The gate learned it. The context guard, written earlier and
+touched a dozen times since, kept taking the first path in the payload at face value. A lesson about a
+payload field is worth grepping for every reader of that field, not just fixing where it hurt.
+
+Where the field is missing, the id names the file: a subagent's transcript sits at
+`<session>/subagents/agent-<agent_id>.jsonl`, which the same payload gives.
+
+### A probe of a hook is not a call to it
+
+The only admissible evidence about what a hook does is to feed it a payload:
+`echo '{"tool_name":"Bash","tool_input":{"command":"touch /tmp/cc-guard-off"}}' | python3 guard.py`.
+Run 25's claims stage did this 65 times, correctly, and the guard answered each one -- which is the
+whole point, and the refusal it prints is the finding.
+
+What went unnoticed is that those payloads went through the same counters as real calls. The repeat
+ledger is keyed by whoever is identified, and a hand-written payload identifies nobody, so 65 probes
+were counted against the orchestrator: the escalation written for a session going in circles ("refused,
+the same way, for the 15th time") was delivered to a stage on the strength of its own test runs. Worse,
+once refusals began feeding the give-up counter, a probe could have marked a live stage deaf.
+
+A real call names a session and a transcript. A probe names neither, and now decides nothing but its
+own answer. The reading is deliberately loose -- a model could copy a full payload out of a transcript
+-- because this is noise reduction, not a boundary.
+
+### Do not edit the thing under review while it is being reviewed
+
+Two of run 25's remaining gaps were mine. The subject of the review was
+`scripts/cc-context-guard.py`, and I fixed the window bug above by copying the repaired file into the
+running worktree. That moved `_CALLS` from line 268 to line 334, and the stage's citations -- correct
+when it wrote them -- became `wrong-lines` refusals.
+
+Judged against the file as the stage actually read it, the same answer stands at seven findings and one
+gap. The one gap is a real catch: the stage quoted `_VERBS` as `(?:touch|mv|cp|dd|tee|install|ln|shred|
+trash)` where the file says `truncate`, in the same report as a finding *about* truncate. The gate
+caught a fabricated quote and an inconsistency the model had not noticed in itself, and would have
+passed everything else.
+
+Syncing a library the harness runs -- the parser, the gate -- is safe mid-flight and repeatedly useful.
+Syncing the file the stage is citing invalidates its work and, worse, makes the harness look wrong when
+it is not.
+
 ## 9. How we were blind — hypotheses that were wrong, and what killed them
 
 Kept deliberately, because the wrong turns cost more than the right ones.
@@ -1056,7 +1925,9 @@ Kept deliberately, because the wrong turns cost more than the right ones.
 | MLX gives a ~3.5× runtime speedup | Shared weights; the speedup is a draft model. Runtime worth <5 % | Comparing layer digests |
 | Slow turns were memory pressure | Partly cache restores, partly variant thrashing; memory peaks did not predict failures | Correlating peaks against stalls |
 | Auxiliary calls were evicting the cache | The real cause was stale `ANTHROPIC_*` in `~/.claude/settings.json` reaching every worker | A logging proxy naming the caller |
-| A smaller declared window would force compaction | Nothing consults a threshold; the reserve only fixes the status-line denominator | Reading the binary's gate logic |
+| A smaller declared window would force compaction | True against llama-server, false against Ollama, which never says a prompt is too long. The reading of the gate logic was correct and the conclusion was over-generalised | A 20,000-token ceiling producing a compaction on the next large read |
+| The client and the runner disagree about tokens by ~10 % | They agree: both count four characters to a token. That is the wrong number for source, JSON and diffs, which run 2.76-3.21. Believed three times, and fatal all three | Twelve transcripts through llama-server's `/tokenize` |
+| An overflow is a fatal error | It is a recoverable one, if it arrives as a 400 saying the prompt is too long. Wrapped as a 502, the client resends the same over-sized request forever | Three byte-identical 133,902-token requests |
 | Long quotes caused the edit failures | 47 edits, 0 failures, including 82-line quotes | The probe, in both arms |
 | A 5-minute unload was a keep-alive misconfiguration | The messages path ignores body `keep_alive` entirely | Watching the expiry reset each turn |
 | A second conversation destroys the first one's prefix cache | It survives, until the trie's paged-out snapshots exceed a budget; then the older is discarded whole | A → B → A at 2.4k (`matched=2371`) and at 55k (`matched=13`) |

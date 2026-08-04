@@ -48,7 +48,12 @@ class Contract:
 
     adapter: str
     summary: str
-    required_evidence: tuple[str, ...] = (FILE_QUOTE,)
+    # Each element is either a kind that must appear, or a tuple of kinds of which one must. The
+    # group exists because a claim about what code *does* is better proved by running it than by
+    # quoting it: run 21 reviewed a rule whose whole job is to refuse things, established its
+    # findings by invoking the hook and reporting what it printed, and was refused in all four of
+    # its rounds for citing no file quote -- while every other claim in two of those rounds held.
+    required_evidence: tuple[str | tuple[str, ...], ...] = (FILE_QUOTE,)
     # Commands the session must actually have run -- not described, run. 0 means the task type is
     # legitimately read-only (a review of code that does not execute).
     min_probes: int = 0
@@ -61,9 +66,21 @@ class Contract:
     high_severity_needs_falsification: bool = True
     # Keeps the refusal finite. A gate that lists forty gaps is a gate nobody reads, and at ~12
     # tok/s the reading is charged to the session.
-    claim_cap: int = 25
+    # Twelve, because the cap is what stops an enumeration rather than what trims a long report. A
+    # stage that found one class of bypass wrote 188 numbered variants of it, was cut off mid-word at
+    # 16,384 tokens with nothing delivered, and had misspelt its own identifier by the 180th. Set at
+    # 25 the cap said nothing until the answer was already too long to arrive.
+    claim_cap: int = 12
     # Some task types are only meaningful as a comparison: an ops claim needs a before and an after.
     min_measurements: int = 0
+    # Whether the session must show the same command failing and then passing. Only an adapter whose
+    # task is to change behaviour can ask for this, and for those it is the whole point: a claim that
+    # a change works is the one claim the code it changed cannot support.
+    needs_red_green: bool = False
+    # Whether the answer must name, in advance, a command that will fail and the output it will
+    # print when it does. Only a planning adapter asks for this; the stage that acts on the plan is
+    # then held to the prediction rather than to whatever failure it happens to produce.
+    needs_prediction: bool = False
     notes: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
@@ -75,7 +92,7 @@ ADAPTERS: dict[str, Contract] = {
     "review": Contract(
         adapter="review",
         summary="Claims about defects in code that already exists.",
-        required_evidence=(FILE_QUOTE,),
+        required_evidence=((FILE_QUOTE, COMMAND_RESULT),),
         min_probes=0,
         defects_only=True,
         high_severity_needs_falsification=True,
@@ -87,6 +104,14 @@ ADAPTERS: dict[str, Contract] = {
                "A high-severity defect needs a probe that reproduces it, or it is not high.",
                "A claim that names no wrong behaviour is not a defect. That a design would be "
                "awkward to extend, quoted from a signature, is an opinion; leave it out.",
+               # Run 22's four findings all passed the gate and all read the same way: a pattern
+               # was shown not to match a thing. Every one was true, and a reader still had to
+               # work out for himself whether any of them mattered, which is the work he asked
+               # for. A mismatch is the evidence; the sentence has to say what it costs.
+               "Say the finding as what goes wrong, then what makes it go wrong: not `_VERBS does "
+               "not match node` but `a stage can create the off switch with node, because _VERBS "
+               "does not match it`. If you cannot finish that sentence, the mismatch is harmless "
+               "and does not belong in the answer.",
                "No defect found is a legal and complete answer."),
     ),
     "debug": Contract(
@@ -116,6 +141,46 @@ ADAPTERS: dict[str, Contract] = {
         notes=("Cite real log lines, not recalled ones.",
                "A performance claim needs a before and an after.",
                "Do not cite decode speed for a cost that prefill dominates."),
+    ),
+    "change-plan": Contract(
+        adapter="change-plan",
+        summary="Where a change goes, and the failing run it commits to in advance.",
+        required_evidence=(FILE_QUOTE,),
+        min_probes=0,
+        defects_only=False,
+        high_severity_needs_falsification=False,
+        needs_prediction=True,
+        # The first implement run went wrong here and nowhere else. The plan proposed a test that
+        # asserted the behaviour as it already was, the stages below it executed that faithfully,
+        # and the result was a red/green pair that could not have come out any other way. A plan
+        # that has to name the number it expects to see cannot propose that test.
+        notes=("Name the file and lines the behaviour lives in, and quote them.",
+               "Predict the failing run: the exact command, and a distinctive string its output "
+               "will contain while the defect is present -- a wrong value, not a stack trace.",
+               "A test that would pass both before and after the change is not a test of it.",
+               "Write no code and change nothing; the next stage does that."),
+    ),
+    "implement": Contract(
+        adapter="implement",
+        summary="Claims that a change was made and that it works.",
+        # No file_quote. Every other adapter reasons about code someone else wrote, where a quote is
+        # a fact about the world; here the session wrote the lines it would be quoting, so a quote
+        # says only that it can read back its own diff. The evidence that a change works has to come
+        # from something that did not take instructions from the model: a command's exit status.
+        required_evidence=(COMMAND_RESULT,),
+        # Three, and they are named: the failing test, the same test passing, and the suite that
+        # says nothing else broke. Fewer cannot distinguish a fix from a deletion.
+        min_probes=3,
+        # The red/green pair is a falsification -- a stronger one than a sentence about a command,
+        # since the gate reads both outcomes out of the transcript itself.
+        high_severity_needs_falsification=False,
+        needs_red_green=True,
+        notes=("Run the test that fails before the change, and show what it printed.",
+               "Run the same command after, unchanged, and show it passing.",
+               "Run the suite around it and cite its counts; a fix that breaks nine others is not "
+               "a fix.",
+               "Quoting the code you just wrote proves that you wrote it and nothing else.",
+               "Whatever you did not run is UNKNOWN, which is a legal answer here too."),
     ),
     "bench-audit": Contract(
         adapter="bench-audit",
@@ -194,8 +259,18 @@ def load_contract(session_id: str, root: str = ".") -> Contract | None:
     raw = {k: v for k, v in raw.items() if k in known}
     for key in ("required_evidence", "notes"):
         if key in raw:
-            raw[key] = tuple(raw[key])
+            raw[key] = tuple(tuple(v) if isinstance(v, list) else v for v in raw[key])
     return Contract(**raw)
+
+
+def wants(contract: Contract) -> list[tuple[str, ...]]:
+    """The evidence requirements as groups: each group is satisfied by any one kind in it."""
+    return [tuple(req) if isinstance(req, (tuple, list)) else (req,)
+            for req in contract.required_evidence]
+
+
+def kinds_named(group: tuple[str, ...]) -> str:
+    return " or ".join(group)
 
 
 def contract_for(adapter: str) -> Contract:
@@ -239,10 +314,10 @@ def load_claims(path: str | os.PathLike[str]) -> list[Claim]:
 
 # The block form the model actually produces when refused. Kept in step with cc_verify's parser,
 # which owns the regexes so there is one definition of a well-formed claim.
-def claims_from_text(text: str) -> tuple[list[Claim], list[str]]:
+def claims_from_text(text: str, root: str = "") -> tuple[list[Claim], list[str]]:
     import cc_verify
 
-    parsed, unknowns = cc_verify.parse_ledger(text)
+    parsed, unknowns = cc_verify.parse_ledger(text, root)
     claims: list[Claim] = []
     for i, c in enumerate(parsed, 1):
         ev: list[Evidence] = []
@@ -289,16 +364,52 @@ def contract_markdown(contract: Contract) -> str:
         "EVIDENCE: <path>:<first_line>-<last_line>",
         "QUOTE:",
         "<the exact lines, copied from the file as you read it>",
+        "",
+        # A schema of angle brackets was all this said, and stages filled it in eight different
+        # ways -- "line 212 of guard.py", "guard.py, line 208: \"...\"", the quote in the EVIDENCE
+        # sentence, the quote in a file, the whole ledger in a file with prose here. Each was
+        # correct work refused on form. A filled-in example is copied; a schema is paraphrased.
+        "Filled in, it looks exactly like this:",
+        "",
+        "CLAIM: The long-sleep rule inspects only Bash commands.",
+        "EVIDENCE: scripts/cc-context-guard.py:213-213",
+        "QUOTE:",
+        '    if tool == "Bash" and any(n > args.max_sleep for n in naps):',
+        "",
+        "The path carries a colon before its line numbers. The quote goes under its own QUOTE "
+        "header -- not inside the EVIDENCE sentence, not in a file you write, and never described "
+        "in prose. Begin with the first CLAIM: a sentence about what you are going to do is not an "
+        "answer, and the gate will read it as one.",
+        "",
+        # The cap was enforced and never stated, which is the one thing this contract exists to
+        # prevent. A stage that found a class of bypass wrote 188 numbered variants of it and was cut
+        # off mid-word with nothing delivered; refusing that against a limit it was never told would
+        # have been the gate's fault, not its own.
+        "At most %d claims. Where a rule misses a whole class of things, that is one claim, stated "
+        "once, with the clearest instances under it -- not one claim per instance." % contract.claim_cap,
     ]
     extra = {
         COMMAND_RESULT: ("EVIDENCE: command: <the command you ran> -> <text it printed>",),
         ABSENCE: ("EVIDENCE: absence: <pattern that must not be found> in <glob>",),
         LOG_MATCH: ("EVIDENCE: log: <path> ~ <regex that matches a real line>",),
     }
-    wanted = [form for kind in contract.required_evidence for form in extra.get(kind, ())]
+    # Only a requirement that admits one kind can be stated as a thing the answer must contain. A
+    # group is an alternative, and is described below as one.
+    singles = [kind for group in wants(contract) if len(group) == 1 for kind in group]
+    wanted = [form for kind in singles for form in extra.get(kind, ())]
     if wanted:
         lines += ["", "This task also needs evidence of these kinds, one per EVIDENCE line:"]
         lines += wanted
+    if COMMAND_RESULT not in singles:
+        # A stage established seven findings by running the guard and reporting what it printed,
+        # and had no admissible way to say so: the command form was shown only to adapters that
+        # require it. A claim about what the code does is checked against the commands this session
+        # actually ran, which is evidence, so the form is always offered.
+        lines += ["", "A claim about what the code does, rather than what it says, may cite the run "
+                  "instead: " + extra[COMMAND_RESULT][0] + " -- checked against the commands you "
+                  "actually ran in this session. Both halves are needed. Eight citations in one "
+                  "round named a command and stopped there, which asserts nothing that can be "
+                  "checked and is refused: say what it printed, or that it printed nothing."]
     if contract.min_probes:
         lines.append("")
         lines.append("You must actually run at least %d command(s); describing one does not count."
@@ -306,6 +417,12 @@ def contract_markdown(contract: Contract) -> str:
     if contract.min_measurements:
         lines.append("At least %d measurements are required, so that a before and an after exist."
                      % contract.min_measurements)
+    if contract.needs_prediction:
+        lines += ["", "Commit to the failing run before you write anything, on its own line:",
+                  "PREDICT: command: <the exact command> -> <a string its output will contain "
+                  "while the defect is there>",
+                  "The string must be one the run cannot print once the defect is gone. A value "
+                  "that is wrong qualifies; 'FAILED' or a stack trace does not."]
     if contract.high_severity_needs_falsification:
         lines += ["", "For a claim you would call high severity, add both lines:",
                   "SEVERITY: high",

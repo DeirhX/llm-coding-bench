@@ -40,6 +40,7 @@ import argparse
 import http.server
 import json
 import os
+import re
 import socketserver
 import sys
 import threading
@@ -50,8 +51,24 @@ import uuid
 from typing import Any, Iterator
 
 DEFAULT_UPSTREAM = "http://127.0.0.1:8080/v1/chat/completions"
-STOP_REASON = {"stop": "end_turn", "length": "max_tokens", "tool_calls": "tool_use",
+# `length` is deliberately not mapped to `max_tokens`. Handed that, Claude Code ends the session
+# with "Claude's response exceeded the 32000 output token maximum" and there is no way back: the
+# flow it was in the middle of is simply over. A cut answer is a turn like any other, so it is
+# reported as one, with a note in place of the truncated tail.
+STOP_REASON = {"stop": "end_turn", "length": "end_turn", "tool_calls": "tool_use",
                "function_call": "tool_use", "content_filter": "end_turn"}
+
+CUT_NOTE = ("\n\n[This answer was cut off at %d tokens by the proxy, so what is above is "
+            "incomplete and any tool call it was about to make was dropped. Do not repeat it from "
+            "the start: write the short version now -- for a ledger, the CLAIM/EVIDENCE/QUOTE "
+            "blocks and nothing else, as the reply itself. Do not put it in a tool call: a whole "
+            "ledger inside one argument is what filled these tokens, writing it to a file is "
+            "refused, and nothing read from a file is judged.]")
+
+
+def _dropped(name: str, size: int) -> None:
+    """Note a tool call discarded for being cut off, so the next investigation is one grep long."""
+    print("dropped a cut %s call carrying %d chars of arguments" % (name, size), flush=True)
 
 
 # --- request translation ---------------------------------------------------------------------
@@ -65,7 +82,64 @@ def _text_of(content: Any) -> str:
     return ""
 
 
-def to_openai(body: dict) -> dict:
+# The most a single answer may be. The client asks for 32,000 and a stage took 24,847 of them in
+# one response at 334 t/s -- three times this model's measured rate, which is what near-total
+# speculative acceptance looks like when the output has gone round in a circle. Nothing else bounds
+# it: the parent was blocked on the report, the gate only sees answers that finish, and the GPU was
+# busy the whole time. A ledger that needs more than this is not a ledger.
+# Raised from 8,192 after two live runs were cut mid-ledger: this model writes its reasoning into
+# the same budget, and a ten-claim ledger with quotes ran past it twice. Still far under the client's
+# 32,000, which is the number that matters -- a cut answer is recoverable, but only because the cut
+# is reported as an ordinary turn rather than as the max_tokens stop that ends a session.
+MAX_OUTPUT = 16384
+
+
+# Repetition sampling, sent with every request because the failure it addresses is not occasional.
+# A claims stage asked to write its ledger spent 15,255 tokens of reasoning redrafting the same
+# ledger -- 787 lines, 211 of them distinct, "- Quote: lines 226-250" thirty times -- hit the output
+# ceiling, had its tool call dropped, and died silently. Run 9 did that 31 times. DRY penalises a
+# continuation that would repeat a sequence already produced, which is exactly that loop, and the
+# allowed length is long enough that repeated code and repeated citations are still cheap.
+DRY = {"dry_multiplier": 0.8, "dry_base": 1.75, "dry_allowed_length": 12, "dry_penalty_last_n": -1}
+
+# Turns where the harness has already told the model what to write. The gate's refusal arrives with
+# the ledger and the list of what is wrong with it, and the cut note asks for the short version --
+# in both cases the thinking has been done and the work left is transcription. Those are exactly the
+# turns that looped: one spent 15,255 reasoning tokens redrafting a ledger it had already written.
+# Only strings this harness itself emits are matched, so nothing the model says can turn it off.
+NO_THINKING = ("This answer is not accepted yet", "cut off at", "Write the ledger now",
+               "--- the refused ledger ---")
+
+# The survey stance, which is the one stage that is transcription from its first turn: list the files
+# and line ranges that bear on the question, draw no conclusions, name no defects. Run 23's survey
+# spent the whole 16,384-token ceiling on turn one and delivered the proxy's cut note as its map of
+# the territory. Matched anywhere in the conversation rather than in the last two messages, because
+# the stance is stated once and the stage is an index for the whole of its life.
+INDEXING = "Map the territory and stop"
+
+# How many turns of reasoning a stage gets before it is asked to work without it. The loop does not
+# appear at the start of a stage, when there is little in the context and something real to work
+# out; it appears deep in one, where the model has everything it needs and reasons in circles about
+# how to say it. Raising the ceiling to 32,768 established that this is not a ceiling problem: the
+# client asks for 32,000 and the model filled them, so the cut moved and the waste doubled.
+THINKING_TURNS = 8
+
+
+def _flat(message: dict) -> str:
+    content = message.get("content")
+    return (content if isinstance(content, str) else json.dumps(content)) or ""
+
+
+def _transcribing(messages: list) -> bool:
+    if any(INDEXING in _flat(m) for m in messages):
+        return True
+    for message in messages[-2:]:
+        if any(mark in _flat(message) for mark in NO_THINKING):
+            return True
+    return sum(1 for m in messages if m.get("role") == "assistant") > THINKING_TURNS
+
+
+def to_openai(body: dict, ceiling: int = 0, dry: bool = True) -> dict:
     """An Anthropic Messages request as OpenAI chat completions."""
     messages: list[dict] = []
     system = _text_of(body.get("system"))
@@ -122,6 +196,10 @@ def to_openai(body: dict) -> dict:
                      ("top_p", "top_p"), ("stop_sequences", "stop")):
         if body.get(src) is not None:
             out[dst] = body[src]
+    limit = ceiling or MAX_OUTPUT
+    if limit:
+        asked = out.get("max_tokens")
+        out["max_tokens"] = min(int(asked), limit) if isinstance(asked, int) else limit
     if body.get("tools"):
         out["tools"] = [{"type": "function",
                          "function": {"name": t.get("name", ""),
@@ -137,10 +215,20 @@ def to_openai(body: dict) -> dict:
         out["tool_choice"] = "none"
     if body.get("stream"):
         out["stream_options"] = {"include_usage": True}
+    if dry:
+        # Unknown fields are ignored by servers that do not sample this way, so this costs nothing
+        # against an endpoint that is not llama.cpp.
+        out.update(DRY)
+    if _transcribing(messages):
+        out["chat_template_kwargs"] = {"enable_thinking": False}
     return out
 
 
 # --- response translation --------------------------------------------------------------------
+
+def usage_of(reply: dict) -> dict:
+    return reply.get("usage") or {}
+
 
 def to_anthropic(reply: dict, model: str) -> dict:
     """A non-streamed OpenAI completion as an Anthropic message."""
@@ -156,14 +244,29 @@ def to_anthropic(reply: dict, model: str) -> dict:
         blocks.append({"type": "thinking", "thinking": thinking})
     if message.get("content"):
         blocks.append({"type": "text", "text": message["content"]})
+    cut = (choice.get("finish_reason") or "") == "length"
     for call in message.get("tool_calls") or []:
         fn = call.get("function") or {}
         try:
             args = json.loads(fn.get("arguments") or "{}")
         except ValueError:
+            # Unparseable because the answer was cut: a call in half is not a call. Passed through,
+            # the client answers "ReportFindings was called with input that could not be parsed as
+            # JSON" and the model sends the same oversized call again. Unparseable on a response
+            # that finished normally is a fact about the model and is still surfaced.
+            if cut:
+                # Say what was thrown away. A stage once spent 16,384 tokens on one call's arguments
+                # and left nothing but this note on record; working out that the tokens had gone into
+                # a tool call rather than into reasoning took an hour of elimination, because the only
+                # party that saw the call discarded it in silence.
+                _dropped(fn.get("name", "?"), len(fn.get("arguments") or ""))
+                continue
             args = {"_unparsed": fn.get("arguments", "")}
         blocks.append({"type": "tool_use", "id": call.get("id") or "toolu_%s" % uuid.uuid4().hex[:16],
                        "name": fn.get("name", ""), "input": args})
+    if cut:
+        blocks.append({"type": "text",
+                       "text": CUT_NOTE % (usage_of(reply).get("completion_tokens", 0))})
     usage = reply.get("usage") or {}
     return {
         "id": reply.get("id") or "msg_%s" % uuid.uuid4().hex[:24],
@@ -180,7 +283,7 @@ def _sse(event: str, data: dict) -> bytes:
     return ("event: %s\ndata: %s\n\n" % (event, json.dumps(data))).encode()
 
 
-def stream_anthropic(chunks: Iterator[dict], model: str) -> Iterator[bytes]:
+def stream_anthropic(chunks: Iterator[dict], model: str, seen: dict | None = None) -> Iterator[bytes]:
     """Re-emit an OpenAI delta stream in Anthropic's event grammar.
 
     The client concatenates `input_json_delta` fragments without re-parsing, so a tool call's
@@ -195,6 +298,7 @@ def stream_anthropic(chunks: Iterator[dict], model: str) -> Iterator[bytes]:
     index = -1
     open_kind: str | None = None
     tool_slot: dict[int, int] = {}          # upstream tool index -> our block index
+    pending: dict[int, dict] = {}           # upstream tool index -> the call being assembled
     finish, usage = "stop", {}
 
     def close() -> Iterator[bytes]:
@@ -205,6 +309,12 @@ def stream_anthropic(chunks: Iterator[dict], model: str) -> Iterator[bytes]:
 
     for chunk in chunks:
         usage = chunk.get("usage") or usage
+        if usage and seen is not None:
+            # Handed back to the caller so the completed request can be logged with the size of the
+            # prompt the tokeniser actually saw. Runs 18, 20 and 25 each died of a prompt too long
+            # for the window, and in every case the only record of how close the last few turns had
+            # come was the error that ended them.
+            seen.update(usage)
         choice = (chunk.get("choices") or [{}])[0]
         finish = choice.get("finish_reason") or finish
         delta = choice.get("delta") or {}
@@ -236,25 +346,54 @@ def stream_anthropic(chunks: Iterator[dict], model: str) -> Iterator[bytes]:
         for call in delta.get("tool_calls") or []:
             slot = call.get("index", 0)
             fn = call.get("function") or {}
-            if slot not in tool_slot:
-                yield from close()
-                index += 1
-                open_kind = "tool"
-                tool_slot[slot] = index
-                yield _sse("content_block_start", {
-                    "type": "content_block_start", "index": index,
-                    "content_block": {"type": "tool_use",
-                                      "id": call.get("id") or "toolu_%s" % uuid.uuid4().hex[:16],
-                                      "name": fn.get("name", ""), "input": {}}})
-            if fn.get("arguments"):
-                yield _sse("content_block_delta", {
-                    "type": "content_block_delta", "index": tool_slot[slot],
-                    "delta": {"type": "input_json_delta", "partial_json": fn["arguments"]}})
+            held = pending.setdefault(slot, {"id": "", "name": "", "args": ""})
+            held["id"] = held["id"] or call.get("id") or "toolu_%s" % uuid.uuid4().hex[:16]
+            held["name"] = held["name"] or fn.get("name", "")
+            held["args"] += fn.get("arguments") or ""
 
     yield from close()
+
+    # Held back rather than streamed, so that a call the answer was cut in the middle of can be
+    # dropped instead of arriving as half a JSON object. Streamed straight through, one became
+    # `ReportFindings was called with input that could not be parsed as JSON` and the model sent the
+    # same oversized call again. The client concatenates argument fragments without parsing them, so
+    # one delta carrying the whole string is as good as many carrying pieces.
+    dropped = False
+    for slot in sorted(pending):
+        held = pending[slot]
+        try:
+            json.loads(held["args"] or "{}")
+        except ValueError:
+            dropped = True
+            _dropped(held.get("name") or "?", len(held.get("args") or ""))
+            continue
+        index += 1
+        tool_slot[slot] = index
+        yield _sse("content_block_start", {
+            "type": "content_block_start", "index": index,
+            "content_block": {"type": "tool_use", "id": held["id"],
+                              "name": held["name"], "input": {}}})
+        if held["args"]:
+            yield _sse("content_block_delta", {
+                "type": "content_block_delta", "index": index,
+                "delta": {"type": "input_json_delta", "partial_json": held["args"]}})
+        yield _sse("content_block_stop", {"type": "content_block_stop", "index": index})
+
+    if finish == "length" or dropped:
+        index += 1
+        yield _sse("content_block_start", {"type": "content_block_start", "index": index,
+                                           "content_block": {"type": "text", "text": ""}})
+        yield _sse("content_block_delta", {
+            "type": "content_block_delta", "index": index,
+            "delta": {"type": "text_delta",
+                      "text": CUT_NOTE % usage.get("completion_tokens", 0)}})
+        yield _sse("content_block_stop", {"type": "content_block_stop", "index": index})
+
+    settled = STOP_REASON.get(finish, "end_turn")
+    if tool_slot and settled == "end_turn" and not dropped:
+        settled = "tool_use"        # a complete call still has to be run, cut answer or not
     yield _sse("message_delta", {"type": "message_delta",
-                                 "delta": {"stop_reason": STOP_REASON.get(finish, "end_turn"),
-                                           "stop_sequence": None},
+                                 "delta": {"stop_reason": settled, "stop_sequence": None},
                                  "usage": {"output_tokens": usage.get("completion_tokens", 0)}})
     yield _sse("message_stop", {"type": "message_stop"})
 
@@ -273,11 +412,42 @@ def iter_openai_sse(stream) -> Iterator[dict]:
             continue
 
 
+# llama-server's way of saying the prompt does not fit, and Anthropic's. They are not the same error
+# in the client's eyes, and the difference is the difference between a run that recovers and a run
+# that dies: Claude Code's reactive compaction fires on an HTTP 400 whose message says the prompt is
+# too long and whose details carry the two token counts. Anything else -- a 502, an api_error -- is
+# fatal, and the client's response to fatal is to resend the same over-sized request. Run 25 sent
+# 133,902 tokens into a 131,072-token window three times, unchanged, and then the session ended.
+_TOO_LONG = re.compile(r"exceed_context_size|exceeds the available context size|"
+                       r"context size.*exceed|prompt is too long", re.I)
+
+
+def overflow_of(detail: str) -> tuple[int, int] | None:
+    """The prompt size and the window, if this upstream error is the prompt not fitting."""
+    if not _TOO_LONG.search(detail or ""):
+        return None
+    try:
+        said = json.loads(detail).get("error") or {}
+    except ValueError:
+        said = {}
+    asked = said.get("n_prompt_tokens") or 0
+    window = said.get("n_ctx") or 0
+    if not (asked and window):
+        # The counts are what the client's recovery path reads, so dig them out of the prose when
+        # they are not fielded: "request (133902 tokens) exceeds the available context size (131072".
+        numbers = [int(n) for n in re.findall(r"\b(\d{4,7})\b", detail)]
+        if len(numbers) < 2:
+            return None
+        asked, window = max(numbers), min(numbers)
+    return int(asked), int(window)
+
+
 # --- server ----------------------------------------------------------------------------------
 
 class Proxy(http.server.BaseHTTPRequestHandler):
     upstream = DEFAULT_UPSTREAM
-    force_model = ""      # rewrite every request to this model, whatever the client asked for
+    force_model = ""     # rewrite every request to this model, whatever the client asked for
+    ceiling = 0          # and cap what a single answer may cost, whatever the client asked for
     logfile: Any = None
     lock = threading.Lock()
     protocol_version = "HTTP/1.1"
@@ -295,7 +465,14 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:                   # noqa: N802
         if self.path.rstrip("/").endswith("/models"):
-            self._json(200, {"data": [], "object": "list"})
+            # An empty list here is not "no opinion", it is "no such model": the client refuses to
+            # start with `the selected model may not exist`, which reads like a configuration
+            # problem miles from the actual cause. Advertising the model we force every request to
+            # is both truthful and the only answer that lets a session begin.
+            named = self.force_model or "local"
+            self._json(200, {"object": "list", "has_more": False,
+                             "data": [{"type": "model", "id": named, "display_name": named,
+                                       "created_at": "2020-01-01T00:00:00Z"}]})
         else:
             self._json(404, {"error": "not found"})
 
@@ -330,7 +507,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                   tools=len(body.get("tools") or []))
 
         request = urllib.request.Request(
-            self.upstream, data=json.dumps(to_openai(body)).encode(),
+            self.upstream, data=json.dumps(to_openai(body, self.ceiling)).encode(),
             headers={"content-type": "application/json",
                      "authorization": self.headers.get("authorization", "Bearer local")})
         try:
@@ -338,6 +515,18 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:600]
             self.note(event="upstream_error", status=exc.code, detail=detail)
+            overflow = overflow_of(detail)
+            if overflow:
+                asked, window = overflow
+                # Said the way the client can act on: its own wording, its own status, and the two
+                # counts where its recovery path looks for them. Answering "api_error" instead is
+                # what turned three overflows into three dead sessions.
+                self.note(event="too_long", asked=asked, window=window)
+                self._json(400, {"type": "error", "error": {
+                    "type": "invalid_request_error",
+                    "message": "prompt is too long: %d tokens > %d maximum" % (asked, window),
+                    "details": {"prompt_tokens": asked, "max_tokens": window}}})
+                return
             self._json(502, {"type": "error", "error": {"type": "api_error", "message": detail}})
             return
         except OSError as exc:
@@ -352,15 +541,19 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             self.send_header("connection", "close")
             self.end_headers()
             sent = 0
+            counted: dict = {}
             try:
-                for piece in stream_anthropic(iter_openai_sse(reply), body.get("model", "")):
+                for piece in stream_anthropic(iter_openai_sse(reply), body.get("model", ""),
+                                              counted):
                     self.wfile.write(piece)
                     sent += len(piece)
             except (BrokenPipeError, ConnectionResetError):
                 self.note(event="client_gone", ms=int((time.time() - started) * 1000))
                 return
             self.note(event="done", stream=True, bytes=sent,
-                      ms=int((time.time() - started) * 1000))
+                      ms=int((time.time() - started) * 1000),
+                      input_tokens=counted.get("prompt_tokens", 0),
+                      output_tokens=counted.get("completion_tokens", 0))
             self.close_connection = True
             return
 
@@ -385,9 +578,11 @@ class Threaded(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 
-def serve(port: int, upstream: str, log_path: str, force_model: str = "") -> None:
+def serve(port: int, upstream: str, log_path: str, force_model: str = "",
+          ceiling: int = MAX_OUTPUT) -> None:
     Proxy.upstream = upstream
     Proxy.force_model = force_model
+    Proxy.ceiling = ceiling
     Proxy.logfile = open(os.path.expanduser(log_path), "a", encoding="utf-8") if log_path else None
     try:
         server = Threaded(("127.0.0.1", port), Proxy)
@@ -399,6 +594,17 @@ def serve(port: int, upstream: str, log_path: str, force_model: str = "") -> Non
                          "lsof -nP -iTCP:%d -sTCP:LISTEN" % (port, exc, port))
     print("anthropic -> openai on 127.0.0.1:%d, upstream %s%s"
           % (port, upstream, ", forcing model %s" % force_model if force_model else ""), flush=True)
+    # Which code is answering, written where the operator already looks. `screen -X quit` kills the
+    # window and orphans the python inside it; the orphan keeps the port, the replacement dies on
+    # bind inside a screen that no longer exists, and every request goes on reaching the old build,
+    # answering exactly as the new one would. An afternoon was spent on a patch that was never live.
+    if Proxy.logfile:
+        Proxy.logfile.write(json.dumps({
+            "event": "serving", "pid": os.getpid(), "port": port,
+            "source": os.path.abspath(__file__),
+            "edited": int(os.path.getmtime(os.path.abspath(__file__))),
+            "t": time.time()}) + "\n")
+        Proxy.logfile.flush()
     server.serve_forever()
 
 
@@ -407,11 +613,13 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=11435)
     ap.add_argument("--upstream", default=DEFAULT_UPSTREAM)
     ap.add_argument("--log", default="/tmp/anthropic-proxy.jsonl")
+    ap.add_argument("--max-output", type=int, default=MAX_OUTPUT,
+                    help="cap on tokens in one answer; 0 to pass the client's own limit through")
     ap.add_argument("--force-model", default="",
                     help="answer every request with this model, whatever the client asked for")
     args = ap.parse_args()
     try:
-        serve(args.port, args.upstream, args.log, args.force_model)
+        serve(args.port, args.upstream, args.log, args.force_model, args.max_output)
     except KeyboardInterrupt:
         return 0
     return 0

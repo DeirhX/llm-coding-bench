@@ -186,10 +186,16 @@ USAGE
 # Write and Edit available so findings can be recorded before stopping. Verified against a fake
 # endpoint: a deny is honoured under --dangerously-skip-permissions and its text reaches the model
 # as the tool result. Lift it for a session with `touch /tmp/cc-guard-off`, or launch --no-guard.
+PRE_TOOL=()
+PRINT_SETTINGS=0
 GUARD=1
+LIFTABLE=0
 DEPTH=0
 DEPTH_ADAPTER="review"
+FLOWS=0
 LEAN_TOOLS=1
+# Task is how a flow's stages run, and TaskCreate/Update are how the client shows their progress,
+# so a flow session keeps them and pays the system-prompt tokens for them.
 UNUSED_TOOLS="Workflow,Agent,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskStop"
 UNUSED_TOOLS="$UNUSED_TOOLS,TaskOutput,ReportFindings,SendMessage,CronCreate"
 UNUSED_TOOLS="$UNUSED_TOOLS,CronList,CronDelete,ScheduleWakeup,EnterWorktree,ExitWorktree"
@@ -213,6 +219,8 @@ while [[ $# -gt 0 ]]; do
     --edit-rule) USE_EDIT_RULE="on"; shift ;;
     --no-edit-rule) USE_EDIT_RULE="off"; shift ;;
     --yolo|-y) YOLO=1; shift ;;
+    --flows) FLOWS=1; DEPTH=1; shift ;;
+    --no-flows) FLOWS=0; shift ;;
     --lean-tools) LEAN_TOOLS=1; shift ;;
     --all-tools) LEAN_TOOLS=0; shift ;;
     --guard) GUARD=1; shift ;;
@@ -228,6 +236,11 @@ while [[ $# -gt 0 ]]; do
       ollama list 2>/dev/null | awk 'NR==1 || /^gemma4-(31b|26b)-(coding|mtp|mlx)-|^gemma4-coding:/ { print "  " $0 }'
       exit 0 ;;
     -h|--help) usage; exit 0 ;;
+    --liftable) LIFTABLE=1; shift ;;
+    # Prints the settings this launch would use and exits. The hooks are assembled here at
+    # runtime, so reading the source is not the same as knowing what gets registered: three
+    # fixes in a row went in behind matchers that never routed the tool they were about.
+    --print-settings) PRINT_SETTINGS=1; shift ;;
     --) shift; CLAUDE_ARGS=("$@"); break ;;
     *) CLAUDE_ARGS+=("$1"); shift ;;
   esac
@@ -384,9 +397,21 @@ if (( LEAN_TOOLS )); then
 else
   CTX_RESERVE=20480
 fi
-CTX_DECLARED=$(( CTX_TOKENS > CTX_RESERVE * 2 ? CTX_TOKENS - CTX_RESERVE : CTX_TOKENS ))
-echo "window: $CTX_TOKENS tokens; Claude Code told $CTX_DECLARED, leaving room for the tools"
-echo "        and framing it never counts, so the status-line percentage is honest"
+# A fixed reserve covers the framing the client never counts. It does not cover the second error,
+# which is far larger than it was thought to be: the client counts four characters to a token, which
+# is the rule for prose, and a coding session carries source, JSON, paths, diffs and command output.
+# Twelve real transcripts put through llama-server's own tokeniser came back at 2.76 to 3.21
+# characters per token, so the client's estimate can be 1.45x low -- not the 10% written here before.
+#
+# Three quarters does not survive that: 98,304 declared, believed, is 142,000 tokens offered to a
+# 131,072-token window, and runs 18, 20 and 25 all died a few thousand tokens past the end. 65%
+# survives the worst measured ratio with room to spare even if compaction never fires. So the ceiling
+# is whichever is lower, the window less the framing or 65% of it.
+CTX_FRAMED=$(( CTX_TOKENS > CTX_RESERVE * 2 ? CTX_TOKENS - CTX_RESERVE : CTX_TOKENS ))
+CTX_COUNTED=$(( CTX_TOKENS * 65 / 100 ))
+CTX_DECLARED=$(( CTX_FRAMED < CTX_COUNTED ? CTX_FRAMED : CTX_COUNTED ))
+echo "window: $CTX_TOKENS tokens; Claude Code told $CTX_DECLARED, leaving room for the tools and"
+echo "        framing it never counts and for the 45% it counts differently from the runner"
 if (( LEAN_TOOLS )); then
   echo "tools:  6 sent, 21 withheld (sub-agents, tasks, cron, worktrees, plan mode,"
   echo "        skills, notebooks, structured questions). Framing is 4,477 tokens a turn"
@@ -395,10 +420,25 @@ if (( LEAN_TOOLS )); then
 else
   echo "tools:  everything sent, costing 16,168 tokens of every request"
 fi
+# A survey stage ran `touch /tmp/cc-guard-off` to get past a refusal and left it there, so every
+# session started afterwards ran unguarded and nothing said so. The switch is cleared at launch and
+# the guard now refuses any tool call that would write it, which leaves it working for the person
+# here and unavailable to the model.
 if (( GUARD )); then
+  if [[ -e /tmp/cc-guard-off || -e /tmp/cc-depth-off ]]; then
+    rm -f /tmp/cc-guard-off /tmp/cc-depth-off
+    echo "note:   a stale off-switch was left in /tmp and has been cleared"
+  fi
   echo "guard:  unbounded reads over 500 lines are refused, so are re-reads of files that have"
   echo "        not changed, and past $(( CTX_TOKENS * ${CLAUDE_GEMMA_STOP_PCT:-80} / 100 )) tokens (${CLAUDE_GEMMA_STOP_PCT:-80}%) anything bulky is refused with"
-  echo "        an instruction to record findings and stop. touch /tmp/cc-guard-off to lift."
+  if (( LIFTABLE )); then
+    echo "        an instruction to record findings and stop. touch /tmp/cc-guard-off to lift it"
+    echo "        mid-session, which this session honours because you asked for --liftable."
+  else
+    echo "        an instruction to record findings and stop. Relaunch --liftable if you want"
+    echo "        touch /tmp/cc-guard-off to work: without it the file is ignored, because a"
+    echo "        model can make files and one did."
+  fi
 else
   echo "guard:  off. Unbounded reads and window overruns are permitted; a single task can"
   echo "        fill the window, and nothing here compacts by itself."
@@ -440,7 +480,19 @@ echo "          python3 .cursor/skills/ollama-watch/scripts/state.py while you w
 # prompts are currently the only thing standing between an unverified disposition and your
 # working tree, and --yolo removes them.
 TOOL_ARGS=()
-(( LEAN_TOOLS )) && TOOL_ARGS=(--disallowed-tools "$UNUSED_TOOLS")
+if (( LEAN_TOOLS )); then
+  KEPT="$UNUSED_TOOLS"
+  # A flow runs its stages as subagents, so the tools that launch one and show its progress are not
+  # unused here whatever the lean list says.
+  # TaskOutput stays out: one call copies everything a stage has done so far into the orchestrator's
+  # window -- 32,164 characters each in run 25 -- and the flow tells it the verdict anyway. A tool that
+  # is offered gets called, and the refusal costs a turn.
+  (( FLOWS )) && KEPT="${KEPT//Agent,/}" && KEPT="${KEPT//Task,/}" \
+              && KEPT="${KEPT//TaskCreate,/}" && KEPT="${KEPT//TaskUpdate,/}" \
+              && KEPT="${KEPT//TaskList,/}" && KEPT="${KEPT//TaskGet,/}" \
+              && KEPT="${KEPT//TaskStop,/}"
+  TOOL_ARGS=(--disallowed-tools "$KEPT")
+fi
 
 YOLO_ARGS=()
 if (( YOLO )); then
@@ -626,9 +678,11 @@ if (( GUARD )); then
     echo "       launch with --no-guard to proceed without it" >&2
     exit 1
   fi
-  GUARD_CMD="$GUARD_SCRIPT --window $CTX_TOKENS --framing $CTX_RESERVE"
+  # The declared window, not the real one: the client refuses to send past what it was told, so that
+  # is the ceiling a session actually hits, and it is the lower of the two.
+  GUARD_CMD="$GUARD_SCRIPT --window $CTX_DECLARED --framing $CTX_RESERVE"
   GUARD_CMD="$GUARD_CMD --stop-pct ${CLAUDE_GEMMA_STOP_PCT:-80}"
-  HOOK_EVENTS+=("\"PreToolUse\": [ { \"matcher\": \"Read|Bash|WebFetch|WebSearch\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$GUARD_CMD\" } ] } ]")
+  PRE_TOOL+=("{ \"matcher\": \"Read|Bash|WebFetch|WebSearch|Write|Edit|MultiEdit\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$GUARD_CMD\" } ] }")
 fi
 
 # The depth gate and the contract that makes it fair. Registering the gate without the contract
@@ -645,9 +699,35 @@ if (( DEPTH )); then
   fi
   HOOK_EVENTS+=("\"SessionStart\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_CONTRACT\" } ] } ]")
   HOOK_EVENTS+=("\"UserPromptSubmit\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_CONTRACT\" } ] } ]")
-  HOOK_EVENTS+=("\"Stop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\" } ] } ]")
-  HOOK_EVENTS+=("\"SubagentStop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\" } ] } ]")
+  HOOK_EVENTS+=("\"Stop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\", \"timeout\": 900 } ] } ]")
+  HOOK_EVENTS+=("\"SubagentStop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"$DEPTH_GATE\", \"timeout\": 900 } ] } ]")
 fi
+
+# The stage loop, for a session that runs its stages as subagents so you can watch them work. The
+# scripted driver owns that loop and can simply stop; here the launches are made by the model, which
+# is the thing being held to a standard, so the ordering is enforced by a hook instead: a stage is
+# admitted only if it is the next one and nothing blocking has been refused. It needs the Task tool,
+# which the lean tool list removes, so asking for flows puts it back.
+if (( FLOWS )); then
+  FLOW_GUARD="$ROOT/scripts/cc-flow-guard.py"
+  if [[ ! -x "$FLOW_GUARD" ]]; then
+    echo "error: flow guard missing or not executable: $FLOW_GUARD" >&2
+    exit 1
+  fi
+  # No matcher: while a flow is running, a tool call that does a stage's work outside a stage is
+  # refused, and that is not a question about which tool it was.
+  # First, so that its refusals are the ones the model reads. Behind the context guard, the call
+  # budget was invisible: run 12 spent 280 calls against a budget of 140 and never once saw the
+  # message telling it to stop, because a refusal from the hook ahead of it got there first.
+  PRE_TOOL=("{ \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] }" ${PRE_TOOL[@]+"${PRE_TOOL[@]}"})
+  # And afterwards, because a launch this hook permits can still be refused by the client -- which
+  # left the flow holding a stage that never existed, and refusing every retry as a duplicate.
+  HOOK_EVENTS+=("\"PostToolUse\": [ { \"matcher\": \"Task|Agent|TaskList|TaskOutput\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$FLOW_GUARD\" } ] } ]")
+fi
+
+# One PreToolUse key holding every matcher. Two keys of the same name in the same object is not two
+# hooks, it is the second one silently replacing the first.
+(( ${#PRE_TOOL} )) && HOOK_EVENTS+=("\"PreToolUse\": [ ${(j:, :)PRE_TOOL} ]")
 
 GUARD_JSON=""
 (( ${#HOOK_EVENTS} )) && GUARD_JSON="  \"hooks\": { ${(j:, :)HOOK_EVENTS} },"
@@ -679,7 +759,8 @@ SESSION_SETTINGS=$(cat <<JSON
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "$CTX_DECLARED",
     "API_TIMEOUT_MS": "${CLAUDE_GEMMA_TIMEOUT_MS:-1800000}",
-    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "${CLAUDE_GEMMA_MAX_OUTPUT:-8192}"
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "${CLAUDE_GEMMA_MAX_OUTPUT:-8192}",
+    "CC_GUARD_LIFTABLE": "$LIFTABLE"
   },
 $GUARD_JSON
   "model": "$MODEL",
@@ -690,6 +771,11 @@ $GUARD_JSON
 }
 JSON
 )
+
+if [[ "$PRINT_SETTINGS" == "1" ]]; then
+  echo "$SESSION_SETTINGS"
+  exit 0
+fi
 
 echo
 

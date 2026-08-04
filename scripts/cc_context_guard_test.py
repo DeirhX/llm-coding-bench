@@ -160,18 +160,204 @@ def main():
     print(f"  {'ok  ' if ok else 'FAIL'}  {'and its wording names no missing tool':<42} "
           f"expected answer-advice got {'it' if ok else said[:80]}")
 
+    # A stage backgrounded a test run and polled it with `sleep 180 && tail`, spending twenty
+    # minutes of a fifty-minute budget waiting for a suite that takes under three seconds.
+    for command, expected, label in (
+            ("sleep 180 && tail -20 /tmp/task.log", "deny", "a long sleep is refused"),
+            ("sleep 2 && pytest -q", "allow", "a short sleep is fine"),
+            ("pytest -q --timeout 300", "allow", "a big number that is not a sleep"),
+            # A stage reviewing this rule was denied three times for writing `sleep 180` as data.
+            ("""python3 -c "print('sleep 180')" """, "allow", "a sleep inside a quoted string"),
+            ("cat > /tmp/x.py << 'EOF'\ncheck('sleep 180')\nEOF", "allow", "a sleep in a heredoc"),
+            ("(cd /tmp && sleep 90)", "deny", "a sleep in a subshell still counts"),
+            ("pytest -q; sleep 120", "deny", "a sleep after a semicolon still counts"),
+    ):
+        got, said = run("Bash", {"command": command}, empty)
+        ok = got == expected
+        failures += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'}  {label:<42} expected {expected:<5} got {got}")
+
+    # A claims stage wrote its whole ledger to claims.jsonl and summarised it in prose, so the gate
+    # judged four cited findings as citing nothing.
+    ledger = "CLAIM: the rule is broader than its intent\nEVIDENCE: file_quote\nQUOTE: x\n"
+    got, said = run("Write", {"file_path": "/tmp/guard_test/claims.jsonl", "content": ledger}, empty)
+    ok = got == "deny" and "message you finish with" in said
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'a ledger written to a file is refused':<42} "
+          f"expected deny  got {got}")
+
+    # ...but the repo's own sources quote those headers, and an implement stage must be able to edit
+    # them.
+    source = '"""The contract."""\n\nCLAIMS = "CLAIM: ...\\nEVIDENCE: ...")\n'
+    got, said = run("Write", {"file_path": "/tmp/guard_test/cc_ledger.py", "content": source}, empty)
+    ok = got == "allow"
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'source that quotes the headers is fine':<42} "
+          f"expected allow got {got}")
+
+    got, said = run("Write", {"file_path": str(small)}, empty, ("--deny", "Write,Edit"))
+    ok = got == "deny" and "judging" in said
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'a judging stage may not write':<42} "
+          f"expected deny  got {got}")
+
+    # A parent read a 231,800-byte subagent transcript in 67 lines: roughly 58,000 tokens, waved
+    # through by a rule that counts lines.
+    fat = TMP / "transcript.jsonl"
+    fat.write_text("\n".join('{"role":"assistant","text":"%s"}' % ("x" * 4000) for _ in range(40)))
+    got, said = run("Read", {"file_path": str(fat)}, empty)
+    ok = got == "deny" and "bytes" in said
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'a few enormous lines are refused':<42} "
+          f"expected deny  got {got}")
+
+    got, _ = run("Read", {"file_path": str(fat), "offset": 1, "limit": 20}, empty)
+    ok = got == "allow"
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'a slice of it is allowed':<42} "
+          f"expected allow got {got}")
+
     OFF.touch()
+    got, _ = run("Read", {"file_path": str(big)}, empty)
+    ok = got == "deny"
+    failures += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'off-switch without the flag':<42} expected deny  got {got}")
+
+    os.environ["CC_GUARD_LIFTABLE"] = "1"
     got, _ = run("Read", {"file_path": str(big)}, empty)
     ok = got == "allow"
     failures += not ok
-    print(f"  {'ok  ' if ok else 'FAIL'}  {'off-switch present':<42} expected allow got {got}")
+    print(f"  {'ok  ' if ok else 'FAIL'}  {'off-switch in a liftable session':<42} expected allow got {got}")
+    del os.environ["CC_GUARD_LIFTABLE"]
     OFF.unlink(missing_ok=True)
 
     failures += failures_in_wording
     print(f"\n{'SELFTEST OK' if not failures else f'{failures} FAILURES'} "
-          f"({len(cases) + 2} cases)")
+          f"({len(cases) + 6} cases)")
     return 1 if failures else 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_a_switch_the_model_made_itself_does_not_lift_the_guard():
+    """The rule that matters, because the pattern rule below it can be walked around by a shell and
+    this cannot: an off-switch is honoured only in a session launched to honour it."""
+    big, _ = setup()
+    OFF.touch()
+    try:
+        assert run("Read", {"file_path": str(big)}, TMP / "none.jsonl")[0] == "deny"
+    finally:
+        OFF.unlink(missing_ok=True)
+
+
+def test_the_model_may_not_turn_the_guard_off():
+    """A survey stage ran `touch /tmp/cc-guard-off`, described it as "Temporarily disable guard for
+    reading", and left it there. Every stage after it, and every session started afterwards, ran
+    unguarded. The switch belongs to whoever is at the keyboard."""
+    big, _ = setup()
+    for command in ("touch /tmp/cc-guard-off",
+                    "touch /tmp/cc-depth-off && echo done",
+                    "python3 -c \"open('/tmp/cc-guard-off','w')\"",
+                    "echo x > /tmp/cc-guard-off",
+                    "echo x >> /tmp/cc-guard-off",
+                    "cd /tmp && touch cc-guard-off",
+                    # Found by a review of this rule, which ran each of them against the hook:
+                    # neither dd nor ln was a write verb, and both make the file.
+                    "dd of=/tmp/cc-guard-off",
+                    "ln -s /dev/null /tmp/cc-guard-off"):
+        decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision == "deny", command
+    decision, _ = run("Write", {"file_path": "/tmp/cc-guard-off", "content": ""},
+                      TMP / "none.jsonl")
+    assert decision == "deny"
+
+
+def test_putting_the_guard_back_is_not_tampering():
+    """Removing a switch leaves the guard stricter than it found it, which is not an attack on it.
+
+    This rule cost run 12 its claims stage. Told to review the off-switch rule, the stage made
+    switches and removed them again, and every removal was refused as tampering until the round had
+    been spent arguing with the hook -- 262 refusals, no findings.
+    """
+    setup()
+    for command in ("rm -f /tmp/cc-guard-off",
+                    "rm -f /tmp/cc-guard-off /tmp/cc-depth-off",
+                    "unlink /tmp/cc-guard-off"):
+        decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision != "deny", command
+
+
+def test_a_file_that_merely_starts_with_the_name_is_not_the_switch():
+    setup()
+    for command in ("touch /tmp/cc-guard-off.notes", "rm -rf /tmp/build"):
+        decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision != "deny", command
+
+
+def test_a_stage_may_ask_the_hook_what_it_would_do():
+    """The only admissible evidence about a hook is what the hook printed, and the payload that
+    gets it to print has to contain the command being asked about. A rule that reads its own test
+    as an attempt refuses the one experiment that could establish anything about it."""
+    setup()
+    probe = ("echo '{\"tool_name\": \"Bash\", \"tool_input\": {\"command\": "
+             "\"touch /tmp/cc-guard-off\"}}' | python3 scripts/cc-context-guard.py")
+    decision, why = run("Bash", {"command": probe}, TMP / "none.jsonl")
+    assert decision == "allow", why
+
+
+def test_a_file_that_merely_starts_with_the_switch_name_is_not_the_switch():
+    """Also from that review: the Write branch compared the name as a substring, so writing to
+    /tmp/cc-guard-off.bak -- a different file -- was refused as tampering."""
+    setup()
+    decision, _ = run("Write", {"file_path": "/tmp/cc-guard-off.bak", "content": "x"},
+                      TMP / "none.jsonl")
+    assert decision == "allow"
+    decision, _ = run("Write", {"file_path": "/tmp/cc-guard-off", "content": "x"},
+                      TMP / "none.jsonl")
+    assert decision == "deny"
+
+
+def test_reading_about_the_off_switch_is_not_tampering():
+    """A review of this guard has to be able to grep for the thing it is reviewing."""
+    setup()
+    for command in ("grep -rn cc-guard-off scripts/",
+                    "ls -l /tmp/cc-guard-off",
+                    # Refused until a survey stage wrote "the guard itself ran on me", deleted its
+                    # test file and fell back to reasoning it could not cite. Writing the result of
+                    # a search somewhere is not writing the switch.
+                    "grep -rn cc-guard-off scripts/ > /tmp/notes.txt",
+                    "rg OFF_SWITCH scripts/cc-context-guard.py"):
+        decision, why = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision == "allow", (command, why)
+
+
+def test_the_refusal_says_how_to_exercise_the_rule_it_enforces() -> None:
+    """A stage reviewing this rule must be able to test it, and the only permitted way is to send the
+    hook a payload. Run 12 spent 262 refusals finding that out by trial and run 20's survey spent half
+    its calls on it, because the refusal described the prohibition and not the alternative."""
+    decision, why = run("Bash", {"command": "touch /tmp/cc-guard-off"}, "")
+    assert decision == "deny", why
+    assert "cc-context-guard.py" in why, why
+    assert "tool_input" in why, why
+
+
+def test_a_file_whose_name_merely_ends_with_the_switch_is_not_the_switch():
+    """The name was bounded on the right and not on the left, and _VERBS ends in a run of any
+    characters, so the switch name matched inside a longer one: `touch /tmp/my-cc-guard-off` was
+    refused as tampering with a file it does not name. Found by a review stage probing this rule,
+    which is the only reason it is known -- and the refusal cost that stage a round."""
+    setup()
+    for command in ("touch /tmp/my-cc-guard-off", "touch /tmp/not-cc-depth-off", "mv a b-cc-guard-off"):
+        decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision != "deny", command
+
+
+def test_a_path_still_reaches_the_switch_itself():
+    """Bounding the left side must not stop the rule reaching the file through a directory, which is
+    how every real attempt on it is written."""
+    setup()
+    for command in ("touch /tmp/cc-guard-off", "touch ../tmp/cc-depth-off", "echo x > /tmp/cc-guard-off"):
+        decision, _ = run("Bash", {"command": command}, TMP / "none.jsonl")
+        assert decision == "deny", command

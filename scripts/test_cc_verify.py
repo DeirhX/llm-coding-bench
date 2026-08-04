@@ -8,7 +8,10 @@ those apart from an invented quote is not worth running.
 
 from __future__ import annotations
 
+import pathlib
 import sys
+import subprocess
+import tempfile
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -199,3 +202,1217 @@ def test_an_interior_fence_is_still_content(tmp_path):
     src.write_text("intro\n```sh\nls -l\n```\ntail\n")
     assert vf.file_quote(str(tmp_path), "doc.md", 1, 5,
                                 "intro\n```sh\nls -l\n```\ntail").kind == vf.PASS
+
+def test_a_quote_with_the_line_numbers_still_on_it_is_accepted(tmp_path) -> None:
+    """What a model gets from Read is numbered, and quoting it back verbatim is honest.
+
+    A live stage spent fifteen minutes refused for this, re-read the file, and produced the
+    same quote again. The verdict it got was the one reserved for fabrication.
+    """
+    (tmp_path / "m.py").write_text("def add(a, b):\n    return a + b\n")
+    numbered = "1 def add(a, b):\n2     return a + b"
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, numbered)
+    assert verdict.ok, verdict
+
+
+def test_numbers_that_do_not_count_are_left_as_content(tmp_path) -> None:
+    """A gutter counts. Two lines that happen to start with a digit are code."""
+    (tmp_path / "m.py").write_text("10 apples\n40 pears\n")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, "10 apples\n40 pears")
+    assert verdict.ok, verdict
+
+
+def test_stripping_a_gutter_cannot_rescue_a_wrong_quote(tmp_path) -> None:
+    (tmp_path / "m.py").write_text("def add(a, b):\n    return a + b\n")
+    wrong = "1 def add(a, b):\n2     return a - b"
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, wrong)
+    assert not verdict.ok, verdict
+
+def test_two_ranges_quoted_with_an_elision_are_checked_separately(tmp_path) -> None:
+    """A definition and its use, cited together -- the citation a review wants to make.
+
+    Attaching the whole block to the last range failed both halves of a correct claim: quote
+    not present on one, incomplete on the other.
+    """
+    (tmp_path / "m.py").write_text(
+        "LOCK = 1\n" + "filler\n" * 3 + "def use():\n    return LOCK\n")
+    text = ("CLAIM: the lock is global.\n"
+            "EVIDENCE: m.py:1, 5-6\n"
+            "QUOTE:\nLOCK = 1\n...\ndef use():\n    return LOCK\n")
+    claims, _ = vf.parse_ledger(text)
+    quoted = [(e["start"], e["end"], e["quote"]) for e in claims[0]["evidence"]]
+    assert quoted[0][2] == "LOCK = 1", quoted
+    assert quoted[1][0] == 5, quoted
+    for citation in claims[0]["evidence"]:
+        verdict = vf.file_quote(str(tmp_path), citation["path"], citation["start"],
+                                citation["end"], citation["quote"])
+        assert verdict.ok, (citation, verdict)
+
+
+def test_an_elision_inside_a_single_range_is_still_content(tmp_path) -> None:
+    """One range, one quote: splitting it would invent fragments nobody cited."""
+    (tmp_path / "m.py").write_text("a = 1\n...\nb = 2\n")
+    text = ("CLAIM: it elides.\n"
+            "EVIDENCE: m.py:1-3\n"
+            "QUOTE:\na = 1\n...\nb = 2\n")
+    claims, _ = vf.parse_ledger(text)
+    citation = claims[0]["evidence"][0]
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 3, citation["quote"])
+    assert verdict.ok, verdict
+
+
+def test_a_single_line_quote_with_a_gutter_the_citation_vouches_for(tmp_path) -> None:
+    """One number is not a sequence, so the citation is what vouches for it.
+
+    Single-line citations are the commonest kind. A live plan stage was refused three times for
+    fabrication over quotes that were correct to the byte once the tab-separated gutter came off.
+    """
+    (tmp_path / "m.py").write_text("a = 1\nb = 2\nc = 3\n")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 2, 2, "2\tb = 2")
+    assert verdict.ok, verdict
+
+
+def test_a_gutter_that_disagrees_with_the_citation_is_not_stripped(tmp_path) -> None:
+    (tmp_path / "m.py").write_text("a = 1\nb = 2\nc = 3\n")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 3, 3, "2\tb = 2")
+    assert not verdict.ok, verdict
+
+
+def test_a_single_line_that_merely_starts_with_a_number_is_content(tmp_path) -> None:
+    (tmp_path / "m.py").write_text("40 pears\n")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 1, "40 pears")
+    assert verdict.ok, verdict
+
+
+def test_commentary_after_the_closing_fence_is_not_part_of_the_quote(tmp_path) -> None:
+    """A quote runs to the next header, so a model that quotes and then explains puts its
+    explanation inside the quote.
+
+    Measured: a plan stage was refused for fabrication over a quote that matched the file to the
+    byte, with two sentences of commentary appended to it.
+    """
+    (tmp_path / "m.py").write_text("def add(a, b):\n    return a + b\n")
+    quoted = ("```python\ndef add(a, b):\n    return a + b\n```\n\n"
+              "This is where the addition happens, and it is why the total is wrong.")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, quoted)
+    assert verdict.ok, verdict
+
+
+def test_an_unclosed_fence_still_gives_up_its_content(tmp_path) -> None:
+    (tmp_path / "m.py").write_text("def add(a, b):\n    return a + b\n")
+    verdict = vf.file_quote(str(tmp_path), "m.py", 1, 2, "```\ndef add(a, b):\n    return a + b")
+    assert verdict.ok, verdict
+
+
+def test_a_citation_that_names_lines_but_no_file_is_resolved() -> None:
+    """A stage wrote sixteen claims, each carrying real quoted source and a line number, and every
+    one was refused for citing nothing: it had written "line 212 checks" rather than naming the
+    file. Asking the tree which file holds that text at that line is stricter than believing a
+    path the model typed."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("BARE_LINES = re.compile"))
+    text = "CLAIM: the bare-line pattern exists.\nEVIDENCE: line %d defines it.\nQUOTE:\n%s\n" % (
+        n, body[n - 1])
+    claims, _ = vf.parse_ledger(text, ROOT)
+    assert claims[0]["path"] == "scripts/cc_verify.py", claims[0]
+    assert vf.verify_ledger(ROOT, text)[0][1].ok, vf.verify_ledger(ROOT, text)[0][1].detail
+
+
+def test_a_quote_that_matches_two_files_stays_uncited() -> None:
+    """Resolution is only honest while it is unambiguous: one line of `import os` is in every
+    file, and guessing which would accept a claim nobody can check."""
+    assert vf.resolve_path(ROOT, 1, 1, "") is None
+
+
+def test_the_written_out_line_label_is_not_a_fabrication() -> None:
+    """`QUOTE: Line 174: `code`` is the gutter written out in words. Compared literally it fails
+    as "quote not present", the verdict reserved for invention."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("BARE_LINES = re.compile"))
+    quoted = "Line %d: `%s`" % (n, body[n - 1])
+    assert vf.file_quote(ROOT, "scripts/cc_verify.py", n, n, quoted).ok
+
+
+def test_a_path_followed_by_its_lines_is_a_citation() -> None:
+    """Every stage that has run here writes `guard.py lines 174, 188-189` rather than
+    `guard.py:174`. Refusing that is a quarrel about punctuation, not about evidence."""
+    found = vf._classify_all("`scripts/cc_verify.py` lines 174, 188-189")
+    assert [(f["path"], f["start"], f["end"]) for f in found] == [
+        ("scripts/cc_verify.py", 174, 174), ("scripts/cc_verify.py", 188, 189)], found
+
+
+def test_a_snippet_labelled_with_its_line_is_not_a_fabrication() -> None:
+    """`` `code` (line 174) `` is the gutter again, written after the code instead of before it."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("PATH_LINES = re.compile"))
+    assert vf.file_quote(ROOT, "scripts/cc_verify.py", n, n, "`%s` (line %d)" % (body[n - 1], n)).ok
+
+
+def test_a_quote_wrapped_in_backticks_is_not_a_fabrication() -> None:
+    """A stage quoted a line perfectly and was told it was not present in the file. The two
+    differed by one backtick at each end."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("PATH_LINES = re.compile"))
+    assert vf.file_quote(ROOT, "scripts/cc_verify.py", n, n, "`%s`" % body[n - 1]).ok
+
+
+def test_a_quote_rewrapped_onto_one_line_is_not_a_fabrication() -> None:
+    """Two lines of a wrapped call, quoted as the one line they read as. The model read the right
+    place and tidied it, which is not inventing it."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("def _flat("))
+    joined = " ".join(l.strip() for l in body[n - 1:n + 1])
+    verdict = vf.file_quote(ROOT, "scripts/cc_verify.py", n, n + 1, joined)
+    assert verdict.ok, verdict.detail
+    assert verdict.kind == vf.REWRAPPED, verdict.detail
+
+
+def test_rewrapping_does_not_excuse_the_wrong_text() -> None:
+    assert not vf.file_quote(ROOT, "scripts/cc_verify.py", 1, 2, "def nothing_of_the_sort():").ok
+
+
+def test_a_header_that_says_the_range_in_passing_is_still_a_header() -> None:
+    """`QUOTE (lines 212-217):` went unrecognised as a header, so the quote attached to nothing
+    and nine otherwise complete claims were reported as incomplete file_quotes."""
+    claims, _ = vf.parse_ledger(
+        "CLAIM: x\nEVIDENCE: a/b.py:10-11\nQUOTE (lines 10-11):\n    pass\n")
+    assert claims[0]["quote"] == "    pass", claims[0]
+
+
+def test_lines_joined_with_slashes_are_still_lines() -> None:
+    """A stage quoted six lines of the guard on one line with ` / ` between them."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("def _flat("))
+    joined = " / ".join("`%s`" % l.strip() for l in body[n - 1:n + 1])
+    assert vf.file_quote(ROOT, "scripts/cc_verify.py", n, n + 1, joined).ok
+
+
+def test_a_slash_in_code_is_not_a_line_break() -> None:
+    assert vf._unslashed("a = b / c") == "a = b / c"
+
+
+def test_a_citation_written_lines_first_is_still_a_citation() -> None:
+    """`line 212-217 of guard.py` is how a claim reads when the sentence begins with where."""
+    found = vf._classify_all("line 212-217 of scripts/cc_verify.py")
+    assert [(f["path"], f["start"], f["end"])
+            for f in found] == [("scripts/cc_verify.py", 212, 217)], found
+
+
+def test_an_unknown_declared_as_a_claim_is_an_unknown() -> None:
+    """Two came back as `CLAIM: UNKNOWN: I could not verify ...` and were refused for citing
+    nothing -- for saying the one thing the stance calls a complete answer, under the wrong
+    header."""
+    claims, unknowns = vf.parse_ledger("CLAIM: UNKNOWN: whether the suite is slow\n")
+    assert claims == [], claims
+    assert unknowns == ["whether the suite is slow"], unknowns
+
+
+def test_a_quote_given_on_the_citation_line_is_read() -> None:
+    """`guard.py, line 208: "# comment"` -- the quote where the citation is, rather than under a
+    QUOTE header. Eight claims in a row were reported as citing nothing for writing it this way."""
+    body = Path(ROOT, "scripts/cc_verify.py").read_text().split("\n")
+    n = next(i for i, l in enumerate(body, 1) if l.startswith("def _inline_quote("))
+    text = 'CLAIM: x\nEVIDENCE: scripts/cc_verify.py, line %d: "%s"\n' % (n, body[n - 1])
+    claims, _ = vf.parse_ledger(text, ROOT)
+    assert claims[0]["quote"] == body[n - 1], claims[0]
+    assert vf.verify_ledger(ROOT, text)[0][1].ok, vf.verify_ledger(ROOT, text)[0][1].detail
+
+
+def test_prose_after_a_citation_is_not_taken_for_a_quote() -> None:
+    """Comparing a claim's own words against the file would report fabrication where there was
+    only a missing quote."""
+    found = vf._classify_all("scripts/cc_verify.py line 10 defines the pattern it needs")
+    assert found and "quote" not in found[0], found
+
+
+def test_every_citation_in_a_multi_line_evidence_block_is_read() -> None:
+    """Five citations arrived under one EVIDENCE header, on lines of their own. Only the first was
+    read and the claim was reported as citing nothing."""
+    claims, _ = vf.parse_ledger(
+        "CLAIM: x\nEVIDENCE: a/b.py line 10\nc/d.py line 20\ne/f.py line 30\n")
+    paths = [e.get("path") for e in claims[0]["evidence"]]
+    assert paths == ["a/b.py", "c/d.py", "e/f.py"], claims[0]["evidence"]
+
+
+def test_a_bold_header_is_read_as_a_header() -> None:
+    """A claims stage wrote every header as `**CLAIM: ...**` with the evidence in the same sentence,
+    and the parser scored the answer nought claims -- earning it a refusal that said no claims were
+    stated, which was the one thing it had not done wrong."""
+    answer = ("**CLAIM: The boundary is strict at 30 seconds.** `sleep 30` returned \"allow\".\n"
+              "**UNKNOWN: Whether --max-sleep is exposed by the driver.** I did not look.\n")
+    claims, unknowns = vf.parse_ledger(answer)
+    assert [c["claim"] for c in claims] == ["The boundary is strict at 30 seconds."], claims
+    assert len(unknowns) == 1, unknowns
+
+
+def test_a_citation_after_a_bold_header_is_evidence() -> None:
+    answer = "**CLAIM: the rule matches text, not sleeps.** See scripts/cc-context-guard.py:174-176\n"
+    claims, _ = vf.parse_ledger(answer)
+    assert claims and claims[0]["evidence"], claims
+    assert claims[0]["evidence"][0]["path"] == "scripts/cc-context-guard.py", claims[0]["evidence"]
+
+
+def test_prose_after_a_bold_header_is_not_turned_into_evidence() -> None:
+    """Inventing a citation for a claim that has none is worse than reporting that it has none."""
+    answer = "**CLAIM: the rule is broader than its intent.** I read it and it looked wrong to me.\n"
+    claims, _ = vf.parse_ledger(answer)
+    assert claims and not claims[0]["evidence"], claims
+
+
+def test_a_plain_header_still_parses() -> None:
+    answer = ("CLAIM: the guard denies a long sleep\n"
+              "EVIDENCE: scripts/cc-context-guard.py:174\n"
+              "QUOTE: _SLEEP = re.compile\n")
+    claims, _ = vf.parse_ledger(answer)
+    assert len(claims) == 1 and claims[0]["evidence"], claims
+
+
+def test_a_finding_is_a_claim() -> None:
+    """A seven-finding report with a path and a line range under every heading parsed as nought
+    claims, because the model called them findings and the parser only knew the word CLAIM."""
+    answer = ("**Finding 1: the rule matches text, not sleeps.**\n"
+              "\n"
+              "`scripts/cc_verify.py`, lines 10-12: it does something.\n")
+    claims, _ = vf.parse_ledger(answer)
+    assert len(claims) == 1, claims
+    assert claims[0]["evidence"] and claims[0]["evidence"][0]["start"] == 10, claims[0]["evidence"]
+
+
+def test_an_inline_quote_stops_at_its_own_delimiter() -> None:
+    """Greedy, this ran to the last backtick on the line and swallowed the prose between, so an
+    incomplete citation was reported as a quote that is not present -- which reads as fabrication."""
+    answer = ("CLAIM: the off-switch lifts every rule\n"
+              "EVIDENCE: scripts/cc_verify.py lines 10-11: `first` where `second`. This means x.\n")
+    claims, _ = vf.parse_ledger(answer)
+    assert claims and not claims[0]["evidence"][0].get("quote"), claims[0]["evidence"]
+
+
+def test_a_lone_backticked_span_is_the_quote() -> None:
+    answer = "CLAIM: the default is 30\nEVIDENCE: scripts/cc_verify.py lines 10-10: `default=30`.\n"
+    claims, _ = vf.parse_ledger(answer)
+    assert claims[0]["evidence"][0].get("quote") == "default=30", claims[0]["evidence"]
+
+
+def test_a_quote_that_is_not_in_the_file_still_fails_without_line_numbers() -> None:
+    """Locating a quote by its text must not become a way to pass without one."""
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "m.py").write_text("def f():\n    return 1\n")
+        assert vf.locate(root, "m.py", "def f():\n    return 1") == (1, 2)
+        assert vf.locate(root, "m.py", "return 99999") is None
+
+
+def test_a_short_fragment_is_not_accepted_as_a_clipped_quote() -> None:
+    """A whole line quoted whole is fine however short. A few words clipped out of the middle of a
+    longer line are not: `allow()` occurs eleven times in the guard and would vouch for anything."""
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "m.py").write_text("if off_switch.exists():\n    allow()\n")
+        assert vf.locate(root, "m.py", "    allow()") == (2, 2)
+        assert vf.locate(root, "m.py", "exists()") is None
+
+
+def test_a_clipped_quote_must_sit_in_the_lines_it_cites() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "m.py").write_text(
+            'deny("Do not sleep for %ds. Run it in the foreground and wait there."\n'
+            "      % max(naps))\n")
+        good = vf.file_quote(root, "m.py", 1, 2,
+                             'Do not sleep for %ds. Run it in the foreground and wait there."\n'
+                             "      % max(naps))")
+        assert good.kind == vf.CLIPPED and good.ok, good
+        bad = vf.file_quote(root, "m.py", 1, 2,
+                            'Do not sleep for %ds. Run it in the background and poll it."\n'
+                            "      % max(naps))")
+        assert not bad.ok, bad
+
+
+def test_a_quote_inside_the_cited_range_is_evidence_for_it() -> None:
+    """A stage cited the rule and the function it calls, then quoted the lines its claim turned on.
+    Judged as though the quote had to be the whole range, that came back as wrong-lines."""
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "m.py").write_text(
+            "\n".join(["import re", "", "_SLEEP = re.compile(r'sleep')", "",
+                       "def naps_in(command):", "    return []", "", "x = 1"]) + "\n")
+        good = vf.file_quote(root, "m.py", 1, 8, "def naps_in(command):\n    return []")
+        assert good.kind == vf.PARTIAL and good.ok, good
+
+
+def test_a_quote_outside_the_cited_range_is_still_wrong_lines() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "m.py").write_text(
+            "\n".join(["import re", "", "def naps_in(command):", "    return []"]) + "\n")
+        moved = vf.file_quote(root, "m.py", 1, 2, "def naps_in(command):\n    return []")
+        assert moved.kind == vf.WRONG_LINES and not moved.ok, moved
+        assert "at line 3" in moved.detail, moved.detail
+
+
+def test_a_quote_given_as_a_python_string_with_prose_after_it_is_read() -> None:
+    """Verbatim from a live claims stage: the quote arrives single-quoted with `\\n` escapes and the
+    finding's point tacked on after the closing quote. Read literally it is one long line that
+    matches nothing, and the stage was refused for a citation that was correct."""
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "g.py").write_text(
+            'x = 1\ndeny("Do not sleep for %ds. Run it in the foreground: "\n'
+            '     "polling costs the whole wait."\n     % max(naps))\n')
+        text = ('CLAIM: the message says nothing about the off-switch\n'
+                'QUOTE: g.py:2-4 \'deny("Do not sleep for %ds. Run it in the foreground: "\\n'
+                '     "polling costs the whole wait."\\n     % max(naps))\' -- no off-switch.\n')
+        claims, _ = vf.parse_ledger(text, root)
+        piece = claims[0]["evidence"][0]
+        assert piece["path"] == "g.py" and (piece["start"], piece["end"]) == (2, 4)
+        assert vf.file_quote(root, "g.py", 2, 4, piece["quote"]).ok
+
+
+def test_prose_after_a_quote_cannot_smuggle_in_a_fabricated_one() -> None:
+    """The prose is dropped, not merged: a quote that is not in the file still fails."""
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "g.py").write_text("x = 1\ny = 2\n")
+        text = "CLAIM: it deletes the database\nQUOTE: g.py:1-2 'drop_all_tables()' -- as shown.\n"
+        claims, _ = vf.parse_ledger(text, root)
+        assert not vf.file_quote(root, "g.py", 1, 2, claims[0]["evidence"][0]["quote"]).ok
+
+
+def test_a_claim_that_names_the_file_supplies_it_to_the_quotes_under_it() -> None:
+    """Verbatim shape from run 7: the path in the claim's own sentence, the line after the quote.
+    Eleven citations of one file came back as "missing a file and a line range" -- every one of them
+    said where, twice, in the two places a person would look."""
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "g.py").write_text("import os\nOFF = Path('/tmp/off')\nSWITCHES = (OFF,)\n")
+        text = ("CLAIM: The switches are defined at lines 2-3 of `g.py`.\n\n"
+                "QUOTE: `OFF = Path('/tmp/off')` (line 2)\n"
+                "QUOTE: `SWITCHES = (OFF,)` (line 3)\n")
+        claims, _ = vf.parse_ledger(text, root)
+        pieces = claims[0]["evidence"]
+        assert len(pieces) == 2, pieces
+        for piece in pieces:
+            assert piece["path"] == "g.py"
+            assert vf.file_quote(root, piece["path"], piece["start"], piece["end"],
+                                 piece["quote"]).ok, piece
+
+
+def test_an_inherited_path_does_not_excuse_the_wrong_line() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "g.py").write_text("import os\nOFF = Path('/tmp/off')\n")
+        text = "CLAIM: about g.py.\n\nQUOTE: `OFF = Path('/tmp/off')` (line 9)\n"
+        claims, _ = vf.parse_ledger(text, root)
+        piece = claims[0]["evidence"][0]
+        assert (piece["path"], piece["start"]) == ("g.py", 9)
+        assert not vf.file_quote(root, "g.py", 9, 9, piece["quote"]).ok
+
+
+def _call(command: str, printed: str):
+    import cc_evidence
+    return ev.ToolCall(agent="claims", tool="Bash", call_id="1",
+                                args={"command": command}, text=printed)
+
+
+def test_a_probe_described_as_the_opposite_of_what_it_printed_fails() -> None:
+    """The looseness that lets "DENIED" stand for `"permissionDecision": "deny"` must not let it
+    stand for a run that allowed."""
+    ran = _call('echo \'{"tool_name": "Bash", "tool_input": {"command": "dd of=/tmp/x"}}\' | python3 g.py',
+                "EXIT:0")
+    good = vf.command_result([ran], 'echo \'{"tool_name": "Bash", "tool_input": {"command": "dd of=/tmp/x"}}\' | python3 g.py',
+                             "ALLOWED (no deny output, exit 0)")
+    assert good.ok, good
+    bad = vf.command_result([ran], 'echo \'{"tool_name": "Bash", "tool_input": {"command": "dd of=/tmp/x"}}\' | python3 g.py',
+                            "DENIED with permissionDecision deny")
+    assert not bad.ok, bad
+
+
+def test_a_command_nobody_ran_is_still_unverified() -> None:
+    ran = _call('echo \'{"tool_input": {"command": "touch /tmp/x"}}\' | python3 g.py', "deny")
+    verdict = vf.command_result([ran], 'echo \'{"tool_input": {"command": "shred /tmp/x"}}\' | python3 g.py',
+                                "DENIED")
+    assert verdict.kind == vf.UNVERIFIED, verdict
+
+
+def test_one_case_of_a_loop_is_judged_on_its_own_output() -> None:
+    """Five probes in one loop print five results. A claim about the one that was allowed must not
+    be settled by the four that were denied."""
+    loop = _call('for c in "cp /dev/null /tmp/sw" "dd of=/tmp/sw"; do echo "CMD: $c"; echo "$c" | python3 g.py; echo ---; done',
+                 'CMD: cp /dev/null /tmp/sw\n{"permissionDecision": "deny"}\n---\n'
+                 'CMD: dd of=/tmp/sw\nEXIT:0\n---\n')
+    denied = vf.command_result([loop], '{"command": "cp /dev/null /tmp/sw"}', "DENIED")
+    assert denied.ok, denied
+    lied = vf.command_result([loop], '{"command": "dd of=/tmp/sw"}', "DENIED")
+    assert not lied.ok, "the case that was allowed was judged on another case's output"
+    honest = vf.command_result([loop], '{"command": "dd of=/tmp/sw"}', "ALLOWED, no deny printed")
+    assert honest.ok, honest
+
+
+def test_silence_claimed_of_a_command_that_said_something_fails() -> None:
+    ran = _call("pytest -q", "3 failed, 40 passed")
+    verdict = vf.command_result([ran], "pytest -q", "no failures, nothing printed")
+    assert not verdict.ok, verdict
+
+
+def test_three_quotes_on_one_header_are_three_citations() -> None:
+    """A stage with three quotes for one claim wrote them on a single QUOTES line, each followed by
+    its line number. Nine correct findings were reported as citing nothing."""
+    with tempfile.TemporaryDirectory() as root:
+        src = Path(root, "guard.py")
+        src.write_text("import re\nVERBS = r\"(?:touch|mv)\"\nCALLS = r\"(?:open|Path)\"\n")
+        text = ('CLAIM: the verbs and the calls are two separate patterns\n'
+                'QUOTES: "VERBS = r"(?:touch|mv)"" (line 2); "CALLS = r"(?:open|Path)"" (line 3)\n')
+        claims, _ = vf.parse_ledger(text, root=root)
+        assert len(claims) == 1, claims
+        pieces = claims[0]["evidence"]
+        assert len(pieces) == 2, pieces
+        for piece in pieces:
+            verdict = vf.file_quote(root, "guard.py", piece["start"], piece["end"],
+                                    piece["quote"])
+            assert verdict.ok, (piece, verdict.kind)
+
+
+def test_a_quote_on_a_shared_header_still_has_to_be_in_the_file() -> None:
+    """The plural form is a spelling, not an exemption."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "guard.py").write_text("import re\nVERBS = r\"(?:touch|mv)\"\n")
+        text = ('CLAIM: two patterns\n'
+                'QUOTES: guard.py "VERBS = r"(?:touch|mv)"" (line 2); '
+                'guard.py "CALLS = whatever I like" (line 2)\n')
+        claims, _ = vf.parse_ledger(text, root=root)
+        verdicts = [vf.file_quote(root, "guard.py", p["start"], p["end"], p["quote"])
+                    for p in claims[0]["evidence"] if p.get("quote")]
+        assert any(not v.ok for v in verdicts), [v.kind for v in verdicts]
+
+
+def test_a_command_written_under_run_is_read_as_a_command() -> None:
+    ran, _ = vf.parse_ledger('CLAIM: the hook allows it\n'
+                             'RUN: echo x | python3 guard.py returns "allow"\n')
+    piece = ran[0]["evidence"][0]
+    assert piece["kind"] == "command_result", piece
+    assert piece["command"] == "echo x | python3 guard.py", piece
+    assert piece["expect"] == '"allow"', piece
+
+
+def test_a_command_under_run_that_nobody_ran_is_not_evidence() -> None:
+    """RUN is a shorter way to say what the contract asks for, not a way to skip the check."""
+    claims, _ = vf.parse_ledger('CLAIM: it allows it\n'
+                                'RUN: python3 guard.py returns "allow"\n')
+    piece = claims[0]["evidence"][0]
+    verdict = vf.command_result([], piece["command"], piece["expect"])
+    assert not verdict.ok, verdict.kind
+
+
+def test_a_quote_that_unescaped_a_double_quote_is_still_the_line() -> None:
+    """A stage writing JSON quotes gave the file's [^\\s'\\";|&] as [^\\s'";|&]. Eleven citations of
+    one regex could not be attributed to any file over that backslash."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text('import re\nname = r"(?:[^\\s\'\\";|&]*/)?" + rest\n')
+        verdict = vf.file_quote(root, "g.py", 2, 2, 'name = r"(?:[^\\s\'";|&]*/)?" + rest')
+        assert verdict.ok, verdict
+        assert verdict.kind == vf.ESCAPED, verdict
+
+
+def test_unescaping_does_not_make_a_different_line_match() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text('import re\nname = r"(?:[^\\s\'\\";|&]*/)?" + rest\n')
+        assert not vf.file_quote(root, "g.py", 2, 2, 'name = r"(?:[^x]*/)?" + rest').ok
+
+
+def test_a_near_miss_is_given_the_address_it_will_be_refused_at() -> None:
+    """A stage quoted two lines, dedenting the first and keeping the second, so the relative indent
+    changed and the quote is rightly refused. Unresolvable, it was refused as citing nothing -- which
+    sends it looking for a citation it had already written."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("def f(x):\n    if x:\n        return False\n")
+        _tracked_repo(root)
+        quote = "if x:\n        return False"
+        assert vf.file_quote(root, "g.py", 2, 3, quote).kind == vf.RETOUCHED
+        assert vf.resolve_path(root, 2, 3, quote) == "g.py"
+
+
+def test_the_address_is_still_not_an_approval() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("def f(x):\n    if x:\n        return False\n")
+        _tracked_repo(root)
+        assert vf.resolve_path(root, 2, 3, "if y:\n        return True") is None
+
+
+def _tracked_repo(root: str) -> None:
+    """resolve_path asks git what the tree holds, so a bare directory answers nothing."""
+    for command in (["git", "init", "-q"], ["git", "add", "-A"]):
+        subprocess.run(command, cwd=root, check=True, capture_output=True)
+
+
+def test_a_header_bolded_through_its_colon_keeps_its_sentence() -> None:
+    """`**CLAIM 1:** text` is how anyone writing markdown bolds a heading. Split at the closing mark
+    the claim was empty and the sentence was trailing prose, so eight findings arrived as
+    `claim 1 ()` and were refused for citing nothing."""
+    text = ("**CLAIM 1:** tampers() denies creation but not removal.\n"
+            "**EVIDENCE:** scripts/g.py:247-249\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, claims
+    assert claims[0]["claim"].startswith("tampers() denies creation"), claims[0]
+    assert claims[0]["evidence"][0]["start"] == 247, claims[0]["evidence"]
+
+
+def test_a_header_bolded_after_its_sentence_still_splits_there() -> None:
+    text = "**CLAIM: the rule is broader than its intent.** scripts/g.py:12-14\n"
+    claims, _ = vf.parse_ledger(text)
+    assert claims[0]["claim"] == "the rule is broader than its intent.", claims
+    assert claims[0]["evidence"][0]["start"] == 12, claims[0]["evidence"]
+
+
+def test_a_conclusion_under_the_evidence_is_not_a_second_claim() -> None:
+    """A report of four findings scored eight claims, half citing nothing, because each FINDING line
+    -- the conclusion drawn from the evidence above it -- was read as a claim of its own."""
+    text = ("**CLAIM 1:** the rule denies creation.\n"
+            "**EVIDENCE:** scripts/g.py:247-249\n"
+            "**FINDING:** creation is denied and removal is not.\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, [c["claim"] for c in claims]
+
+
+def test_a_numbered_finding_is_still_a_heading() -> None:
+    text = ("**Finding 1:** the rule denies creation.\n"
+            "**EVIDENCE:** scripts/g.py:247-249\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, claims
+    assert claims[0]["claim"].startswith("the rule denies creation"), claims[0]
+
+
+def test_probes_reported_in_prose_are_read_as_the_commands_they_were() -> None:
+    """Eight findings established by running the hook cited nothing, because the stage reported each
+    run in a sentence instead of under the header the contract names."""
+    text = ("**CLAIM 1:** creation is denied and removal is not.\n"
+            "**EVIDENCE:** Ran two hooks. `touch /tmp/cc-guard-off` -- denied. "
+            "`rm /tmp/cc-guard-off` -- allowed.\n")
+    claims, _ = vf.parse_ledger(text)
+    pieces = [p for p in claims[0]["evidence"] if p.get("kind") == "command_result"]
+    assert len(pieces) == 2, claims[0]["evidence"]
+    assert pieces[0]["command"] == "touch /tmp/cc-guard-off", pieces
+    assert pieces[0]["expect"] == "denied", pieces
+
+
+def test_a_probe_reported_in_prose_still_has_to_have_been_run() -> None:
+    piece = [p for p in vf.parse_ledger(
+        "**CLAIM 1:** it is denied.\n"
+        "**EVIDENCE:** `touch /tmp/cc-guard-off` -- denied.\n")[0][0]["evidence"]
+        if p.get("kind") == "command_result"][0]
+    assert not vf.command_result([], piece["command"], piece["expect"]).ok
+
+
+def test_backticked_code_in_prose_is_not_mistaken_for_a_probe() -> None:
+    claims, _ = vf.parse_ledger("**CLAIM 1:** the rule is narrow.\n"
+                                "**EVIDENCE:** `tampers()` returns False here.\n")
+    assert not [p for p in claims[0]["evidence"] if p.get("kind") == "command_result"], claims[0]
+
+
+def test_prose_between_two_snippets_is_not_a_command() -> None:
+    """Backticks alternate, so a scan that pairs them wrongly reads the words between two snippets as
+    something the stage ran: `OFF_SWITCH`. Only checks `DEPTH_OFF` produced ". Only checks"."""
+    claims, _ = vf.parse_ledger(
+        "**CLAIM 1:** the check is narrow.\n"
+        "**EVIDENCE:** `OFF_SWITCH`. Only checks `DEPTH_OFF`. Does not mention the other.\n")
+    phantoms = [p for p in claims[0]["evidence"] if p.get("kind") == "command_result"]
+    assert not phantoms, phantoms
+
+
+def test_the_line_a_denial_comes_from_is_not_part_of_what_it_printed() -> None:
+    claims, _ = vf.parse_ledger("**CLAIM 1:** creation is denied.\n"
+                                "**EVIDENCE:** `touch /tmp/cc-guard-off` -- denied (line 307-310).\n")
+    piece = [p for p in claims[0]["evidence"] if p.get("kind") == "command_result"][0]
+    assert piece["expect"] == "denied", piece
+
+
+def test_a_label_in_front_of_the_code_is_read_as_the_citation() -> None:
+    """`QUOTE: Line 246: `code`` -- the label before the line rather than after it. It was stripped
+    for the comparison and never read as the citation, so a ledger of nine quoted lines, each
+    carrying its own number, was refused nine times for missing a file and a line range."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("import re\nVERBS = 1\nCALLS = 2\n")
+        _tracked_repo(root)
+        claims, _ = vf.parse_ledger("CLAIM: two names\nQUOTE: Line 2: `VERBS = 1`\n", root=root)
+        piece = claims[0]["evidence"][0]
+        assert piece["start"] == 2, piece
+        assert piece["path"] == "g.py", piece
+        assert vf.file_quote(root, piece["path"], piece["start"], piece["end"], piece["quote"]).ok
+
+
+def test_a_labelled_quote_still_has_to_be_at_that_line() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("import re\nVERBS = 1\nCALLS = 2\n")
+        _tracked_repo(root)
+        claims, _ = vf.parse_ledger("CLAIM: two names\nQUOTE: Line 3: `VERBS = 1`\n", root=root)
+        piece = claims[0]["evidence"][0]
+        assert not vf.file_quote(root, "g.py", piece["start"], piece["end"], piece["quote"]).ok
+
+
+def test_a_command_keeps_none_of_the_backticks_it_arrived_in() -> None:
+    piece = vf.parse_ledger("CLAIM: it is denied\n"
+                            "EVIDENCE: command: `echo hi | guard.py` -> deny\n")[0][0]["evidence"][0]
+    assert piece["command"] == "echo hi | guard.py", piece
+
+
+def test_a_quote_off_by_a_line_is_told_which_line_it_is_at() -> None:
+    """Cited one line out, a quote resolved to no file at all, so the stage was told its citation was
+    missing a file and a line range -- of a citation that named both."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("import re\nVERBS = 1\nCALLS = 2\nMORE = 3\n")
+        _tracked_repo(root)
+        assert vf.resolve_path(root, 3, 3, "VERBS = 1") == "g.py"
+        assert vf.file_quote(root, "g.py", 3, 3, "VERBS = 1").kind == vf.WRONG_LINES
+
+
+def test_a_quote_in_no_file_resolves_to_no_file() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("import re\nVERBS = 1\n")
+        _tracked_repo(root)
+        assert vf.resolve_path(root, 2, 2, "NOTHING_LIKE_THIS = 9") is None
+
+
+def test_findings_numbered_under_a_claims_heading_are_claims() -> None:
+    """The word said once as a heading and the findings numbered under it, which is how a person
+    writes a report. A stage that made 188 of these parsed as none and was told no claims were
+    stated -- so the cap it had blown never even applied."""
+    text = ("CLAIMS\n\n"
+            "**1. The switch can still be made.** scripts/g.py:12-14\n"
+            "**2. The removal is allowed.** scripts/g.py:20-20\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 2, [c["claim"] for c in claims]
+    assert claims[0]["claim"] == "The switch can still be made.", claims[0]
+    assert claims[0]["evidence"][0]["start"] == 12, claims[0]["evidence"]
+
+
+def test_a_numbered_list_outside_a_claims_heading_is_a_numbered_list() -> None:
+    text = ("Here is what I did:\n"
+            "1. Read the file.\n"
+            "2. Ran the hook.\n"
+            "CLAIM: the rule is narrow.\n"
+            "EVIDENCE: scripts/g.py:1-2\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, [c["claim"] for c in claims]
+
+
+def test_a_header_written_the_way_a_person_writes_it_is_a_header() -> None:
+    """`Evidence:` is what a stage writing a report writes. 188 claims cited nothing over the case of
+    one letter."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("\n" * 11 + "if x:\n    pass\n")
+        claims, _ = vf.parse_ledger("Claim: the rule is narrow.\n"
+                                    "Evidence: g.py:12-13\n"
+                                    "Quote: Line 12: `if x:`\n")
+        assert len(claims) == 1, claims
+        piece = claims[0]["evidence"][0]
+        assert piece["start"] == 12 and piece["path"] == "g.py", piece
+        assert vf.file_quote(root, "g.py", 12, 13, piece["quote"]).ok
+
+
+def test_the_word_in_a_sentence_is_still_not_a_header() -> None:
+    claims, _ = vf.parse_ledger("CLAIM: the evidence: it was never read.\n"
+                                "EVIDENCE: scripts/g.py:1-2\n")
+    assert len(claims) == 1, claims
+    assert claims[0]["claim"].startswith("the evidence:"), claims[0]
+
+
+def test_the_word_evidence_at_the_end_of_a_paragraph_is_still_evidence() -> None:
+    """Six claims cited nothing with the citation sitting in the last sentence of each: `... becomes
+    a no-op for the session. Evidence: line 280-281 of `guard.py`.`"""
+    text = ("**CLAIM: the check short-circuits the rest.**\n\n"
+            "When both are true allow() is called at once. Evidence: line 12-13 of `scripts/g.py`.\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, claims
+    piece = [p for p in claims[0]["evidence"] if p.get("start")]
+    assert piece and piece[0]["start"] == 12, claims[0]["evidence"]
+    assert piece[0]["path"] == "scripts/g.py", piece
+
+
+def test_a_sentence_about_evidence_is_not_a_citation() -> None:
+    claims, _ = vf.parse_ledger("CLAIM: the rule is narrow.\n"
+                                "There is no evidence: nobody ran it.\n")
+    assert not [p for p in claims[0]["evidence"] if p.get("start")], claims[0]["evidence"]
+
+
+def test_a_file_cited_by_its_absolute_path_is_the_file_in_the_tree() -> None:
+    """macOS puts a symlink on /tmp, so a stage in a tree opened as /tmp/x cites /private/tmp/x. Left
+    absolute the quote verifies and then fails the coverage check, which compares what was read."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("import re\nVERBS = 1\n")
+        assert vf.under_root(root, str(Path(root, "g.py").resolve())) == "g.py"
+        assert vf.file_quote(root, str(Path(root, "g.py").resolve()), 2, 2, "VERBS = 1").ok
+        assert vf.under_root(root, "/etc/passwd") == "/etc/passwd"
+
+
+def test_an_evidence_header_is_not_read_twice() -> None:
+    """The inline rule fired on the header itself, duplicating it, so the QUOTE attached to the copy
+    and the original was refused for missing the lines. Twenty-two tests said so at once."""
+    claims, _ = vf.parse_ledger("CLAIM: add returns the sum.\n"
+                                "EVIDENCE: src/m.py:1-2\n"
+                                "QUOTE:\ndef add(a, b):\n    return a + b\n")
+    assert len(claims[0]["evidence"]) == 1, claims[0]["evidence"]
+    assert claims[0]["evidence"][0]["quote"].startswith("def add"), claims[0]["evidence"]
+
+
+def test_the_line_saying_where_a_quote_came_from_is_the_citation() -> None:
+    """`(From scripts/g.py, lines 12-13)` after the quote is the stage saying where it copied from,
+    put where a person puts an attribution. Swallowed into the text it made the quote absent from the
+    very file it names."""
+    with tempfile.TemporaryDirectory() as root:
+        Path(root, "g.py").write_text("\n" * 11 + "if x:\n    pass\n")
+        text = ("CLAIM: the branch is there.\n"
+                "QUOTE:\nif x:\n    pass\n(From g.py, lines 12-13)\n")
+        claims, _ = vf.parse_ledger(text, root=root)
+        piece = claims[0]["evidence"][0]
+        assert piece["start"] == 12 and piece["path"] == "g.py", piece
+        assert vf.file_quote(root, piece["path"], piece["start"], piece["end"], piece["quote"]).ok
+
+
+def test_an_attribution_does_not_override_a_citation_already_made() -> None:
+    text = ("CLAIM: the branch is there.\n"
+            "EVIDENCE: g.py:12-13\n"
+            "QUOTE:\nif x:\n(From somewhere/else.py, line 99)\n")
+    piece = vf.parse_ledger(text)[0][0]["evidence"][0]
+    assert piece["path"] == "g.py" and piece["start"] == 12, piece
+    assert piece["quote"] == "if x:", piece
+
+
+def test_a_command_with_neither_a_header_word_nor_backticks_is_still_one() -> None:
+    """How a stage writes it when it has just run the thing:
+    `EVIDENCE: python3 scripts/guard_test.py -- "expected deny got deny"`."""
+    claims, _ = vf.parse_ledger(
+        'CLAIM: the suite passes.\n'
+        'EVIDENCE: python3 scripts/guard_test.py -- "29 passed"\n')
+    piece = claims[0]["evidence"][0]
+    assert piece["kind"] == "command_result", piece
+    assert piece["command"] == "python3 scripts/guard_test.py", piece
+    assert piece["expect"] == '"29 passed"', piece
+
+
+def test_an_evidence_line_that_opens_on_a_sentence_is_a_sentence() -> None:
+    claims, _ = vf.parse_ledger(
+        "CLAIM: the rule is narrow.\n"
+        "EVIDENCE: The pattern -- as written -- matches only literals.\n")
+    assert claims[0]["evidence"][0].get("kind") is None, claims[0]["evidence"]
+
+
+def test_a_bare_command_nobody_ran_is_not_evidence() -> None:
+    piece = vf.parse_ledger('CLAIM: it passes.\n'
+                            'EVIDENCE: pytest -q -- "29 passed"\n')[0][0]["evidence"][0]
+    assert not vf.command_result([], piece["command"], piece["expect"]).ok
+
+
+def test_a_bare_claim_heading_makes_each_paragraph_under_it_a_claim() -> None:
+    """`CLAIM` once as a heading and one finding to a paragraph, no marker on any of them. A stage
+    wrote four that way, each with its probe in the last sentence, and scored no claims at all."""
+    text = ("CLAIM\n\n"
+            "The rule catches four of six classes. Evidence: scripts/g.py:12-14\n\n"
+            "The write branch checks the basename. Evidence: scripts/g.py:20-21\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 2, [c["claim"] for c in claims]
+    assert claims[0]["claim"].startswith("The rule catches"), claims[0]
+    assert claims[1]["evidence"][0]["start"] == 20, claims[1]["evidence"]
+
+
+def test_paragraphs_before_any_heading_are_not_claims() -> None:
+    text = ("I read the file and ran the hook.\n\n"
+            "Here is what I found, in a moment.\n\n"
+            "CLAIM: the rule is narrow.\nEVIDENCE: scripts/g.py:1-2\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, [c["claim"] for c in claims]
+
+
+def test_a_continuation_line_of_a_paragraph_is_not_a_second_claim() -> None:
+    text = ("CLAIMS\n\n"
+            "The rule catches four of six classes,\nbecause it matches literals only.\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, [c["claim"] for c in claims]
+
+
+def test_a_probe_reported_as_having_produced_no_output_keeps_its_command() -> None:
+    """`... produced no output (ALLOW)`. Split at `output` instead of `produced`, the command keeps
+    the words `produced no` and what it printed is read as `(ALLOW)`, so a probe that ran exactly as
+    reported fails against its own recording. Eight findings arrived in that shape."""
+    body = ("echo '{\"tool_name\": \"Bash\"}' | python3 /tmp/cc-guard.py produced no output (ALLOW)")
+    piece = vf._bare_command(body)
+    assert len(piece) == 1, piece
+    assert piece[0]["command"].endswith("python3 /tmp/cc-guard.py"), piece[0]["command"]
+    assert piece[0]["expect"] == "no output (ALLOW)", piece[0]["expect"]
+
+
+def test_prose_in_an_answer_that_marks_its_claims_stays_prose() -> None:
+    """The paragraph rule is for the answer that marks nothing. Where some findings are marked, the
+    unmarked paragraphs around them are the report's prose, and reading those as claims would refuse
+    a stage for a sentence about what it had just read."""
+    text = ("CLAIMS\n\n"
+            "I read the guard and ran it against six payloads.\n\n"
+            "CLAIM: the rule matches literals only.\nEVIDENCE: scripts/g.py:1-2\n\n"
+            "That is all I could establish in the time.\n")
+    claims, _ = vf.parse_ledger(text)
+    assert len(claims) == 1, [c["claim"] for c in claims]
+    assert claims[0]["claim"].startswith("the rule matches"), claims[0]
+
+
+class _Call:
+    """A recorded tool call, as cc_evidence.collect returns them."""
+
+    def __init__(self, command: str, text: str, ok: bool = True) -> None:
+        self.tool, self.args, self.text, self.ok = "Bash", {"command": command}, text, ok
+
+
+def test_a_probe_that_was_stopped_is_evidence_that_it_was_stopped() -> None:
+    """A rule that denies things is probed by being denied: the result on record is the hook's own
+    message, which never contains the word the claim uses, and the verdict was FAIL anyway because
+    the call did not succeed. Run 20's claims stage was refused 19 times gathering exactly this."""
+    calls = [_Call("touch /tmp/cc-guard-off",
+                   "The guards' off-switches are the operator's, not yours.", ok=False)]
+    verdict = vf.command_result(calls, "touch /tmp/cc-guard-off", "denied")
+    assert verdict.ok, (verdict.kind, verdict.detail)
+
+
+def test_a_command_that_merely_failed_is_not_a_refusal() -> None:
+    calls = [_Call("ls /tmp/cc-guard-off",
+                   "Exit code 1\nls: /tmp/cc-guard-off: No such file or directory", ok=False)]
+    verdict = vf.command_result(calls, "ls /tmp/cc-guard-off", "denied")
+    assert not verdict.ok, (verdict.kind, verdict.detail)
+
+
+def test_a_refused_command_claimed_to_have_been_allowed_still_fails() -> None:
+    calls = [_Call("touch /tmp/cc-guard-off",
+                   "The guards' off-switches are the operator's, not yours.", ok=False)]
+    verdict = vf.command_result(calls, "touch /tmp/cc-guard-off", "no output, allowed")
+    assert not verdict.ok, (verdict.kind, verdict.detail)
+
+
+def _bash(command: str, printed: str, ok: bool = True):
+    return ev.ToolCall(agent="claims", tool="Bash", call_id="c1",
+                                args={"command": command}, ok=ok, text=printed)
+
+
+def test_a_command_cited_without_saying_what_it_printed_is_not_evidence() -> None:
+    """The blank sailed through every check, because "" is a substring of anything: an EVIDENCE line
+    naming a command and no output passed against any call that looked like it, and against calls
+    that were never made. Run 21's fourth round had eight citations of that shape and the gate
+    reported seven of its claims as standing."""
+    calls = [_bash("pytest -q", "291 passed")]
+    verdict = vf.command_result(calls, "pytest -q", "")
+    assert not verdict.ok, verdict
+    assert "not what it printed" in verdict.detail, verdict.detail
+
+
+def test_a_probe_that_set_a_variable_is_not_matched_to_one_that_did_not() -> None:
+    """Probes of one hook are nearly the same string, so the payload decides which is which -- but
+    the shell around the payload can be the entire claim. Run 21 cited a run that exported
+    CC_GUARD_LIFTABLE and was matched to twelve recorded probes with the same payload and no
+    variable, which is the one condition the claim was about."""
+    payload = '{"tool_name": "Bash", "tool_input": {"command": "touch /tmp/cc-guard-off"}}'
+    plain = _bash("echo '%s' | python3 guard.py" % payload, "DENY")
+    cited = "export CC_GUARD_LIFTABLE=1; echo '%s' | python3 guard.py" % payload
+    assert not vf._same_command(cited, plain.args["command"])
+    assert vf.command_result([plain], cited, "allowed").kind == vf.UNVERIFIED
+    lifted = _bash("export CC_GUARD_LIFTABLE=1; echo '%s' | python3 guard.py" % payload, "allowed")
+    assert vf.command_result([lifted], cited, "allowed").ok
+
+
+def test_a_variable_inside_the_payload_is_not_a_condition_of_the_run() -> None:
+    """The bypass under review builds the name out of shell, so `X=cc-guard` appears inside the
+    payload being tested. That is the thing the probe is about, not a setting of the probe, and
+    holding the recorded call to it would refuse the citation that reports it."""
+    payload = '{"tool_name": "Bash", "tool_input": {"command": "X=cc-guard; touch /tmp/$X-off"}}'
+    ran = _bash("echo '%s' | python3 guard.py" % payload, "(no output)")
+    assert vf._same_command("echo '%s' | python3 guard.py" % payload, ran.args["command"])
+
+
+def test_a_quoted_regex_keeps_the_escapes_that_make_it_one() -> None:
+    """`\\b` and `\\n` are escapes in JSON and word-boundaries and character classes in a regex, and
+    this repo is mostly regex. Decoded as JSON, a correct one-line quote of `_VERBS` arrived carrying
+    a backspace and a line break, matched nothing, and was reported as not present in the file it had
+    been copied out of. The citation settles it: one line cited cannot be several lines quoted."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = pathlib.Path(tmp) / "guard.py"
+        source = '_VERBS = r"(?:touch|mv|cp)\\b[^;|&\\n]*"\n'
+        target.write_text(source)
+        body = 'guard.py:1 "%s"' % source.rstrip().replace('"', '\\"')
+        found, text = vf._quote_carrying_citation(body)
+        assert "\\b" in text and "\x08" not in text, repr(text)
+        verdict = vf.file_quote(tmp, found[0]["path"], found[0]["start"], found[0]["end"], text)
+        assert verdict.ok, verdict
+
+
+def test_a_multi_line_quote_still_arrives_as_several_lines() -> None:
+    """The escape a model means as a line break, when it hands over a run of lines as one string,
+    still has to become one -- so the rule above is bounded to citations of a single line."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = pathlib.Path(tmp) / "widen.py"
+        target.write_text("def widen(rows):\n    width = 0\n    return width\n")
+        body = 'widen.py:1-2 "def widen(rows):\\n    width = 0"'
+        found, text = vf._quote_carrying_citation(body)
+        assert len(text.splitlines()) == 2, repr(text)
+        assert vf.file_quote(tmp, found[0]["path"], found[0]["start"], found[0]["end"], text).ok
+
+
+def test_an_intentionally_escaped_backslash_still_decodes_to_one() -> None:
+    """Only an even number of backslashes is left alone, or a quote that really did contain `\\\\b`
+    would come back with a backslash it never had."""
+    assert vf._protect(r'"a\\b"') == r'"a\\b"', vf._protect(r'"a\\b"')
+    assert vf._protect(r'"a\b"') != r'"a\b"'
+
+
+def test_a_quote_of_two_lines_citing_one_still_says_where_it_is() -> None:
+    """Reading the `\\n` as two characters must not cost the near-miss message. Deciding the reading
+    in the parser turned this from `wrong-lines`, which names the lines the text is actually at, into
+    a bare `quote not present` -- the same verdict a fabricated quote gets. So the parser hands over
+    one reading, the verifier tries the other, and the better answer wins."""
+    with tempfile.TemporaryDirectory() as tmp:
+        (pathlib.Path(tmp) / "widen.py").write_text("def widen(rows):\n    width = 0\n    return w\n")
+        found, text = vf._quote_carrying_citation('widen.py:1 "def widen(rows):\\n    width = 0"')
+        verdict = vf.file_quote(tmp, found[0]["path"], found[0]["start"], found[0]["end"], text)
+        assert verdict.kind == vf.WRONG_LINES, verdict
+
+
+def test_a_quote_with_no_newline_either_way_is_judged_once() -> None:
+    """There is no second reading to try when nothing in the quote is ambiguous."""
+    assert vf._other_reading("width = 0") is None
+    assert vf._other_reading("a\nb") == "a\\nb"
+    assert vf._other_reading("a\\nb") == "a\nb"
+
+
+def test_a_numbered_claim_with_the_colon_outside_the_emphasis_is_still_a_claim() -> None:
+    """`**CLAIM 1**: ...` is the same header as `**CLAIM 1:** ...`, and only the second was read.
+    Run 22's claims stage wrote eight findings the first way, spending 138 tool calls to get them, and
+    was told it had stated no claims -- a refusal that describes the parser rather than the report."""
+    eight = "\n\n".join("**CLAIM %d**: finding number %d.\n\nEvidence: guard.py:%d \"line %d\""
+                        % (n, n, n, n) for n in range(1, 9))
+    with tempfile.TemporaryDirectory() as tmp:
+        pathlib.Path(tmp, "guard.py").write_text("".join("line %d\n" % n for n in range(1, 9)))
+        claims, _ = vf.parse_ledger(eight, root=tmp)
+        assert len(claims) == 8, [c.get("claim") for c in claims]
+        assert all(c.get("evidence") for c in claims), claims
+
+
+def test_the_emphasis_rule_does_not_swallow_a_sentence_that_merely_starts_with_a_word() -> None:
+    """The two asterisks are optional, not the colon: prose about a claim is not a claim."""
+    prose = "Claim inspection showed nothing. The evidence header, however, was absent.\n"
+    claims, _ = vf.parse_ledger(prose, root=".")
+    assert not claims, claims
+
+
+def test_a_bare_command_citation_is_refused_with_what_it_printed() -> None:
+    """Run 22's third claims round was refused thirteen times, every gap saying the same thing about
+    output it had on record and was not shown. A stage that ran the experiment and guessed the wrong
+    format loses the round to a formatting note, so the note carries the output it is asking for."""
+    calls = [_bash("python3 scripts/cc-context-guard.py < payload.json",
+                   "{\"permissionDecision\": \"deny\", \"reason\": \"off-switch\"}")]
+    verdict = vf.command_result(calls, "python3 scripts/cc-context-guard.py < payload.json", "")
+    assert not verdict.ok, verdict
+    assert "permissionDecision" in verdict.detail, verdict.detail
+    assert "printed:" in verdict.detail, verdict.detail
+
+
+def test_a_bare_citation_of_a_silent_command_says_it_was_silent() -> None:
+    """Silence is the result when the rule under test is one that lets things through, and a stage
+    told only that its citation lacks output will go looking for output that does not exist."""
+    calls = [_bash("touch /tmp/my-cc-guard-off", "")]
+    verdict = vf.command_result(calls, "touch /tmp/my-cc-guard-off", "")
+    assert not verdict.ok, verdict
+    assert "printed nothing" in verdict.detail, verdict.detail
+
+
+def test_a_bare_citation_of_a_command_nobody_ran_says_that_instead() -> None:
+    """Showing the output must not invent one: a citation of a command with no recorded call gets the
+    plain refusal, or the message would imply the run happened."""
+    calls = [_bash("ls", "notes.txt")]
+    verdict = vf.command_result(calls, "curl http://example.com", "")
+    assert not verdict.ok, verdict
+    assert "printed:" not in verdict.detail, verdict.detail
+
+
+def test_a_finding_written_as_a_paragraph_is_read_as_cited() -> None:
+    """Run 25's claims round wrote every finding as prose with the citation mid-sentence, and all
+    eight were refused for citing nothing."""
+    text = ("CLAIM: the guard admits an off switch only when the launch allowed one.\n"
+            "The check is `OFF_SWITCH.exists() and os.environ.get(\"CC_GUARD_LIFTABLE\")` at "
+            "line 323, so both have to hold.\n")
+    claims, _ = vf.parse_ledger(text)
+    quotes = [e for e in claims[0]["evidence"] if e.get("kind") == "file_quote"]
+    assert quotes and quotes[0]["start"] == 323, claims[0]["evidence"]
+
+
+def test_a_line_that_is_already_a_header_is_not_given_another() -> None:
+    """The promotion of prose to evidence fired on evidence lines too, and the doubled header made
+    the header part of the body: `EVIDENCE: command: rg -n 'a:1-2'` was read as a file citation."""
+    claims, _ = vf.parse_ledger(
+        "CLAIM: x\nEVIDENCE: command: rg -n 'a:1-2' src && echo done -> done\n")
+    assert [e["kind"] for e in claims[0]["evidence"]] == ["command_result"], claims[0]["evidence"]
+
+
+def test_source_quoted_in_a_sentence_is_not_read_as_a_command() -> None:
+    """A quotation of the file that happens to contain a comparison was reported as a command
+    nobody could find, which refuses the round as surely as a fabrication would."""
+    got = vf._probes('the test is `OFF_SWITCH.exists() and os.environ.get("X") == "1"` here')
+    assert got == [], got
+
+
+def test_prose_between_two_snippets_is_not_a_command() -> None:
+    """Backticks alternate, so a scan that pairs them wrongly reads the words in between as a run.
+    Run 25 produced `flag does NOT re`, `is denied but` and `function is only` this way."""
+    for phantom in ("`flag does NOT re`", "`is denied but`", "`function is only`"):
+        assert vf._probes("a %s b" % phantom) == [], phantom
+
+
+def test_a_command_that_names_a_program_is_still_a_command() -> None:
+    """The whitelist that turns phantoms away must not turn away the probes a stage really ran."""
+    got = vf._probes("I ran `CC_GUARD_LIFTABLE=1 python3 scripts/g.py` -- allowed.")
+    assert [g["kind"] for g in got] == ["command_result"], got
+    assert got[0]["command"].startswith("CC_GUARD_LIFTABLE=1 python3"), got
+
+
+def test_a_hook_that_printed_nothing_bears_out_a_report_of_nothing_caught() -> None:
+    """A rule letting something through has nothing to show but silence. Four such reports in run
+    25 said "is not caught by _CALLS" of a hook that printed nothing, and each was judged a
+    failure."""
+    calls = [_bash("echo '{\"command\": \"node -e x\"}' | python3 guard.py", "", ok=True)]
+    verdict = vf.command_result(calls, "python3 guard.py", "the node call is not caught by _CALLS")
+    assert verdict.ok, verdict.detail
+
+
+def test_a_report_of_something_said_is_not_borne_out_by_silence() -> None:
+    """The same latitude must not accept a description of output against no output at all."""
+    calls = [_bash("python3 guard.py", "", ok=True)]
+    verdict = vf.command_result(calls, "python3 guard.py", "printed DENIED with the reason")
+    assert not verdict.ok, verdict.detail
+
+
+def test_an_outcome_in_backticks_is_the_outcome() -> None:
+    """Three findings in run 25 were refused for a probe whose expected output the parser read as
+    ">": the unquoted alternative could only match the arrow when the outcome wore backticks."""
+    got = vf._probes('`echo \'{"tool_input":{"command":"echo x > /tmp/y"}}\' | python3 g.py` -> `deny`.')
+    assert [(g["kind"], g["expect"]) for g in got] == [("command_result", "deny")], got
+
+
+def test_an_aside_after_a_backticked_outcome_is_still_an_aside() -> None:
+    got = vf._probes('`shred /tmp/cc-guard-off` -> `deny` (false positive: the file survives).')
+    assert got and got[0]["expect"] == "deny", got
+
+
+def test_an_unbackticked_outcome_still_reads() -> None:
+    got = vf._probes('`echo p | python3 g.py` -> empty output (allowed: rm is not a verb here).')
+    assert got and got[0]["expect"] == "empty output", got
+
+
+def test_a_probe_that_spells_out_its_silence_is_read_as_silent() -> None:
+    """The stage wrote `... | python3 guard.py && echo "ALLOWED"` so that silence could be seen and
+    cited, reported it as "empty output (allowed)", and was refused because the words differed."""
+    calls = [_bash('echo p | python3 guard.py && echo "ALLOWED"', "ALLOWED", ok=True)]
+    verdict = vf.command_result(calls, "python3 guard.py", "empty output (allowed)")
+    assert verdict.ok, verdict.detail
+
+
+def test_a_probe_that_printed_a_refusal_is_not_read_as_silent() -> None:
+    """The same latitude must not turn a denial into an allowance."""
+    calls = [_bash('echo p | python3 guard.py && echo "ALLOWED"', "DENIED", ok=True)]
+    verdict = vf.command_result(calls, "python3 guard.py", "empty output (allowed)")
+    assert not verdict.ok, verdict.detail
+
+
+def _bash(command: str, printed: str, ok: bool = True):
+    return ev.ToolCall(agent="claims", tool="Bash", call_id="c%d" % id(printed),
+                                args={"command": command}, ok=ok, text=printed)
+
+
+def test_a_probe_that_printed_the_evidence_and_then_crashed_does_not_beat_the_clean_run() -> None:
+    """Run 26's probe printed what the claim rested on and died three lines later on a typo.
+
+    Two clean runs of the same command printed the same thing afterwards, and the gate refused the
+    claim on the first attempt because it returned on the first match it found. Order of attempts is
+    not evidence about anything; a session that gets a probe working on the third go has got it
+    working.
+    """
+    command = "python3 -c 'print(forget_running(s, every=True))'"
+    calls = [_bash(command, "forget_running=['claims']\nTraceback ... NameError", ok=False),
+             _bash(command, "forget_running=['claims']", ok=True)]
+    said = vf.command_result(calls, command, "['claims']")
+    assert said.kind == vf.PASS, said
+
+    # And with only the failed run on record it is still refused -- but usefully, naming the reason.
+    only_broken = vf.command_result(calls[:1], command, "['claims']")
+    assert only_broken.kind == vf.FAIL, only_broken
+    assert "exited non-zero" in only_broken.detail, only_broken.detail
+    assert "again cleanly" in only_broken.detail, only_broken.detail
+
+
+def test_a_quote_headed_with_its_citation_before_the_colon_is_read() -> None:
+    """`QUOTE from `s.py` lines 4-5:` -- how run 26's claims stage wrote all twelve of its quotes.
+
+    The header was not recognised as a header, so the fenced lines under it attached to nothing and
+    the claim was reported as citing none of them.
+    """
+    import cc_ledger
+    with tempfile.TemporaryDirectory() as root:
+        body = ["import os", "", "", "def pick(entry):", "    return SHORT if entry else LONG"]
+        pathlib.Path(root, "s.py").write_text("\n".join(body) + "\n")
+        ledger = ("**FINDING 1: the limit depends on the entry.**\n"
+                  "\n"
+                  "QUOTE from `s.py` lines 4-5:\n"
+                  "```\n"
+                  "def pick(entry):\n"
+                  "    return SHORT if entry else LONG\n"
+                  "```\n"
+                  "\n"
+                  "Which is what the claim rests on.\n")
+        claims, _ = cc_ledger.claims_from_text(ledger, root)
+        assert len(claims) == 1, claims
+        evidence = claims[0].evidence
+        assert evidence, "the quote attached to nothing, as in run 26"
+        assert evidence[0].path == "s.py", evidence[0]
+        assert (evidence[0].start, evidence[0].end) == (4, 5), evidence[0]
+        said = vf.file_quote(root, evidence[0].path, evidence[0].start, evidence[0].end,
+                                   evidence[0].quote or "")
+        assert said.ok, said
+
+
+def test_the_bounded_phrase_does_not_turn_a_sentence_into_a_header() -> None:
+    """The reason it is bounded and colon-free: a header must stay distinguishable from prose."""
+    for line in ("QUOTE from `s.py` lines 4-5:", "QUOTE (lines 212-217):", "QUOTE:",
+                 "EVIDENCE: command: rg -n X s.py -> X = 3"):
+        assert vf.HEADER_RE.match(line), line
+    for line in ("The quote from s.py shows that the limit depends on the entry",
+                 "    QUOTE: indented, so part of a quoted block rather than a header of one"):
+        assert not vf.HEADER_RE.match(line), line
+
+
+def test_each_quote_header_overrides_the_address_inherited_from_the_previous_quote() -> None:
+    """Run 26 put two independently addressed QUOTEs under one finding.
+
+    The second quote inherited the first one's path, then supplied only its own line range because
+    the parser treated the inherited path as explicit. A quote from cc_flowstate.py was consequently
+    checked against cc-flow-guard.py and refused, despite both header citations being complete.
+    """
+    import cc_ledger
+    with tempfile.TemporaryDirectory() as root:
+        pathlib.Path(root, "first.py").write_text("guard = True\n")
+        pathlib.Path(root, "second.py").write_text("state = True\n")
+        ledger = ("CLAIM: both sites participate.\n"
+                  "QUOTE from `first.py` lines 1-1:\n"
+                  "```\n"
+                  "guard = True\n"
+                  "```\n"
+                  "QUOTE from `second.py` lines 1-1:\n"
+                  "```\n"
+                  "state = True\n"
+                  "```\n")
+        claims, _ = cc_ledger.claims_from_text(ledger, root)
+        assert len(claims) == 1, claims
+        assert [piece.path for piece in claims[0].evidence] == ["first.py", "second.py"]
+        assert all(vf.file_quote(root, piece.path or "", piece.start, piece.end,
+                                 piece.quote or "").ok
+                   for piece in claims[0].evidence)
+
+
+def test_a_long_python_c_citation_is_not_matched_to_a_different_experiment() -> None:
+    """Run 26 cited a precise one-line probe containing typos and invented paths.
+
+    Seventy-percent token overlap matched it to any of several later, working heredoc probes of the
+    same module. That upgrades a command nobody ran into evidence merely because somebody ran a
+    vaguely similar experiment, which is exactly the fabrication boundary the verifier exists for.
+    """
+    cited = ("python3 -c \"import sys, tempfile; sys.path.insert(0, '/private/tmp/z86'); "
+             "import cc_flowstate; s=c_flowstate.begin('review','t','s9',tempfile.mkdtemp()); "
+             "print(cc_flowstate.admits(s,'claims'))\"")
+    ran = ("python3 << 'PYEOF'\nimport sys, tempfile\nsys.path.insert(0, "
+           "'/private/tmp/r26tree/scripts')\nimport cc_flowstate\n"
+           "s = cc_flowstate.begin('review', 't', 'real', tempfile.mkdtemp())\n"
+           "print(cc_flowstate.admits(s, 'claims'))\nPYEOF")
+    call = _bash(ran, "(False, 'already running')", ok=True)
+    assert not vf._same_command(cited, ran)
+    assert vf.command_result([call], cited, "False").kind == vf.UNVERIFIED

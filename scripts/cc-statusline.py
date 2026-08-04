@@ -16,6 +16,7 @@ the launcher declares a window smaller than the model's and this line is read ag
 """
 
 import json
+import os
 import sys
 
 RESET = "\033[0m"
@@ -40,6 +41,35 @@ def humanise(n: int) -> str:
     if n >= 1000:
         return f"{n / 1000:.1f}k"
     return str(n)
+
+
+def _flow(payload: dict) -> str:
+    """The running flow, as `review 1/3 claims` or `implement plan refused`."""
+    session = payload.get("session_id") or ""
+    root = (payload.get("workspace") or {}).get("project_dir") or payload.get("cwd") or ""
+    if not session or not root:
+        return ""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import cc_flowstate
+        import cc_flow
+    except ImportError:
+        return ""
+    state = cc_flowstate.peek(session, root)
+    if not state.get("flow"):
+        return ""
+    total = len(cc_flow.flow_for(state["flow"]) or ())
+    done = len(cc_flowstate.done(state))
+    bad = cc_flowstate.refused(state)
+    if bad and cc_flowstate.next_stage(state) == bad[-1]["stage"]:
+        return f"{RED}{state['flow']} {bad[-1]['stage']} refused{RESET}"
+    running = cc_flowstate.running(state)
+    if running:
+        return f"{YELLOW}{state['flow']} {done}/{total} {running[-1]}{RESET}"
+    nxt = cc_flowstate.next_stage(state)
+    if nxt is None:
+        return f"{GREEN}{state['flow']} complete{RESET}"
+    return f"{DIM}{state['flow']} {done}/{total}, next {nxt}{RESET}"
 
 
 def main() -> None:
@@ -77,6 +107,13 @@ def main() -> None:
     effort = (payload.get("effort") or {}).get("level")
     if effort:
         parts.append(f"{DIM}{effort}{RESET}")
+
+    # The client shows that a subagent is working, which answers "is something happening" and not
+    # "is it getting anywhere". A flow is three stages deep and the interesting states are the ones
+    # you would otherwise have to ask about: which stage, and whether one was refused.
+    flow = _flow(payload)
+    if flow:
+        parts.append(flow)
 
     if nag:
         parts.append(nag)

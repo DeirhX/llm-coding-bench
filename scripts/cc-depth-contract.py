@@ -25,11 +25,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import cc_flow
+import cc_flowstate
 import cc_ledger  # noqa: E402
 
 OFF_SWITCH = Path("/tmp/cc-depth-off")
@@ -48,7 +51,10 @@ def main() -> int:
                     help="one of: %s" % ", ".join(sorted(cc_ledger.ADAPTERS)))
     args = ap.parse_args()
 
-    if OFF_SWITCH.exists():
+    # A file is not a switch when the thing being switched off can make files. Honoured only in a
+    # session launched to honour it; the environment of a hook is the one thing a stage cannot
+    # reach, because the client spawns each hook fresh from its own.
+    if OFF_SWITCH.exists() and os.environ.get("CC_DEPTH_LIFTABLE") == "1":
         return 0
     try:
         payload = json.load(sys.stdin)
@@ -58,7 +64,13 @@ def main() -> int:
     session = payload.get("session_id") or "nosession"
     root = payload.get("cwd") or os.getcwd()
     event = payload.get("hook_event_name") or "UserPromptSubmit"
-    contract = cc_ledger.contract_for(args.adapter)
+
+    # A person opening a session does not know in advance whether the next hour is a review or a
+    # change, and should not have to relaunch to switch. A prompt that names a flow starts it here,
+    # which is also the only place that knows the prompt at all.
+    started = _flow_from(payload.get("prompt") or "", session, root)
+    adapter = cc_flow.FLOW_ADAPTER.get(started, args.adapter) if started else args.adapter
+    contract = cc_ledger.contract_for(adapter)
 
     try:
         directory = cc_ledger.run_dir(session, root)
@@ -73,14 +85,67 @@ def main() -> int:
         return 0
 
     marker = directory / "contract-injected"
+    if started:
+        # A new flow means a new contract, so the injected one has to be re-injected even though
+        # this session has seen a contract before.
+        marker.unlink(missing_ok=True)
     if marker.exists():
         return 0
     try:
         marker.write_text(contract.adapter + "\n")
     except OSError:
         pass
-    emit(event, cc_ledger.contract_markdown(contract))
+    context = cc_ledger.contract_markdown(contract)
+    if started:
+        context += "\n\n" + _flow_briefing(started)
+    emit(event, context)
     return 0
+
+
+FLOW_LINE = re.compile(r"^\s*(?:/)?(?P<flow>review|implement)\b[:\s]+(?P<task>.+)$",
+                       re.I | re.M | re.S)
+
+
+def _flow_from(prompt: str, session: str, root: str) -> str:
+    """Start a flow if the prompt asks for one, and return its name.
+
+    Deliberately a prefix and not a classifier: "review" or "implement" as the first word, which is
+    what the two slash commands expand to. Guessing from the shape of a sentence would mean a
+    session sometimes silently in a flow and sometimes not, and the difference is whether three
+    subagents are about to run.
+    """
+    found = FLOW_LINE.match((prompt or "").strip())
+    if not found:
+        return ""
+    flow = found.group("flow").lower()
+    if not cc_flow.flow_for(flow):
+        return ""
+    cc_flowstate.begin(flow, " ".join(found.group("task").split())[:2000], session, root)
+    return flow
+
+
+def _flow_briefing(flow: str) -> str:
+    stages = cc_flow.flow_for(flow) or []
+    names = [s.name for s in stages]
+    return "\n".join([
+        "## This is a %s flow, and it runs in stages" % flow,
+        "",
+        "Run each of these as a subagent, in this order, waiting for each to report before "
+        "launching the next: **%s**." % ", ".join(names),
+        "",
+        "The first line of a subagent's prompt must be exactly `STAGE: <name>`. You do not need to "
+        "write the rest: the stance is substituted for you, identical every time, so that what a "
+        "stage does here is the same thing it does when the flow is run as a script. Anything else "
+        "you put in the prompt is discarded.",
+        "",
+        "Each stage is judged when it finishes, and you will be told the verdict. A stage that is "
+        "refused can be run again. If a stage the flow depends on is refused, the stages after it "
+        "will not start, and the way forward is to satisfy that stage rather than to work around "
+        "it.",
+        "",
+        "Do the work in the stages, not yourself: your job is to launch them in order and to report "
+        "what they found.",
+    ])
 
 
 if __name__ == "__main__":

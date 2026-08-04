@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import json
 import sys
+import os
 import tempfile
 from pathlib import Path
 
@@ -39,16 +40,20 @@ class Fake:
         self.prompts: list[str] = []
         self.resumed: list[bool] = []
         self.settings: list = []
+        self.tools: list[str] = []
+        self.disallowed: list[str] = []
 
     def __call__(self, prompt, model, head, session, cwd, settings, resume=False, yolo=False,
-                 timeout=3600):
+                 timeout=3600, tools=dp.STAGE_TOOLS, disallowed=""):
         self.prompts.append(prompt)
+        self.disallowed.append(disallowed)
         self.resumed.append(resume)
         self.settings.append(settings)
+        self.tools.append(tools)
         return (self.replies.pop(0) if self.replies else ""), ""
 
 
-def _run(replies, stages="survey,claims", task="does add add?"):
+def _run(replies, stages="survey,claims", task="does add add?", adapter="review"):
     tmp = tempfile.mkdtemp()
     root = Path(tmp)
     (root / "src").mkdir()
@@ -60,12 +65,11 @@ def _run(replies, stages="survey,claims", task="does add add?"):
     dp.LOCK = root / "lock"
     try:
         head = dp.head_file(out)
-        contract = cc_ledger.contract_for("review")
-        results = []
-        for name in stages.split(","):
-            stage = {s.name: s for s in dp.DEFAULT_STAGES}[name]
-            results.append(dp.run_stage(stage, contract, task, "fake-model", head, out, root,
-                                        False, False))
+        contract = cc_ledger.contract_for(adapter)
+        chosen = [{s.name: s for s in dp.DEFAULT_STAGES + dp.IMPLEMENT_STAGES}[n]
+                  for n in stages.split(",")]
+        results = dp.run_flow(chosen, contract, task, "fake-model", head, out, root, False, False,
+                              adapter, quiet=True)
         return results, fake, out, root
     finally:
         dp.invoke = original
@@ -167,3 +171,160 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# A plan the change-plan contract accepts: it cites what it read and names the failure it expects
+# before any code exists. Without the PREDICT line the stage is refused, which is the point of it.
+PLAN = ("CLAIM: add returns the sum, and the caller wants the product.\n"
+        "EVIDENCE: src/m.py:1-2\n"
+        "QUOTE:\ndef add(a, b):\n    return a + b\n"
+        "PREDICT: command: pytest -q -> AssertionError: 5 != 6\n")
+
+
+def test_only_the_implement_stage_is_handed_the_editing_tools() -> None:
+    """The plan reads and the verify stage judges; a stage that could edit either would be judging
+    a tree it had moved."""
+    _, fake, _, _ = _run([PLAN, "changed it", "stashed it and it failed"],
+                         stages="plan,implement,verify", adapter="implement")
+    handed = dict(zip(["plan", "implement", "verify"], fake.tools))
+    assert "Edit" not in handed["plan"] and "Write" not in handed["plan"], handed
+    assert "Edit" in handed["implement"] and "Write" in handed["implement"], handed
+    assert "Edit" not in handed["verify"] and "Write" not in handed["verify"], handed
+
+
+def test_the_writing_stage_is_told_to_change_the_repository_not_scratch() -> None:
+    """The read-only stages are told the opposite, and that instruction would send a fix to /tmp."""
+    _, fake, out, _ = _run([PLAN, "changed it", "stashed it and it failed"],
+                           stages="plan,implement,verify", adapter="implement")
+    plan, implement = fake.prompts[0], fake.prompts[1]
+    assert "Do not create files in the repository" in plan, plan[-300:]
+    assert "Change the files the task requires" in implement, implement[-300:]
+    assert str(out / "scratch") in implement, implement[-300:]
+
+
+
+def test_the_plan_stage_is_judged_on_its_own_contract() -> None:
+    """The run's adapter is implement, which the plan cannot satisfy and is not asked to.
+
+    It is asked for something else: the failing run it expects, named before the code exists. The
+    first real implement run went wrong precisely here, in the one stage nothing was checking.
+    """
+    results, _, _, _ = _run(["a plan with no commitment in it"], stages="plan", adapter="implement")
+    gaps = " ".join(results[0].gaps)
+    assert "commits to nothing" in gaps, gaps
+    assert "failed and then passed" not in gaps, "the plan must not be held to the run's contract"
+
+
+def test_a_plan_that_names_its_failure_passes() -> None:
+    results, _, _, _ = _run([PLAN], stages="plan", adapter="implement")
+    assert results[0].gaps == [], results[0].gaps
+
+
+def test_the_prediction_reaches_the_stage_that_must_honour_it() -> None:
+    """Read off plan.md rather than carried in memory, so a stage rerun alone judges the same."""
+    _, _, out, _ = _run([PLAN], stages="plan", adapter="implement")
+    import cc_verify
+    assert [p["expect"] for p in cc_verify.predictions((out / "plan.md").read_text())] \
+        == ["AssertionError: 5 != 6"]
+
+
+def test_a_base_url_the_caller_set_is_not_overwritten(monkeypatch) -> None:
+    """Pointing the pipeline at llama-server has to be possible from outside it."""
+    import depth_pipeline as dp
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8099")
+    seen = {}
+
+    def fake(cmd, **kw):
+        seen.update(kw.get("env") or {})
+        raise SystemExit(0)
+
+    monkeypatch.setattr(dp.subprocess, "run", fake)
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            dp.invoke("p", "m", Path(tmp) / "h.md", "s", Path(tmp), Path(tmp) / "s.json", ())
+        except SystemExit:
+            pass
+    assert seen.get("ANTHROPIC_BASE_URL") == "http://127.0.0.1:8099", seen.get("ANTHROPIC_BASE_URL")
+
+def test_a_refused_plan_stops_the_flow() -> None:
+    """The stages below a plan execute it faithfully, which is the problem.
+
+    A plan that committed to nothing was implemented and then verified anyway, and what came
+    out passed a real red/green pair while changing no behaviour at all.
+    """
+    results, fake, _, _ = _run(["a plan with no commitment in it", "changed it", "verified"],
+                               stages="plan,implement,verify", adapter="implement")
+    assert [r.stage for r in results] == ["plan"], [r.stage for r in results]
+    assert len(fake.prompts) <= 2, fake.prompts
+
+
+def test_a_plan_that_commits_lets_the_flow_continue() -> None:
+    results, _, _, _ = _run([PLAN, "changed it", "verified"],
+                            stages="plan,implement,verify", adapter="implement")
+    assert [r.stage for r in results] == ["plan", "implement", "verify"], results
+
+def test_no_cache_lines_is_not_a_measurement_of_zero() -> None:
+    """Pointed at llama-server, nothing matches Ollama's log and the column read 0.0%.
+
+    That is an absence of measurement printed as a measurement, in the one column that says
+    whether the shared head is earning its keep.
+    """
+    assert dp.StageResult(stage="s", session="x").reuse is None
+    assert dp.StageResult(stage="s", session="x", cache=[(100, 80)]).reuse == 80.0
+
+def test_a_judging_stage_is_forbidden_the_writing_tools_not_merely_unoffered() -> None:
+    """--allowed-tools pre-approves; it does not forbid, and --dangerously-skip-permissions
+    forbids nothing at all. A verify stage carrying a read-only tool list made nine successful
+    edits to the files it was judging, which is not a report on a change but a second author.
+    """
+    _, fake, out, _ = _run([PLAN, "changed it", "verified it"],
+                           stages="plan,implement,verify", adapter="implement")
+    kinds = dict(zip(["plan", "implement", "verify"], fake.disallowed))
+    assert kinds["implement"] == "", kinds
+    assert "Write" in kinds["verify"] and "Edit" in kinds["verify"], kinds
+    assert "Write" in kinds["plan"], kinds
+    settings = json.loads((out / "settings.json").read_text())
+    command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert "--deny" in command, command
+
+def test_a_judging_stage_that_edits_the_tree_is_caught_however_it_did_it() -> None:
+    """Denying Write does not stop `printf > file`, and a verify stage needs Bash.
+
+    Measured on a live probe: with Write, Edit, MultiEdit and NotebookEdit all denied by flag
+    and by hook, the model never attempted any of them and used a shell redirection instead.
+    """
+    import subprocess
+    tmp = tempfile.mkdtemp()
+    root = Path(tmp)
+    (root / "src").mkdir()
+    (root / "src/m.py").write_text(SAMPLE)
+    out = root / "out"
+    out.mkdir()
+    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"],
+                 ["add", "-A"], ["commit", "-qm", "before"]):
+        subprocess.run(["git"] + args, cwd=tmp, capture_output=True)
+
+    class Meddler(Fake):
+        def __call__(self, *a, **kw):
+            (root / "src/m.py").write_text(SAMPLE + "\n# judged and edited\n")
+            return super().__call__(*a, **kw)
+
+    fake = Meddler([SOLID])
+    original, dp.invoke = dp.invoke, fake
+    dp.LOCK = root / "lock"
+    try:
+        head = dp.head_file(out)
+        stage = {s.name: s for s in dp.DEFAULT_STAGES}["claims"]
+        result = dp.run_stage(stage, cc_ledger.contract_for("review"), "t", "m", head, out,
+                              root, False, False)
+    finally:
+        dp.invoke = original
+    assert any("changed the working tree" in g for g in result.gaps), result.gaps
+
+def test_a_lock_whose_holder_is_gone_is_not_a_lock() -> None:
+    """A run killed mid-stage leaves the lock behind, and the next one asks a human whether a
+    pid from an hour ago still means anything. The pid answers that.
+    """
+    assert dp.holder_alive("2026-08-02 16:40:11 pid %d model m" % os.getpid())
+    assert not dp.holder_alive("2026-08-02 16:40:11 pid 999999 model m")
+    assert dp.holder_alive("something with no pid in it")

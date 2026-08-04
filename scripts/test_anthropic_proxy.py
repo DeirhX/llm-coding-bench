@@ -13,6 +13,7 @@ import json
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -141,10 +142,16 @@ def test_stream_grammar_opens_and_closes_every_block() -> None:
     events = [e.decode() for e in ap.stream_anthropic(iter(chunks), "m")]
     kinds = [line.split(": ", 1)[1] for e in events for line in e.split("\n")
              if line.startswith("event: ")]
+    # One delta for the tool arguments rather than two: the call is assembled and held until it is
+    # whole, so that a truncated one can be dropped rather than sent as half a JSON object.
     assert kinds == ["message_start", "content_block_start", "content_block_delta",
                      "content_block_delta", "content_block_stop", "content_block_start",
-                     "content_block_delta", "content_block_delta", "content_block_stop",
+                     "content_block_delta", "content_block_stop",
                      "message_delta", "message_stop"], kinds
+    args = "".join(json.loads(line[6:])["delta"]["partial_json"]
+                   for e in events for line in e.split("\n")
+                   if line.startswith("data: ") and "input_json_delta" in line)
+    assert json.loads(args) == {"file": "a.py"}, args
     fragments = [json.loads(line[6:])["delta"]["partial_json"]
                  for e in events for line in e.split("\n")
                  if line.startswith("data: ") and '"input_json_delta"' in line]
@@ -194,10 +201,12 @@ def test_reasoning_becomes_a_thinking_block() -> None:
     Reading only `content` yields a blank answer, which is indistinguishable from a dead model --
     and is exactly what the first live smoke test produced.
     """
-    msg = ap.to_anthropic({"choices": [{"finish_reason": "length", "message": {
+    msg = ap.to_anthropic({"choices": [{"finish_reason": "stop", "message": {
         "content": "", "reasoning": "The user said banana."}}]}, "m")
     assert msg["content"] == [{"type": "thinking", "thinking": "The user said banana."}]
-    assert msg["stop_reason"] == "max_tokens"
+    # `length` used to be reported as max_tokens, which kills the session outright. See
+    # test_a_cut_answer_is_a_turn_and_not_the_end_of_the_session.
+    assert msg["stop_reason"] == "end_turn"
 
 
 def test_thinking_then_text_are_separate_streamed_blocks() -> None:
@@ -227,3 +236,208 @@ def test_force_model_rewrites_whatever_the_client_asked_for() -> None:
         assert FakeUpstream.seen[-1]["model"] == "resident-31b"
     finally:
         ap.Proxy.force_model = ""
+
+
+def test_the_model_list_names_the_model_we_force() -> None:
+    """An empty list reads to the client as "no such model", and it refuses to start.
+
+    The failure it prints -- the selected model may not exist or you may not have access to it --
+    points at configuration rather than at an endpoint answering GET /v1/models with nothing.
+    """
+    _stack(18085, 18086)
+    ap.Proxy.force_model = "qwopus"
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:18086/v1/models", timeout=10) as fh:
+            body = json.loads(fh.read())
+    finally:
+        ap.Proxy.force_model = ""
+    assert [m["id"] for m in body["data"]] == ["qwopus"], body
+
+
+def test_one_answer_is_bounded() -> None:
+    """A stage took 24,847 tokens in a single response at 334 t/s -- three times this model's
+    measured rate, which is what near-total speculative acceptance looks like when the output has
+    gone round in a circle. The parent was blocked on the report and the GPU was busy throughout.
+    """
+    asked = {"model": "m", "max_tokens": 99000, "messages": [{"role": "user", "content": "hi"}]}
+    assert ap.to_openai(asked)["max_tokens"] == ap.MAX_OUTPUT
+    assert ap.to_openai(asked, 512)["max_tokens"] == 512
+
+
+def test_a_modest_request_is_left_alone() -> None:
+    asked = {"model": "m", "max_tokens": 100, "messages": [{"role": "user", "content": "hi"}]}
+    assert ap.to_openai(asked)["max_tokens"] == 100
+
+
+def test_a_client_that_names_no_limit_still_gets_one() -> None:
+    asked = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+    assert ap.to_openai(asked)["max_tokens"] == ap.MAX_OUTPUT
+
+
+def test_a_cut_answer_is_a_turn_and_not_the_end_of_the_session() -> None:
+    """Handed stop_reason max_tokens, Claude Code ends the session with "Claude's response exceeded
+    the 32000 output token maximum", mid-flow, with no way back. A cut answer is still a turn."""
+    msg = ap.to_anthropic({"choices": [{"finish_reason": "length", "message": {
+        "content": "CLAIM: the rule is"}}], "usage": {"completion_tokens": 8192}}, "m")
+    assert msg["stop_reason"] == "end_turn", msg["stop_reason"]
+    assert "cut off at 8192 tokens" in msg["content"][-1]["text"], msg["content"]
+
+
+def test_a_tool_call_cut_in_half_is_dropped() -> None:
+    """Passed through, the client answers that the input could not be parsed as JSON and the model
+    sends the same oversized call again."""
+    msg = ap.to_anthropic({"choices": [{"finish_reason": "length", "message": {
+        "content": "here goes",
+        "tool_calls": [{"id": "c1", "function": {"name": "Write", "arguments": '{"file_pa'}}]}}]}, "m")
+    assert not [b for b in msg["content"] if b["type"] == "tool_use"], msg["content"]
+    assert msg["stop_reason"] == "end_turn", msg["stop_reason"]
+
+
+def test_a_streamed_tool_call_cut_in_half_is_dropped_and_the_cut_is_stated() -> None:
+    """The live failure: a stage's answer ran past the cap in the middle of a tool call, the client
+    was handed half a JSON object and stop_reason max_tokens, and the session ended there."""
+    chunks = [
+        {"choices": [{"delta": {"content": "Now let me"}}]},
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "c1", "function": {"name": "Write", "arguments": '{"file_pa'}}]}},
+                     ], "usage": {"completion_tokens": 8192}},
+        {"choices": [{"delta": {}, "finish_reason": "length"}], "usage": {"completion_tokens": 8192}},
+    ]
+    events = [e.decode() for e in ap.stream_anthropic(iter(chunks), "m")]
+    body = "".join(events)
+    assert "tool_use" not in body, body
+    assert "cut off at 8192 tokens" in body, body
+    assert '"stop_reason": "end_turn"' in body, body
+
+
+def test_every_request_asks_for_repetition_sampling() -> None:
+    """A claims stage spent 15,255 tokens of reasoning redrafting one ledger -- 787 lines, 211 of
+    them distinct -- hit the ceiling, had its tool call dropped and died without answering. Run 9
+    did that 31 times, which is hours of a machine that generates at 70 tokens a second."""
+    sent = ap.to_openai({"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+    assert sent["dry_multiplier"] > 0
+    assert sent["dry_allowed_length"] >= 8, "short repeats are normal in code and citations"
+    bare = ap.to_openai({"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+                           dry=False)
+    assert "dry_multiplier" not in bare
+
+
+def test_a_turn_that_only_has_to_write_down_a_ledger_does_not_think() -> None:
+    """The refusal arrives with the ledger and the list of what is wrong with it: the thinking has
+    been done. That is the turn that spent 15,255 reasoning tokens redrafting what it already had."""
+    refused = ap.to_openai({"model": "m", "messages": [
+        {"role": "user", "content": "review this"},
+        {"role": "user", "content": "This answer is not accepted yet. 2 things below..."}]})
+    assert refused["chat_template_kwargs"] == {"enable_thinking": False}
+    working = ap.to_openai({"model": "m", "messages": [{"role": "user", "content": "review this"}]})
+    assert "chat_template_kwargs" not in working
+
+
+def test_the_model_cannot_turn_its_own_thinking_off() -> None:
+    """Matched only against strings this harness emits, and only in the last two messages, so a
+    model that writes the words in an answer does not change how it is sampled next turn."""
+    old = ap.to_openai({"model": "m", "messages": [
+        {"role": "assistant", "content": "This answer is not accepted yet"},
+        {"role": "user", "content": "carry on"}, {"role": "user", "content": "and on"}]})
+    assert "chat_template_kwargs" not in old
+
+
+def test_thinking_stops_once_a_stage_is_deep_in_its_work() -> None:
+    """Ten turns into a stage the context holds everything the stage needs and the reasoning is
+    about how to phrase it. That is where every runaway here has been: run 11 generated 32,000
+    tokens a turn and was cut ten times, all of it reasoning, none of it seen by anyone."""
+    early = [{"role": "user", "content": "review this"},
+             {"role": "assistant", "content": "reading"}]
+    assert "chat_template_kwargs" not in ap.to_openai({"model": "m", "messages": early})
+    deep = early + [{"role": "assistant", "content": "still reading"}] * 10
+    assert ap.to_openai({"model": "m", "messages": deep})["chat_template_kwargs"] == {
+        "enable_thinking": False}
+
+
+def test_the_indexing_stage_is_not_asked_to_reason() -> None:
+    """Run 23's survey spent the whole 16,384-token ceiling on its first turn and handed the gate the
+    proxy's cut note as its map. Listing files and line ranges, with conclusions forbidden by the
+    stance itself, is transcription from the start -- and the marker matched is the harness's own
+    words, so nothing the model writes can switch its reasoning off."""
+    import cc_flow
+    stance = [s for s in cc_flow.DEFAULT_STAGES if s.name == "survey"][0].stance
+    assert ap.INDEXING in stance, "the stance no longer says what the proxy matches"
+    survey = {"messages": [{"role": "user", "content": "STAGE: survey\n" + stance}],
+              "max_tokens": 500}
+    assert ap.to_openai(survey).get("chat_template_kwargs") == {"enable_thinking": False}
+
+
+def test_a_stage_that_makes_claims_still_reasons() -> None:
+    """The stage that has to work something out keeps the tokens to do it in."""
+    claims = {"messages": [{"role": "user", "content": "STAGE: claims\nmake the claims"}],
+              "max_tokens": 500}
+    assert ap.to_openai(claims).get("chat_template_kwargs") is None
+
+
+class RefusingUpstream(BaseHTTPRequestHandler):
+    """llama-server turning down a prompt that does not fit, in its own words."""
+
+    detail: str = ""
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *_a) -> None:
+        pass
+
+    def do_POST(self) -> None:  # noqa: N802
+        payload = self.detail.encode()
+        self.send_response(400)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+def test_a_prompt_that_does_not_fit_is_reported_the_way_the_client_can_act_on() -> None:
+    """An overflow has to arrive as a 400 saying the prompt is too long, or the run dies of it.
+
+    Claude Code has two ways to recover from a full window and this is the one that works here: an
+    HTTP 400 whose message says the prompt is too long and whose details carry the counts. A 502, or
+    a 400 typed `api_error`, is fatal, and the client's answer to fatal is to send the same request
+    again. Run 25 offered 133,902 tokens to a 131,072-token window three times without changing a
+    character, and the session ended with its last round still working.
+    """
+    RefusingUpstream.detail = json.dumps({"error": {
+        "code": 400, "type": "exceed_context_size_error",
+        "message": "request (133902 tokens) exceeds the available context size (131072 tokens), "
+                   "try increasing it",
+        "n_prompt_tokens": 133902, "n_ctx": 131072}})
+    up = _serve(RefusingUpstream, 8791)
+    ap.Proxy.upstream = "http://127.0.0.1:8791/v1/chat/completions"
+    ap.Proxy.logfile = None
+    proxy = ap.Threaded(("127.0.0.1", 8792), ap.Proxy)
+    threading.Thread(target=proxy.serve_forever, daemon=True).start()
+    time.sleep(0.1)
+    try:
+        try:
+            _post(8792, {"model": "m", "max_tokens": 8,
+                         "messages": [{"role": "user", "content": "hi"}]})
+            raise AssertionError("the proxy passed an over-long prompt off as a success")
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            said = json.loads(exc.read())
+    finally:
+        proxy.shutdown()
+        up.shutdown()
+    assert status == 400, "a 502 is fatal to the client; only a 400 starts a recovery"
+    assert said["error"]["type"] == "invalid_request_error", said
+    assert "prompt is too long" in said["error"]["message"], said["error"]["message"]
+    assert said["error"]["details"] == {"prompt_tokens": 133902, "max_tokens": 131072}, said
+
+
+def test_the_counts_are_recovered_from_the_prose_when_they_are_not_fielded() -> None:
+    """The client's recovery reads the numbers, and not every build fields them separately."""
+    said = ap.overflow_of(json.dumps({"error": {
+        "message": "request (133902 tokens) exceeds the available context size (131072 tokens)"}}))
+    assert said == (133902, 131072), said
+
+
+def test_an_upstream_failure_that_is_not_an_overflow_is_left_alone() -> None:
+    """Turning every 400 into "prompt is too long" would send the client compacting after a typo."""
+    assert ap.overflow_of(json.dumps({"error": {"message": "model not found"}})) is None
+    assert ap.overflow_of("") is None
+    assert ap.overflow_of("upstream closed the connection") is None

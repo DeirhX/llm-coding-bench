@@ -41,6 +41,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import cc_evidence  # noqa: E402
+import cc_diff  # noqa: E402
+import cc_flow  # noqa: E402
 import cc_ledger  # noqa: E402
 import cc_verify  # noqa: E402
 
@@ -51,56 +53,15 @@ OLLAMA_LOG = Path.home() / ".ollama" / "logs" / "server.log"
 CACHE_HIT = re.compile(r"cache hit.*?total=(\d+)\s+matched=(\d+)")
 
 # Tools a stage may use. Deliberately read-only plus Bash: a stage that can edit is a stage whose
-# evidence describes a file it changed halfway through reading.
-STAGE_TOOLS = "Read,Grep,Glob,Bash"
-
-
-@dataclass
-class Stage:
-    """One pass over the problem. Stances differ; the engine and the contract do not."""
-
-    name: str
-    stance: str
-    produces: str
-    consumes: tuple[str, ...] = ()
-    verify: bool = True
-
-
-DEFAULT_STAGES = [
-    Stage(
-        name="survey",
-        produces="survey.md",
-        verify=False,     # an inventory makes no claims, so there is nothing to verify yet
-        stance=("Map the territory and stop. List the files, entry points and data that bear on "
-                "the question, each with the line range you actually opened. A file here can be "
-                "longer than one read allows, so say which part of it you saw and let the next "
-                "stage search for the rest. Draw no conclusions and name no defects -- a later "
-                "stage does that, and anything you assert here it will have to re-derive. If "
-                "something looks wrong, note the location only."),
-    ),
-    Stage(
-        name="claims",
-        produces="claims.md",
-        consumes=("survey.md",),
-        stance=("Now make the claims the survey supports, and only those. Open every file you "
-                "cite, in this stage, before quoting it -- the survey is a map, not a substitute "
-                "for reading, and it saw at most the first part of a long file. To cite a line "
-                "beyond that, find it with a search and read around the hit; a line number you "
-                "have not seen is a guess even when the claim is right. Each claim gets its own "
-                "block. If the survey pointed somewhere you could not resolve, that is an "
-                "UNKNOWN, not a guess."),
-    ),
-    Stage(
-        name="adversary",
-        produces="verdict.md",
-        consumes=("claims.md",),
-        stance=("Try to break each claim above. For each one, run the cheapest thing that would "
-                "show it false and report what it printed; a claim you cannot attack survives, a "
-                "claim your attack kills is deleted, and a claim you cannot test becomes an "
-                "UNKNOWN with the reason. Do not add new findings. Do not soften the surviving "
-                "ones -- restate them with their evidence intact."),
-    ),
-]
+# evidence describes a file it changed halfway through reading. Exactly one stage of an implement
+# run is allowed the editing tools, so every other stage's citations refer to a tree it did not move.
+# What the stages are lives in cc_flow, because a Claude Code session runs the same three stances as
+# native subagents and two copies of a stance drift the moment one is edited.
+STAGE_TOOLS = cc_flow.STAGE_TOOLS
+EDITING_TOOLS = cc_flow.EDITING_TOOLS
+Stage = cc_flow.Stage
+DEFAULT_STAGES = cc_flow.DEFAULT_STAGES
+IMPLEMENT_STAGES = cc_flow.IMPLEMENT_STAGES
 
 
 @dataclass
@@ -117,9 +78,17 @@ class StageResult:
     error: str = ""
 
     @property
-    def reuse(self) -> float:
+    def reuse(self) -> float | None:
+        """None when nothing was recorded, which is not the same as nothing was reused.
+
+        The figure comes from Ollama's log. Pointed at llama-server, no line ever matches and the
+        old arithmetic reported a confident 0.0% -- an absence of measurement printed as a
+        measurement of zero, in the one column that says whether the head is earning its keep.
+        """
         total = sum(t for t, _ in self.cache)
-        return 100.0 * sum(m for _, m in self.cache) / total if total else 0.0
+        if not total:
+            return None
+        return 100.0 * sum(m for _, m in self.cache) / total
 
 
 def transcript_for(session: str, cwd: str) -> Path:
@@ -158,15 +127,27 @@ def compose(head: Path, contract: cc_ledger.Contract, stage: Stage, task: str,
     parts += ["",
               # Twelve repro scripts turned up in the repository root after six runs. A stage is
               # meant to be read-only, and Bash is the hole in that: it is the tool the adversary
-              # stage exists for, so it cannot be taken away, only aimed somewhere harmless.
-              "Any scratch file you write -- a repro script, a probe, a scratch test -- goes in "
-              "%s and nowhere else. Do not create files in the repository you are reviewing."
-              % scratch,
+              # stage exists for, so it cannot be taken away, only aimed somewhere harmless. The one
+              # stage that may edit needs the opposite instruction, or it writes its fix to scratch.
+              ("Change the files the task requires and nothing else. Scratch work -- a probe, a "
+               "throwaway script -- still goes in %s. That path is absolute: it is not inside "
+               "this repository, and creating an out/ or scratch/ directory here instead is a "
+               "change to the repository that you will be asked to justify. No scratch file is "
+               "part of your answer." % scratch) if stage.writes else
+              ("Any scratch file you write -- a repro script, a probe, a scratch test -- goes in "
+               "%s and nowhere else. Do not create files in the repository you are reviewing."
+               % scratch),
               "", "Write your answer to the reply. It is checked, not read charitably."]
     return "\n".join(parts)
 
 
-def settings_file(model: str, out_dir: Path) -> Path:
+# Tools that change the tree. A stage that is not there to change it must be unable to, not merely
+# unlisted: --allowed-tools pre-approves rather than forbids, and under --dangerously-skip-
+# permissions nothing forbids at all.
+WRITING_TOOLS = "Edit,Write,MultiEdit,NotebookEdit"
+
+
+def settings_file(model: str, out_dir: Path, deny: str = "") -> Path:
     """A settings file for this run, because the user's global one can veto the model.
 
     ~/.claude/settings.json may carry `enforceAvailableModels` with a list this model is not on --
@@ -176,6 +157,8 @@ def settings_file(model: str, out_dir: Path) -> Path:
     A session that supplies its own model cannot be overruled by a stale global list.
     """
     guard = "%s --stop-advice answer" % (REPO / "scripts/cc-context-guard.py")
+    if deny:
+        guard += " --deny %s" % deny
     path = out_dir / "settings.json"
     path.write_text(json.dumps({
         "model": model,
@@ -192,19 +175,27 @@ def settings_file(model: str, out_dir: Path) -> Path:
 
 
 def invoke(prompt: str, model: str, head: Path, session: str, cwd: Path, settings: Path,
-           resume: bool = False, yolo: bool = False, timeout: int = 3600) -> tuple[str, str]:
+           resume: bool = False, yolo: bool = False, timeout: int = 3600,
+           tools: str = STAGE_TOOLS, disallowed: str = "") -> tuple[str, str]:
     """One `claude -p` turn. Returns (text, error)."""
     cmd = ["claude", "-p", prompt, "--model", model,
            "--append-system-prompt-file", str(head),
            "--settings", str(settings),
-           "--allowed-tools", STAGE_TOOLS,
+           "--allowed-tools", tools,
            "--output-format", "json"]
+    if disallowed:
+        cmd += ["--disallowed-tools", disallowed]
     cmd += ["--resume", session] if resume else ["--session-id", session]
     if yolo:
         cmd.append("--dangerously-skip-permissions")
     env = dict(os.environ)
     env.update({
-        "ANTHROPIC_BASE_URL": env.get("OLLAMA_HOST_URL", "http://127.0.0.1:11434"),
+        # Ollama is the default backend, not the only one. A caller that has already pointed
+        # ANTHROPIC_BASE_URL somewhere -- llama-server behind the proxy, say -- means it, and
+        # overwriting it here sent every request to Ollama, which answered that the model does not
+        # exist. The error names the model, so it reads as a bad --model rather than as this line.
+        "ANTHROPIC_BASE_URL": (env.get("ANTHROPIC_BASE_URL")
+                               or env.get("OLLAMA_HOST_URL", "http://127.0.0.1:11434")),
         "ANTHROPIC_AUTH_TOKEN": "ollama",
         "ANTHROPIC_API_KEY": "",
         "ANTHROPIC_MODEL": model,
@@ -256,19 +247,51 @@ def load_gate():
     return module
 
 
-def check(answer: str, contract: cc_ledger.Contract, session: str, cwd: Path):
+def check(answer: str, contract: cc_ledger.Contract, session: str, cwd: Path,
+          predicted: tuple = ()):
     """The interactive gate's arithmetic, reused verbatim so both paths agree."""
     gate = load_gate()
-    claims, unknowns = cc_ledger.claims_from_text(answer)
+    claims, unknowns = cc_ledger.claims_from_text(answer, str(cwd))
     transcript = transcript_for(session, str(cwd))
     calls = cc_evidence.collect(str(transcript)) if transcript.is_file() else []
     if not transcript.is_file():
         print("   note: no transcript at %s -- citations checked against the files, but not "
               "against what this stage read" % transcript, file=sys.stderr)
     gaps, report = gate.evaluate(contract, claims, unknowns, calls, str(cwd),
-                                 check_coverage=transcript.is_file())
+                                 check_coverage=transcript.is_file(), answer=answer,
+                                 predicted=predicted)
     report["coverage_checked"] = transcript.is_file()
     return claims, unknowns, gaps, report, gate
+
+
+def tree_fingerprint(cwd: Path) -> str:
+    """A hash of every uncommitted change, scratch excluded.
+
+    Denying the writing tools does not stop a stage writing: asked to change a file with Write
+    forbidden, the model never attempted it and ran `printf ... > target.txt` instead, because a
+    stage that must run tests must have Bash. Enumerating the ways to write a file through a shell
+    is a losing game -- sed, tee, patch, python -c -- so this measures the outcome instead. A judge
+    that leaves the tree different from how it found it is not reporting on a change, it is making
+    one.
+    """
+    text = cc_diff.diff(str(cwd))
+    kept = [chunk for path, chunk in _chunks(text) if not cc_diff._SCRATCH.search(path)]
+    return hashlib.sha256("\n".join(kept).encode()).hexdigest()[:16]
+
+
+def _chunks(text: str):
+    """(path, its whole section of the diff) for each file, headers included."""
+    path, lines = None, []
+    for line in text.splitlines():
+        found = cc_diff._ADDED_FILE.match(line)
+        if found:
+            if path:
+                yield path, "\n".join(lines)
+            path, lines = found.group("path"), [line]
+        elif path:
+            lines.append(line)
+    if path:
+        yield path, "\n".join(lines)
 
 
 def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str, head: Path,
@@ -276,6 +299,14 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
     session = str(uuid.uuid4())
     scratch = out_dir / "scratch"
     scratch.mkdir(exist_ok=True)
+    contract = cc_ledger.contract_for(stage.adapter) if stage.adapter else contract
+    # What the plan committed to, read off disk rather than carried in memory, so a stage rerun on
+    # its own reaches the same verdict as one inside a full run.
+    predicted = ()
+    if contract.needs_red_green:
+        plan = out_dir / "plan.md"
+        if plan.is_file():
+            predicted = tuple(cc_verify.predictions(plan.read_text(errors="replace")))
     prompt = compose(head, contract, stage, task, out_dir, scratch)
     (out_dir / ("%s.prompt.txt" % stage.name)).write_text(prompt)
     result = StageResult(stage=stage.name, session=session)
@@ -285,8 +316,11 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
 
     started = time.time()
     offset = log_offset()
-    settings = settings_file(model, out_dir)
-    answer, error = invoke(prompt, model, head, session, cwd, settings, yolo=yolo)
+    watched = None if stage.writes or dry_run else tree_fingerprint(cwd)
+    settings = settings_file(model, out_dir, "" if stage.writes else WRITING_TOOLS)
+    forbidden = "" if stage.writes else WRITING_TOOLS
+    answer, error = invoke(prompt, model, head, session, cwd, settings, yolo=yolo,
+                           tools=stage.tools, disallowed=forbidden)
     if error and not answer:
         result.error = error
         result.seconds = time.time() - started
@@ -294,16 +328,23 @@ def run_stage(stage: Stage, contract: cc_ledger.Contract, task: str, model: str,
         return result
 
     if stage.verify:
-        claims, unknowns, gaps, report, gate = check(answer, contract, session, cwd)
+        claims, unknowns, gaps, report, gate = check(answer, contract, session, cwd, predicted)
+        if watched is not None and tree_fingerprint(cwd) != watched:
+            gaps.append("This stage changed the working tree, which it is not here to do: it is "
+                        "reporting on a change it did not make, and a judge that edits the code is "
+                        "a second author of it. Undo what you changed, then say what you found by "
+                        "reading and running alone.")
         if gaps:
             # One refusal, same wording the Stop hook uses, so the two paths train the same habit.
             refusal = gate.refusal(gaps, out_dir / "claims.jsonl")
             second, error = invoke(refusal, model, head, session, cwd, settings,
-                                   resume=True, yolo=yolo)
+                                   resume=True, yolo=yolo, tools=stage.tools,
+                                   disallowed=forbidden)
             result.rounds = 2
             if second:
                 answer = second
-                claims, unknowns, gaps, report, _ = check(answer, contract, session, cwd)
+                claims, unknowns, gaps, report, _ = check(answer, contract, session, cwd,
+                                                          predicted)
         result.claims, result.unknowns, result.gaps = len(claims), unknowns, gaps
         report.update({"gaps": gaps, "rounds": result.rounds, "stage": stage.name})
         (out_dir / ("%s.gate.json" % stage.name)).write_text(json.dumps(report, indent=2) + "\n")
@@ -329,12 +370,67 @@ def head_file(out_dir: Path) -> Path:
     return head
 
 
+def run_flow(stages, contract: cc_ledger.Contract, task: str, model: str, head: Path,
+             out_dir: Path, cwd: Path, yolo: bool, dry_run: bool, adapter: str = "",
+             head_hash: str = "", quiet: bool = False) -> list[StageResult]:
+    """Every stage in order, stopping when one fails or when a blocking stage is refused.
+
+    One loop, called by main and by the tests. The tests used to carry their own copy, which is how
+    a stage that refuses the plan and then implements it anyway passed a test suite that had a test
+    for exactly that.
+    """
+    def say(text: str, err: bool = False) -> None:
+        if not quiet:
+            print(text, file=sys.stderr if err else sys.stdout, flush=True)
+
+    results: list[StageResult] = []
+    for stage in stages:
+        say("== %s (%s, %s) ..." % (stage.name, adapter or contract.adapter, model))
+        result = run_stage(stage, contract, task, model, head, out_dir, cwd, yolo, dry_run)
+        results.append(result)
+        if head_hash and hashlib.sha256(head.read_bytes()).hexdigest()[:12] != head_hash:
+            say("   head changed mid-run: every later stage now re-prefills it", err=True)
+        if result.error:
+            say("   failed: %s" % result.error, err=True)
+            break
+        reuse = "not recorded" if result.reuse is None else "%.1f%%" % result.reuse
+        if stage.verify:
+            say("   %.0fs, %d round(s), %d claim(s), %d gap(s), %d unknown(s), reuse %s"
+                % (result.seconds, result.rounds, result.claims, len(result.gaps),
+                   len(result.unknowns), reuse))
+        else:
+            # "0 claim(s), 0 gap(s)" on a stage nothing judged reads like a clean bill of health.
+            say("   %.0fs, not judged here -- the next stage judges it, reuse %s"
+                % (result.seconds, reuse))
+        if stage.blocking and result.gaps:
+            say("   %s was refused, and every stage after it would be acting on what it produced, "
+                "so stopping here.\n   %s" % (stage.name, "\n   ".join(result.gaps[:3])), err=True)
+            break
+    return results
+
+
+def holder_alive(note: str) -> bool:
+    """Whether the process named in a lock file still exists. Unreadable notes are held to be live,
+    since refusing to start is the cheaper mistake."""
+    found = re.search(r"pid (\d+)", note or "")
+    if not found:
+        return True
+    try:
+        os.kill(int(found.group(1)), 0)
+    except ProcessLookupError:
+        return False
+    except (OSError, ValueError):
+        return True
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("task", help="the question the pipeline answers")
     ap.add_argument("--adapter", default="review", choices=sorted(cc_ledger.ADAPTERS))
     ap.add_argument("--model", default=os.environ.get("DEPTH_MODEL", "gemma4-31b-mtp-96k"))
-    ap.add_argument("--stages", default="survey,claims,adversary")
+    ap.add_argument("--stages", default="survey,claims,adversary",
+                    help="review flow: survey,claims,adversary; change flow: plan,implement,verify")
     ap.add_argument("--out", default="")
     ap.add_argument("--cwd", default=os.getcwd())
     ap.add_argument("--yolo", action="store_true",
@@ -343,18 +439,32 @@ def main() -> int:
                     help="compose the prompts and assert the head, call no model")
     args = ap.parse_args()
 
-    by_name = {s.name: s for s in DEFAULT_STAGES}
+    by_name = {s.name: s for s in DEFAULT_STAGES + IMPLEMENT_STAGES}
     try:
         stages = [by_name[n.strip()] for n in args.stages.split(",") if n.strip()]
     except KeyError as exc:
         print("unknown stage %s; known: %s" % (exc, ", ".join(by_name)), file=sys.stderr)
         return 2
 
+    contract_check = cc_ledger.contract_for(args.adapter)
+    if contract_check.needs_red_green and not any(s.writes for s in stages):
+        # Cheap, because the alternative is finding out forty minutes later that every stage was
+        # read-only and the run could not have satisfied its own contract.
+        print("adapter %s must show a command failing and then passing, and no selected stage may "
+              "write. Add the implement stage." % args.adapter, file=sys.stderr)
+        return 2
+
     # One runner, one variant, one stage at a time. A second driver would evict the first's model.
     if LOCK.exists() and not args.dry_run:
-        print("another pipeline holds %s (started %s). Wait, or remove it if it is stale."
-              % (LOCK, LOCK.read_text().strip()[:60]), file=sys.stderr)
-        return 1
+        held = LOCK.read_text().strip()
+        if holder_alive(held):
+            print("another pipeline holds %s (started %s). Wait, or remove it if it is stale."
+                  % (LOCK, held[:60]), file=sys.stderr)
+            return 1
+        # A run killed mid-stage leaves the lock behind, and the next one then asks a human to
+        # decide whether a pid from an hour ago is still meaningful. The pid answers that.
+        print("clearing a lock whose holder is gone (%s)" % held[:60], file=sys.stderr)
+        LOCK.unlink(missing_ok=True)
 
     out_dir = Path(args.out or (Path(args.cwd) / "artifacts/pipeline"
                                 / time.strftime("%Y%m%d-%H%M%S")))
@@ -367,30 +477,21 @@ def main() -> int:
         LOCK.write_text("%s pid %d model %s\n" % (time.strftime("%F %T"), os.getpid(), args.model))
     results: list[StageResult] = []
     try:
-        for stage in stages:
-            print("== %s (%s, %s) ..." % (stage.name, args.adapter, args.model), flush=True)
-            r = run_stage(stage, contract, args.task, args.model, head, out_dir,
-                          Path(args.cwd), args.yolo, args.dry_run)
-            results.append(r)
-            if hashlib.sha256(head.read_bytes()).hexdigest()[:12] != head_hash:
-                print("   head changed mid-run: every later stage now re-prefills it",
-                      file=sys.stderr)
-            if r.error:
-                print("   failed: %s" % r.error, file=sys.stderr)
-                break
-            print("   %.0fs, %d round(s), %d claim(s), %d gap(s), %d unknown(s), reuse %.1f%%"
-                  % (r.seconds, r.rounds, r.claims, len(r.gaps), len(r.unknowns), r.reuse),
-                  flush=True)
+        results = run_flow(stages, contract, args.task, args.model, head, out_dir, Path(args.cwd),
+                           args.yolo, args.dry_run, args.adapter, head_hash)
     finally:
         if not args.dry_run:
             LOCK.unlink(missing_ok=True)
 
     summary = {
         "task": args.task, "adapter": args.adapter, "model": args.model,
+        # The tree the run read. Without it a replay has to guess from directory naming, and
+        # judging citations against the wrong tree reports every one of them as a fabrication.
+        "cwd": str(Path(args.cwd).resolve()),
         "head_sha256_12": head_hash, "out": str(out_dir),
         "stages": [{"stage": r.stage, "session": r.session, "seconds": round(r.seconds, 1),
                     "rounds": r.rounds, "claims": r.claims, "gaps": r.gaps,
-                    "unknowns": r.unknowns, "reuse_pct": round(r.reuse, 1), "error": r.error}
+                    "unknowns": r.unknowns, "reuse_pct": None if r.reuse is None else round(r.reuse, 1), "error": r.error}
                    for r in results],
     }
     (out_dir / "run.json").write_text(json.dumps(summary, indent=2) + "\n")

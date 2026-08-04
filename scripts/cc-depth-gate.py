@@ -25,7 +25,9 @@ Three findings from the measured spike are built in rather than assumed (LOCAL_A
   ranges the recorder saw.
 
 Fail open, exactly like `cc-context-guard.py`: any unexpected condition allows the stop. A gate that
-wedges a session because it crashed is worse than no gate. Kill switch: `touch /tmp/cc-depth-off`.
+wedges a session because it crashed is worse than no gate. Kill switch: `touch /tmp/cc-depth-off`
+in a session launched with `CC_DEPTH_LIFTABLE=1`, and nothing at all without it -- the file on its
+own stopped working when the switch was gated, and this line went on saying otherwise.
 
 On the pass that follows a block (`stop_hook_active`), the gate still verifies and still writes
 `gate.json` -- it just does not block. That is free observability: the final verdict of every gated
@@ -37,12 +39,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import cc_diff  # noqa: E402
+import cc_flow
+import cc_flowstate
 import cc_evidence  # noqa: E402
 import cc_ledger  # noqa: E402
 import cc_verify  # noqa: E402
@@ -136,8 +142,139 @@ def _session_asserted_something(calls: list, text: str) -> bool:
     return len(text.split()) > 120
 
 
+# How many times the closing message may be sent back. Two, because the session has to end: a gate
+# that will not let a run finish is worse than one that lets a bad sentence through, and by this
+# point every finding in the message has already been judged.
+CLOSING_LIMIT = 2
+# Something written as a path, loosely: anything with a slash in it and no spaces.
+_LOOKS_LIKE_A_PATH = re.compile(r"[A-Za-z0-9_.~-]*/[A-Za-z0-9_./-]+")
+
+
+def _invented_paths(text: str, root: str) -> list[str]:
+    """Paths the answer puts inside this tree that are not in it.
+
+    The closing message is written after the last verdict and nothing looked at it. Run 22's named
+    `scripts/cc-context-guard`, then `scripts/cc`, then `scripts/c` -- one path losing a character
+    each time it was cited -- with a misquoted line beside each, in the same message as four findings
+    that had passed the gate. A stage can be held to its evidence for an hour and invent in the last
+    paragraph, and this is the cheapest thing that catches it: a file either is in the tree or is not.
+
+    Only paths this tree could own are judged. `/tmp/cc-guard-off` is a real subject of a real review
+    and is not here; a directory the tree does not have is not a claim about the tree at all.
+    """
+    missing = []
+    for found in _LOOKS_LIKE_A_PATH.finditer(text or ""):
+        inside = cc_verify.under_root(root, found.group(0).rstrip(".,;:)"))
+        if os.path.isabs(inside) or inside in missing:
+            continue
+        parent = os.path.dirname(inside)
+        if not parent or not os.path.isdir(os.path.join(root, parent)):
+            continue
+        if not os.path.exists(os.path.join(root, inside)):
+            missing.append(inside)
+    return missing
+
+
+# A fenced block in the closing message, with whatever the fence was labelled. Labels that name a
+# shell are runs, not quotations of a file, and a command a stage typed is nowhere on disk by design.
+_FENCED = re.compile(r"```(?P<label>[A-Za-z0-9_+-]*)\n(?P<body>.*?)```", re.S)
+_A_SHELL = re.compile(r"^(?:bash|sh|zsh|shell|console|shellsession|term|output|text|txt|diff|json)$",
+                      re.I)
+# The line-number gutter a stage copies out of the Read tool, which is not part of the file.
+_A_GUTTER = re.compile(r"^\s{0,8}\d{1,6}(?:\s*[|:>]\s?|\s)")
+# How many blocks are looked at, and how many lines of each. A closing message is short; this is here
+# so that a pathological one cannot turn the last hook of a run into a full-tree scan.
+_BLOCKS, _LINES = 8, 6
+
+
+def _nowhere_in_the_tree(quote: str, root: str) -> bool:
+    """Whether not one line of this quotation can be found in any file under version control.
+
+    Deliberately the weakest question worth asking. A stage that elides the middle of a quotation, or
+    rewraps it, or reindents it, has still quoted the file, and refusing that would send back honest
+    work in the one message that has to be allowed to finish. A stage that made the passage up has
+    nothing anywhere.
+    """
+    lines = [l.strip() for l in quote.splitlines()]
+    lines = [_A_GUTTER.sub("", l) for l in lines if len(l.strip()) >= 12]
+    if not lines:
+        return False
+    for line in lines[:_LINES]:
+        try:
+            # -e, because a quoted line beginning with a dash is a quoted line, and the pattern goes
+            # before the pathspec separator or git reads it as a path and searches the whole tree.
+            found = subprocess.run(["git", "grep", "-F", "-q", "-e", line, "--"],
+                                   cwd=root, capture_output=True, timeout=20)
+        except (OSError, subprocess.SubprocessError):
+            # No git, or a search that would not finish. The check exists to catch invention, and
+            # failing it open is the only safe direction: this is the message that has to be allowed
+            # to finish.
+            return False
+        if found.returncode == 0:
+            return False
+    return True
+
+
+def _fabricated_quotes(text: str, root: str) -> list[str]:
+    """Passages the closing message presents as quotations of the tree that the tree does not have.
+
+    Every finding in the message has been through the gate; the sentences around them have not. Run
+    22 closed on four verified findings and three fenced blocks, each attributed to a file that does
+    not exist, each holding a line nobody wrote. The findings were true and the message was not, and a
+    reader cannot tell those apart -- the quotation is the part that looks like proof.
+    """
+    made_up = []
+    for found in _FENCED.finditer(text or ""):
+        if _A_SHELL.match(found.group("label") or ""):
+            continue
+        body = found.group("body")
+        if _nowhere_in_the_tree(body, root):
+            first = next((l.strip() for l in body.splitlines() if len(l.strip()) >= 12), "")
+            made_up.append(first[:120])
+        if len(made_up) >= _BLOCKS:
+            break
+    return made_up
+
+
+# The proxy's note, which is what arrives when a turn runs into the token ceiling.
+_CUT_NOTE = re.compile(r"\[This answer was cut off.*?\]", re.S)
+def _nothing_to_hand_on(text: str) -> str:
+    """Why the next stage cannot use this answer, if it cannot.
+
+    A stage that makes no claims is not verified -- an inventory held to a contract that wants claims
+    is refused for obeying -- and `not verify` was read as `accept whatever arrives`. Run 23's survey
+    ran into the 16,384-token ceiling on its first turn, and what reached the gate was the proxy's
+    truncation note and nothing else. It was accepted, recorded as the map of the territory, and the
+    claims stage was launched to work from it. Accepting a stage's silence is worse than refusing it:
+    the refusal costs a round, the acceptance costs the rest of the run.
+
+    Only silence counts. A length rule was tried first and refused two surveys that said where the
+    rule lives and what guards it in one line each -- which is the whole job, done briefly. What is
+    caught here is an answer consisting of the proxy saying there is no answer.
+    """
+    said = _CUT_NOTE.sub("", text or "").strip()
+    if not said:
+        return ("the turn was cut off at the token ceiling before anything was written, so the "
+                "next stage has nothing to read")
+    return ""
+
+
+def _cite_of(ev) -> str:
+    """How a citation that held up is written down for whoever reads the finding later."""
+    if ev.kind == cc_ledger.FILE_QUOTE and ev.path:
+        if ev.start and ev.end and ev.end != ev.start:
+            return "%s:%s-%s" % (ev.path, ev.start, ev.end)
+        return "%s:%s" % (ev.path, ev.start) if ev.start else ev.path
+    if ev.kind == cc_ledger.COMMAND_RESULT and ev.command:
+        return "command: %s" % ev.command[:120]
+    if ev.pattern:
+        return "%s: %s" % (ev.kind.replace("_", " "), ev.pattern[:80])
+    return ev.kind.replace("_", " ")
+
+
 def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
-             calls: list, root: str, check_coverage: bool = True) -> tuple[list[str], dict]:
+             calls: list, root: str, check_coverage: bool = True,
+             answer: str = "", predicted: tuple = ()) -> tuple[list[str], dict]:
     """Return (gaps, report). Gaps are what the refusal will say; report goes to gate.json.
 
     `check_coverage` exists for one caller: the scripted driver, which locates a transcript by
@@ -154,6 +291,7 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
         "unknowns": unknowns,
         "probes_run": len(probes),
         "verdicts": [],
+        "stood": [],
     }
 
     if len(claims) > contract.claim_cap:
@@ -164,10 +302,16 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
     kinds_seen: set[str] = set()
     for i, claim in enumerate(claims, 1):
         label = "claim %d (%s)" % (i, claim.claim[:70])
+        before, uncheckable = len(gaps), False
         if not claim.evidence:
             claim.verdict = "no-evidence"
-            gaps.append("%s cites nothing. Quote the lines it rests on, or move it to UNKNOWN."
-                        % label)
+            # Seven claims came back established by actually running the guard and reporting what
+            # it printed, and every one was told to "quote the lines it rests on" -- advice that
+            # fits a claim about what the code says and not one about what it does. Both admissible
+            # forms are named, or the stage is being asked to fake the wrong one.
+            gaps.append("%s cites nothing. Quote the lines it rests on under a QUOTE header, or if "
+                        "you established it by running something, write EVIDENCE: command: <the "
+                        "command> -> <text it printed>. Otherwise move it to UNKNOWN." % label)
             report["verdicts"].append({"claim": claim.claim, "verdict": claim.verdict})
             continue
 
@@ -177,7 +321,14 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
             claim.verdict, claim.detail = verdict.kind, verdict.detail
             report["verdicts"].append({"claim": claim.claim, "kind": ev.kind,
                                        "verdict": verdict.kind, "detail": verdict.detail})
-            if not verdict.ok:
+            if not verdict.ok and _read_showed(ev, calls, root):
+                # The file moved under the stage. Reported, because the reader should know the
+                # citation could not be checked against the file as it stands, but not counted
+                # against the stage, which quoted what it was shown.
+                report["verdicts"][-1]["verdict"] = "moved"
+                report.setdefault("moved", []).append(ev.path)
+                uncheckable = True
+            elif not verdict.ok:
                 gaps.append("%s: %s -- %s" % (label, verdict.kind, verdict.detail))
             elif (check_coverage and ev.kind == cc_ledger.FILE_QUOTE and ev.path and ev.start
                   and not cc_evidence.covers(ranges, ev.path, ev.start, ev.end or ev.start, root)):
@@ -213,16 +364,45 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
                             "the severity."
                             % (label, "" if probes else " -- no command was run at all"))
 
-    if not claims:
+        if len(gaps) == before and claim.evidence and not uncheckable:
+            # A claim that survived every check is the one thing in a refused round worth keeping.
+            # The stage can still be given up on for its neighbours: run 21's claims stage proved
+            # six findings across the rounds that refused it for a seventh, and every one was
+            # discarded because the stage as a whole never passed.
+            report["stood"].append({"claim": claim.claim,
+                                    "cites": [_cite_of(ev) for ev in claim.evidence]})
+
+    # Length is what separates the two failures. A stage that stopped mid-thought writes one line
+    # about what it is going to do next; a stage that answered in the wrong shape writes pages. The
+    # first version of this told a seven-finding report that its turn had ended before it answered.
+    if not claims and len(answer.strip()) < 500 and not re.search(
+            r"(?m)^\W{0,4}(CLAIM|UNKNOWN)\b", answer):
+        # Not a formatting complaint: the turn ended before the ledger began. Every first round of
+        # every claims stage has finished on a sentence like "Now let me run the actual tests and
+        # verify each claim", and telling it that no claims were stated reads as a quarrel about
+        # blocks when what it needs to hear is that it stopped in the middle.
+        gaps.append("Your turn ended before you answered -- the last thing you wrote was a sentence "
+                    "about what you were going to do next. Write the ledger now: the findings you "
+                    "have, each as a CLAIM with its EVIDENCE and QUOTE, and an UNKNOWN for whatever "
+                    "you did not get to.")
+    elif not claims and not unknowns:
         gaps.append("No claims were stated. Write each finding as a CLAIM/EVIDENCE/QUOTE block, or "
                     "state UNKNOWN for what you could not establish.")
+    elif not claims:
+        # An answer of unknowns and no claims is the contract's own second option, and refusing it
+        # said the opposite of the sentence above. It is also the right answer for an adversary that
+        # did its job: the stance tells it to delete every claim its attack kills, so a stage that
+        # kills all of them has nothing left to state and everything to report. Refusing that
+        # teaches the one lesson this harness exists to prevent -- that a finding is safer invented
+        # than withheld.
+        pass
 
-    missing = [k for k in contract.required_evidence if k not in kinds_seen]
+    missing = [g for g in cc_ledger.wants(contract) if not (set(g) & kinds_seen)]
     if missing and claims:
         gaps.append("This task type requires %s evidence and none was given. %s"
-                    % (" and ".join(missing),
+                    % (" and ".join(cc_ledger.kinds_named(g) for g in missing),
                        "An absence claim needs a search that returns nothing."
-                       if cc_ledger.ABSENCE in missing else ""))
+                       if any(cc_ledger.ABSENCE in g for g in missing) else ""))
         if not unknowns:
             gaps.append("Nothing was listed as UNKNOWN either. If a required check was not run, "
                         "say so explicitly -- that is a legal answer.")
@@ -231,6 +411,59 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
         gaps.append("This task type requires %d command(s) actually run; %d ran. Running one "
                     "that fails is fine and informative; describing one is not."
                     % (contract.min_probes, len(probes)))
+
+    if contract.needs_red_green:
+        pair, red = _red_then_green(probes)
+        report["red_green"] = pair
+        if not pair:
+            gaps.append("Nothing here failed and then passed. Run the check that demonstrates the "
+                        "problem before the change, then run that same command again afterwards -- "
+                        "same words, so the two runs can be compared. A command that only ever "
+                        "passed does not distinguish a fix from a no-op.")
+        elif predicted and not _as_predicted(red, predicted):
+            # The prediction was made before the code existed, which is the only moment at which
+            # the model cannot choose the failure to suit the diff it has already written.
+            gaps.append("The failing run of `%s` did not print what the plan said it would (%s). "
+                        "Either the change is not aimed at the behaviour the plan named, or the "
+                        "test is failing for some other reason. Show the predicted failure, or say "
+                        "plainly that the prediction was wrong and why."
+                        % (pair[:60], ", ".join(repr(p.get("expect")) for p in predicted)[:120]))
+        elif not _behavioural(red):
+            gaps.append("The failing run of `%s` failed because the code it calls did not exist "
+                        "yet -- a missing argument, a missing name, an import. That is the test "
+                        "agreeing with the diff's shape, not with its effect: written before the "
+                        "change and run after it, it would pass either way. Make it fail on a "
+                        "value that is wrong, and say which value." % pair[:60])
+
+    if contract.needs_red_green:
+        # Two things only the diff can answer, both taken from the first real implement run: whether
+        # the tests it added assert anything about behaviour, and whether the change it made can
+        # reach a production path at all.
+        changed = cc_diff.diff(root)
+        for hollow in cc_diff.hollow_tests(changed):
+            gaps.append("%s. A test that only checks the wiring passes for any diff of that shape. "
+                        "Assert the value the change is supposed to alter." % hollow)
+        for inert in cc_diff.inert_parameters(changed, root):
+            gaps.append("%s, so every production path still takes the default and behaves exactly "
+                        "as before. Either pass it where the behaviour is wrong, or say plainly "
+                        "that this change is preparation and the defect is still there." % inert)
+
+    if contract.needs_prediction:
+        made = cc_verify.predictions(answer)
+        report["predictions"] = [p.get("expect") for p in made]
+        if not made:
+            # Two rounds of a real stage were spent being told this in the abstract. The line is
+            # short enough to print, so print it: a model that cannot produce the shape from a
+            # description of it can copy the shape.
+            gaps.append("This plan commits to nothing. Add one line, exactly like this:\n"
+                        "  PREDICT: command: <the command you will run> -> <a string its output "
+                        "will contain while the defect is present>\n"
+                        "For example: PREDICT: command: pytest tests/test_cash.py -q -> "
+                        "available_cash_czk 1000000\n"
+                        "The string must be one the run cannot print once the defect is gone, so a "
+                        "wrong value qualifies and a stack trace does not. Without it the stage "
+                        "that acts on this plan picks its own failure afterwards, and any change "
+                        "can be made to fail somehow.")
 
     if contract.min_measurements:
         measured = sum(1 for v in report["verdicts"]
@@ -348,6 +581,68 @@ def _was_searched(ev, calls) -> bool:
     return False
 
 
+# What a test prints when the code it calls is not there yet, as opposed to being wrong. The first
+# implement run produced all of it: three tests whose red was `TypeError: _put_cash_requirement()
+# got an unexpected keyword argument 'holdings'`, which is the test asserting that the diff has the
+# shape the diff has. Every one of them passed the red/green check and none of them touched
+# behaviour -- the change threaded a parameter that no caller ever passes.
+_INTERFACE = re.compile(r"(?i)unexpected keyword argument|takes \d+ positional argument|"
+                        r"ModuleNotFoundError|ImportError|IndentationError|SyntaxError|"
+                        r"AttributeError: (?:module|type object|'\w+' object) .*has no attribute|"
+                        r"NameError: name|no tests ran|errors? (?:during|while) collecting")
+# An assertion that failed is the shape of a test that ran and disagreed with what it found.
+_BEHAVIOURAL = re.compile(r"(?i)AssertionError|^E\s+assert|assert\w* .* (?:!=|==|not in)|"
+                          r"Expected .* but got|\bmismatch\b", re.M)
+
+
+def _as_predicted(red, predicted: tuple) -> bool:
+    """Does the failure the session produced match the one its plan committed to?
+
+    Substring, on the output only: the command is already matched by the red/green pair, and asking
+    for two matches of the same thing would only add a way to be wrong about whitespace.
+    """
+    text = str(getattr(red, "text", "") or "")
+    if not text.strip():
+        return True          # unreadable output is not evidence of a mismatch, as above
+    return any(str(p.get("expect") or "").strip() in text for p in predicted if p.get("expect"))
+
+
+def _behavioural(red) -> bool:
+    """Did the failing run fail on a value, or on the code not being written yet?
+
+    Generous where it is uncertain: no output at all counts as behavioural, because a check that
+    cannot read the failure should not be the thing that refuses the answer. It only fires when the
+    output says plainly that a name or a signature was missing and says nothing about a value.
+    """
+    text = str(getattr(red, "text", "") or "")
+    if not text.strip():
+        return True
+    return bool(_BEHAVIOURAL.search(text)) or not _INTERFACE.search(text)
+
+
+def _red_then_green(probes: list) -> tuple[str | None, object]:
+    """The one command that failed and later passed, with the failing call, or (None, None).
+
+    This is the implement adapter's whole evidential basis, and it is deliberately literal: the same
+    command string, an early run that failed, a later run that did not. Normalising harder -- same
+    program, same test file, close enough -- would accept the case this exists to catch, where the
+    "after" run quietly narrows the selection to the test that was made to pass.
+
+    Cost of the strictness is a session that retypes its command slightly and is asked once to run
+    it again verbatim. Cost of the looseness is a green tick for a fix that fixed nothing.
+    """
+    outcomes: dict[str, list] = {}
+    for call in probes:
+        command = " ".join(str(call.args.get("command") or "").split())
+        if command:
+            outcomes.setdefault(command, []).append(call)
+    for command, runs in outcomes.items():
+        results = [bool(c.ok) for c in runs]
+        if False in results and True in results[results.index(False) + 1:]:
+            return command, runs[results.index(False)]
+    return None, None
+
+
 def _is_opinion(claim) -> bool:
     if not _OPINION.search(claim.claim):
         return False
@@ -365,13 +660,87 @@ def _is_probe(command: str | None) -> bool:
     return False
 
 
+def _read_showed(ev, calls: list, root: str) -> bool:
+    """Did a Read in this session show this quote in this file, whatever the file says now?
+
+    A file edited while a stage was reading it makes every citation of it look like fabrication:
+    the quote is verbatim, the address has moved, and the verdict says "not present in". That
+    happened twice in one afternoon here, to a stage that had done nothing wrong.
+
+    A Read result is written by the client, not by the model, so it cannot be arranged. Bash output
+    can be -- `echo` prints whatever it is given -- so only Read counts.
+
+    Showing the quote is not enough on its own: a stage that cites real text at line 200 when it
+    sits at line 4 has done the thing the line numbers exist to prevent, and the Read shows that
+    text too. So the file must also have changed since the Read, which the Read itself proves --
+    lines it displayed that the file no longer has anywhere.
+    """
+    if ev.kind != cc_ledger.FILE_QUOTE or not (ev.path and ev.quote):
+        return False
+    wanted = [ln.strip() for ln in ev.quote.splitlines() if ln.strip()]
+    if not wanted:
+        return False
+    for call in calls:
+        if call.tool != "Read" or not call.text:
+            continue
+        named = str(call.args.get("file_path") or "")
+        if not named.endswith(ev.path.lstrip("./")) and Path(named).name != Path(ev.path).name:
+            continue
+        if all(line in call.text for line in wanted) and _drifted(call, root, ev.path):
+            return True
+    return False
+
+
+_GUTTERED = re.compile(r"^\s{0,8}\d{1,6}(?:\s*[|:>]|\s)(?P<code>.*)$")
+
+
+def _drifted(call, root: str, path: str) -> bool:
+    """Does the file no longer hold what this Read displayed?"""
+    try:
+        now = Path(root, path).read_text(errors="replace")
+    except OSError:
+        return False
+    shown = []
+    for line in call.text.splitlines():
+        seen = _GUTTERED.match(line)
+        body = (seen.group("code") if seen else line).strip()
+        if len(body) > 12:
+            shown.append(body)
+    if not shown:
+        return False
+    return any(line not in now for line in sorted(shown, key=len, reverse=True)[:20])
+
+
 def _check(ev, root: str, calls: list):
     if ev.kind == cc_ledger.FILE_QUOTE:
+        if ev.path and ev.quote and not ev.start:
+            # A quote with no line numbers: find it. The lines are set on the evidence so that the
+            # coverage check downstream still has an address to work with.
+            where = cc_verify.locate(root, ev.path, ev.quote)
+            if where is None:
+                return cc_verify.Verdict(cc_verify.FAIL, "quote not present in %s" % ev.path)
+            ev.start, ev.end = where
         if not (ev.path and ev.start and ev.quote):
-            return cc_verify.Verdict(cc_verify.UNVERIFIED, "incomplete file_quote")
+            # "incomplete file_quote" told seven cited findings nothing they could act on. What is
+            # missing is almost always the quote: the stage named the file and the lines and then
+            # described them, which is the habit the quote exists to break.
+            missing = ("the lines themselves -- paste them under a QUOTE header, exactly as they "
+                       "appear, instead of describing them" if ev.path and ev.start
+                       else "a file and a line range")
+            return cc_verify.Verdict(cc_verify.UNVERIFIED, "this citation is missing " + missing)
         return cc_verify.file_quote(root, ev.path, ev.start, ev.end or ev.start, ev.quote)
     if ev.kind == cc_ledger.COMMAND_RESULT:
-        return cc_verify.command_result(calls, ev.command or "", ev.expect or "")
+        expected = ev.expect or ""
+        if not expected.strip() and ev.quote:
+            # A QUOTE under a command citation is ambiguous: sometimes it is the output, written
+            # under its own header instead of after an arrow, and sometimes it is a quote of the code
+            # the same claim rests on. So it is tried as output and only kept if the recorded run
+            # bears it out. Assuming it was the output reported two claims as having printed a regex
+            # from the file under review, which is a refusal nobody could act on.
+            spoken = cc_verify.command_result(calls, ev.command or "", ev.quote)
+            if spoken.ok:
+                return spoken
+        return cc_verify.command_result(calls, ev.command or "", expected)
     if ev.kind == cc_ledger.LOG_MATCH:
         return cc_verify.log_match(ev.path or "", ev.pattern or "")
     if ev.kind == cc_ledger.ABSENCE:
@@ -384,15 +753,116 @@ def refusal(gaps: list[str], claims_path: Path) -> str:
     head = ("This answer is not accepted yet. %d thing(s) below are asserted without evidence that "
             "holds up. Fix them and finish; you will not be asked twice." % len(gaps))
     body = "\n".join("%d. %s" % (i, g) for i, g in enumerate(gaps, 1))
+    # The tail used to offer claims.jsonl as an alternative home for the ledger, which is why a
+    # stage put it there and summarised it in prose: the file is read only by the scripted driver,
+    # and in a flow the next stage sees nothing but the message.
     tail = ("\nRe-read what you cite before quoting it -- quoting from memory is what produced "
-            "half of these. Record the corrected findings in your reply as CLAIM/EVIDENCE/QUOTE "
-            "blocks%s. Anything you cannot establish goes to UNKNOWN, which costs you nothing."
-            % (", or in %s" % claims_path if claims_path.parent.is_dir() else ""))
+            "half of these. Record the corrected findings in the message you finish with, as "
+            "CLAIM/EVIDENCE/QUOTE blocks, in full. Anything you cannot establish goes to UNKNOWN, "
+            "which costs you nothing.")
     return "%s\n\n%s\n%s" % (head, body, tail)
 
 
+# How many times a session may be pushed back into its flow before it is let go. One is too few:
+# a three-stage flow needs at least one push per stage, and a model that stops to "wait" for a
+# subagent it has already been handed the report from will spend several. Unbounded is a hang.
+NUDGE_LIMIT = 8
+
+
+def _stage_of(state: dict, agent: str, payload: dict) -> str:
+    """Which stage of the flow this subagent is, if any.
+
+    The launch is recorded by the PreToolUse hook before the agent exists, so the running stage is
+    the one with no verdict yet. With one stage in flight at a time -- which the same hook enforces
+    -- that is unambiguous.
+    """
+    if not state.get("flow"):
+        return ""
+    for entry in reversed(state.get("stages", [])):
+        if entry.get("verdict") is None:
+            if agent and entry.get("agent") and entry["agent"] != agent:
+                continue
+            return entry.get("stage", "")
+    return ""
+
+
+def _digest(text: str, limit: int = 1200) -> str:
+    """What a stage hands the next one: its claims, not its prose."""
+    kept = [line for line in (text or "").splitlines()
+            if line.startswith(("CLAIM:", "EVIDENCE:", "UNKNOWN:", "PREDICT:", "CHANGE:"))]
+    return "\n".join(kept)[:limit]
+
+
+def _closing_answer(flow: str, proved: list[dict], abandoned: list[str] | None = None) -> str:
+    """The only closing text a flow may emit, assembled from already-judged state.
+
+    Run 28 reached the right verdict -- zero verified findings -- then the parent expanded two of
+    the refused claims into a detailed final answer containing invented line numbers and a false
+    explanation. Labelling a claim "Unverified" does not make the prose after it safe. The closing
+    answer is data we already have, so render it here and require it byte-for-byte instead of asking
+    the model to paraphrase one final time after every substantive check has finished.
+    """
+    abandoned = abandoned or []
+    named = ", ".join(abandoned)
+    if not proved:
+        answer = "The %s flow produced no verified findings." % flow
+        if abandoned:
+            answer += (" The %s stage was refused %d times and abandoned."
+                       % (named, cc_flowstate.ROUND_CAP))
+        return answer
+    lines = ["Verified findings:"]
+    for finding in proved[:cc_flowstate.STOOD_KEPT]:
+        claim = " ".join(str(finding.get("claim") or "").split())
+        cites = "; ".join(" ".join(str(c).split()) for c in finding.get("cites") or [])
+        lines.append("- %s%s" % (claim, " [%s]" % cites if cites else ""))
+    if abandoned:
+        lines.extend(("", "The %s stage was refused %d times and abandoned; no other findings "
+                           "were verified." % (named, cc_flowstate.ROUND_CAP)))
+    return "\n".join(lines)
+
+
+# How long the stop hook will sit waiting for a stage to report before answering the session. Long
+# enough to cover the gap between a session finishing its turn and its stage finishing its work,
+# short enough that a hook the client has given up on is not still sleeping.
+# How long this hook waits for a stage before handing the turn back. Long, because waiting here is
+# nearly free -- a sleep in a hook process -- while waiting in the session costs a turn each time, and
+# a poll of the stage costs 32k characters of the window it has to answer in. Twelve minutes covers
+# most rounds on local weights; a round that outlives it costs one short turn and another wait.
+WAIT_FOR = float(os.environ.get("CC_FLOW_WAIT", "720"))
+
+
+def _await_stage(session: str, root: str, state: dict) -> tuple[dict, list[str]]:
+    """Wait here for the stage in flight, and say what is still running when we give up."""
+    cc_flowstate.release()      # minutes of waiting is not a thing to hold a lock through
+    deadline = time.time() + WAIT_FOR
+    while time.time() < deadline:
+        in_flight = cc_flowstate.running(state)
+        if not in_flight:
+            return state, []
+        if cc_flowstate.deaf(state):
+            # Waiting on a stage that has worked through twenty-five refusals is waiting on nothing.
+            break
+        pending = [e for e in state.get("stages", []) if e.get("verdict") is None]
+        if pending and all(e.get("reopened") and not e.get("calls") for e in pending):
+            # A SubagentStop refusal reopens the same worker. Run 30's parent entered its Stop hook
+            # before the client scheduled that worker's correction, and this wait then prevented the
+            # correction from starting for the full twelve minutes. The instant the hook returned,
+            # the worker made six calls. It was blocked, not stale. Return control while keeping the
+            # entry; the worker can now resume, and the next Stop will apply REOPENED_STALE normally
+            # if it truly exited instead.
+            break
+        time.sleep(2.0)
+        # peek, not load: this loop runs for minutes, and the lock load() holds would stop every
+        # other hook for the whole wait -- including the stage whose report we are waiting for.
+        state = cc_flowstate.peek(session, root)
+    return cc_flowstate.load(session, root), cc_flowstate.running(state)
+
+
 def main() -> int:
-    if OFF_SWITCH.exists():
+    # A file is not a switch when the thing being switched off can make files. Honoured only in a
+    # session launched to honour it; the environment of a hook is the one thing a stage cannot
+    # reach, because the client spawns each hook fresh from its own.
+    if OFF_SWITCH.exists() and os.environ.get("CC_DEPTH_LIFTABLE") == "1":
         return allow()
     try:
         payload = json.load(sys.stdin)
@@ -413,7 +883,187 @@ def main() -> int:
     agent = payload.get("agent_id") or ""
     transcript = payload.get("agent_transcript_path") or payload.get("transcript_path") or ""
 
-    contract = cc_ledger.load_contract(session, root)
+    # A stage of a flow is judged as that stage, not as the session it belongs to. The plan of a
+    # change cannot be held to red/green -- nothing has run yet -- and holding it to the session's
+    # contract is how a plan that committed to nothing came to be accepted and then built upon.
+    state = cc_flowstate.load(session, root)
+    stage = _stage_of(state, agent, payload)
+    # The client hands over the answer it is about to accept, which removes the race with the
+    # transcript write entirely. The settled read stays as the fallback for clients that do not.
+    text = payload.get("last_assistant_message") or (_settled_text(transcript) if transcript else "")
+
+    # A session that ends in the middle of a flow has answered from one stage of three. The first
+    # one to run did exactly that: the survey reported, the orchestrator relayed it, and the flow
+    # stopped two stances short of an answer anybody should act on.
+    if os.environ.get("CC_FLOW_TRACE"):
+        try:
+            with open(os.environ["CC_FLOW_TRACE"], "a") as fh:
+                fh.write(json.dumps({"hook": payload.get("hook_event_name"),
+                                     "agent": agent, "resumed": resumed,
+                                     "flow": state.get("flow"),
+                                     "nudges": state.get("nudges")}) + "\n")
+        except OSError:
+            pass
+
+    # A parent that keeps doing stage work after repeated refusals is stopped by the flow guard.
+    # If the client gives it a closing turn anyway (or a person resumes the session), only the safe
+    # abort result stored at that boundary may leave the session.
+    if not agent and state.get("aborted"):
+        expected = str(state.get("final_answer") or state["aborted"])
+        if text.strip() != expected:
+            return block("Reply with exactly the following text and nothing else:\n\n%s" % expected)
+        return allow()
+
+    # `stop_hook_active` is not consulted here. Its purpose is to stop a Stop hook looping, and a
+    # bounded nudge count does that job better: the flag was already set on the parent's stop after
+    # a subagent had finished, so treating it as "we have pushed once already" meant never pushing
+    # at all. Measured: a flow that completed its survey and then ended, with the counter at zero.
+    if not agent and state.get("flow"):
+        # A stage still marked in flight when the parent stops is one whose subagent went away:
+        # a parent cannot finish a turn while its own Task call is outstanding. Measured on the
+        # second flow: the orchestrator said it would wait for the survey, then answered from a
+        # file it had read itself while the survey was still going.
+        abandoned = cc_flowstate.forget_running(state)
+        if abandoned:
+            cc_flowstate.save(state, session, root)
+        in_flight = cc_flowstate.running(state)
+        if in_flight:
+            # Blocking a stop cannot make a session wait. It can only make it speak again, and it
+            # did: told to wait for the survey, it said "I'll wait for it to report" and stopped,
+            # eighty-four times over ten minutes and seventy-six thousand tokens. So the waiting is
+            # done here instead, in the hook, where waiting is a thing a process can actually do.
+            state, in_flight = _await_stage(session, root, state)
+        # After the wait, and not before it: a stage that reported while we waited has changed what
+        # comes next, and answering from the older view told a session that survey had run and that
+        # survey had not.
+        left = cc_flowstate.next_stage(state)
+        nudges = int(state.get("nudges", 0))
+        gone_deaf = cc_flowstate.deaf(state)
+        if in_flight and gone_deaf and nudges < NUDGE_LIMIT:
+            # The one case where killing a stage is the right instruction. It has been told to stop
+            # reading and answer on every call for a long time and has gone on regardless -- run 24's
+            # survey made 280 calls that way, of which 220 were refused, and it was still going when
+            # the run was ended by hand. No hook can stop it; the session that launched it can.
+            state["nudges"] = nudges + 1
+            cc_flowstate.save(state, session, root)
+            return block(
+                "The %s stage has been refused on every call for a long time and is still calling "
+                "tools. It is not going to answer. Call TaskStop for it -- that is allowed now, and "
+                "only now -- and then carry on with the flow: the round counts as spent and "
+                "whatever it did establish is kept." % ", ".join(gone_deaf))
+        if in_flight and nudges < NUDGE_LIMIT:
+            # Stopping with a stage still reading is the ordinary shape of this: the launch returns
+            # a task and the turn ends while the work goes on. What the session must not do is take
+            # that as the stage having failed, which it did -- killing the task, then answering from
+            # a file it had read itself.
+            state["nudges"] = nudges + 1
+            cc_flowstate.save(state, session, root)
+            return block(
+                "The %s stage is still running. It has not failed and it is not stuck. Say in one "
+                "short sentence that you are waiting for it, and stop -- this hook does the waiting, "
+                "and it will tell you the verdict. Do not call TaskOutput: each poll copies the "
+                "stage's whole working record into your context, and ten of them once filled the "
+                "window and ended the run before the stage could report."
+                % ", ".join(in_flight))
+        given_up = [st.name for st in cc_flow.flow_for(state["flow"]) or []
+                    if cc_flowstate.exhausted(state, st.name)
+                    and st.name not in cc_flowstate.done(state)]
+        if not left and given_up and not state.get("disclosed"):
+            # The final message is itself an output boundary. Run 28 correctly reached zero verified
+            # findings, then invented a detailed explanation while restating the rejected claims.
+            # Hand the client the complete safe answer rather than another prose-writing assignment.
+            stood = [f for st in given_up for f in cc_flowstate.salvage(state, st)]
+            expected = _closing_answer(state["flow"], stood, given_up)
+            state["disclosed"] = True
+            state["final_answer"] = expected
+            cc_flowstate.save(state, session, root)
+            return block("Reply with exactly the following text and nothing else:\n\n%s" % expected)
+        if not left and not given_up and not state.get("handed"):
+            # The parent has not seen a single finding. It launches stages, waits, and is told
+            # verdicts; the findings live in subagent state. Render that state once, here, so the
+            # closing turn cannot add findings that never passed.
+            proved = [f for st in cc_flowstate.done(state) for f in cc_flowstate.salvage(state, st)]
+            expected = _closing_answer(state["flow"], proved)
+            state["handed"] = True
+            state["final_answer"] = expected
+            cc_flowstate.save(state, session, root)
+            return block("Reply with exactly the following text and nothing else:\n\n%s" % expected)
+        if not left and state.get("final_answer"):
+            expected = str(state["final_answer"])
+            if text.strip() != expected:
+                return block(
+                    "That closing answer added or changed material after the verdict. Reply with "
+                    "exactly the following text and nothing else:\n\n%s" % expected)
+            return allow()
+        if not left:
+            # The last thing written is the only thing anybody reads, and until now it was the only
+            # thing not checked.
+            invented = _invented_paths(text, root)
+            tried = int(state.get("closing", 0))
+            if not invented and tried < CLOSING_LIMIT:
+                made_up = _fabricated_quotes(text, root)
+                if made_up:
+                    state["closing"] = tried + 1
+                    cc_flowstate.save(state, session, root)
+                    return block(
+                        "Your answer shows %d passage(s) as quotations of this tree, and no file "
+                        "here holds any line of them: %s. Everything you were held to is still "
+                        "held; this is the part nobody checked until now, and a made-up quotation "
+                        "reads exactly like a proved one. Write the answer again with those "
+                        "passages as they are on disk, or say the finding in your own words without "
+                        "a quotation. Keep every finding and its evidence otherwise unchanged."
+                        % (len(made_up), "; ".join("`%s`" % m for m in made_up[:3])))
+            if invented and tried < CLOSING_LIMIT:
+                state["closing"] = tried + 1
+                cc_flowstate.save(state, session, root)
+                return block(
+                    "Your answer cites %d file(s) this tree does not have: %s. A citation of a file "
+                    "that does not exist is worth less than no citation, because it reads like one. "
+                    "Write the answer again with the paths as they are on disk, or without them if "
+                    "you cannot name them; keep every finding and its evidence otherwise unchanged."
+                    % (len(invented), ", ".join(invented[:6])))
+        if left and nudges < NUDGE_LIMIT:
+            done = cc_flowstate.done(state)
+            state["nudges"] = nudges + 1
+            cc_flowstate.save(state, session, root)
+            return block(
+                "The %s flow is not finished. %s run; %s has not. Launch a subagent whose "
+                "prompt begins with `STAGE: %s`. Nothing is running now, so there is nothing to "
+                "wait for -- launch it, then read its output until it reports. Answering now would "
+                "give me one stage's view of this, and "
+                "the stages after it exist because that view is the one that has been wrong before."
+                % (state["flow"],
+                   ("%s %s" % (", ".join(done), "have" if len(done) > 1 else "has"))
+                   if done else "No stage has",
+                   left, left))
+
+    contract = None
+    if stage:
+        # Some stages are not judged at all. A survey is an inventory, and holding an inventory to
+        # a contract that wants claims refuses it for having made none -- which is the one thing it
+        # was told to do. Measured on the first flow that ran: refused at 59 seconds, for obeying.
+        running = cc_flow.stage_in(state.get("flow", ""), stage)
+        if running is not None and not running.verify:
+            empty = _nothing_to_hand_on(text)
+            if empty:
+                cc_flowstate.record_verdict(state, stage, [empty], agent, answer=text)
+                cc_flowstate.save(state, session, root)
+                return block(
+                    "This stage has produced nothing the next one can use: %s. Write it now, in "
+                    "the reply itself and nothing else -- one line per entry, no preamble, no "
+                    "reasoning, and stop at forty. Do not begin again from where you were cut off."
+                    % empty)
+            cc_flowstate.record_verdict(state, stage, [], agent)
+            state["nudges"] = 0
+            for entry in reversed(state.get("stages", [])):
+                if entry.get("stage") == stage and not entry.get("summary"):
+                    entry["summary"] = _digest(text, limit=2000) or text[-1500:]
+                    break
+            cc_flowstate.save(state, session, root)
+            return allow()
+        contract = cc_ledger.contract_for(cc_flow.adapter_for(state.get("flow", ""), stage))
+    if contract is None:
+        contract = cc_ledger.load_contract(session, root)
     if contract is None:
         adapter = os.environ.get("CC_DEPTH_ADAPTER")
         if not adapter:
@@ -421,9 +1071,6 @@ def main() -> int:
         contract = cc_ledger.contract_for(adapter)
 
     calls = cc_evidence.collect(transcript) if transcript else []
-    # The client hands over the answer it is about to accept, which removes the race with the
-    # transcript write entirely. The settled read stays as the fallback for clients that do not.
-    text = payload.get("last_assistant_message") or (_settled_text(transcript) if transcript else "")
 
     out_key = "%s/%s" % (session, agent) if agent else session
     claims_path = cc_ledger.run_dir(out_key, root) / "claims.jsonl"
@@ -432,16 +1079,34 @@ def main() -> int:
     if claims:
         unknowns = [u for c in claims for u in c.unknowns]
     else:
-        claims, unknowns = cc_ledger.claims_from_text(text)
+        claims, unknowns = cc_ledger.claims_from_text(text, root)
 
     if not claims and not _session_asserted_something(calls, text):
         return allow()          # a short factual answer is not a ledger-bearing one
 
-    gaps, report = evaluate(contract, claims, unknowns, calls, root)
+    gaps, report = evaluate(contract, claims, unknowns, calls, root, answer=text)
+    # A refused native subagent used to be blocked in place and asked to repair itself. Run 30 showed
+    # why that is the wrong unit of retry: the claims worker was already at 82% context, duplicate-read
+    # protection denied the exact source again, and it reconstructed twelve quotes from memory --
+    # rewrapped, truncated and misspelt. End that worker. The parent launches a fresh round, and
+    # compose() gives it the refused ledger plus every gap without giving it the exhausted transcript.
+    fresh_retry = bool(stage and agent and gaps)
+    if stage:
+        # What the next stage may do turns on this verdict, so it is written where the hook that
+        # admits the next launch can read it rather than left in the conversation.
+        cc_flowstate.record_verdict(state, stage, gaps, agent, text, report.get("stood"),
+                                    reopen=not fresh_retry)
+        state["nudges"] = 0     # a stage reported, so the budget for pushing is not being spent
+        for entry in reversed(state.get("stages", [])):
+            if entry.get("stage") == stage and not entry.get("summary"):
+                entry["summary"] = _digest(text)
+                break
+        cc_flowstate.save(state, session, root)
+        report["stage"] = stage
     report.update({
         "session": session,
         "agent": agent or None,
-        "blocked": bool(gaps) and not resumed,
+        "blocked": bool(gaps) and not resumed and not fresh_retry,
         "final_pass": resumed,
         "gaps": gaps,
         "ms": int((time.time() - started) * 1000),
@@ -453,7 +1118,7 @@ def main() -> int:
     except OSError:
         pass
 
-    if resumed or not gaps:
+    if resumed or not gaps or fresh_retry:
         return allow()
     return block(refusal(gaps, claims_path))
 
