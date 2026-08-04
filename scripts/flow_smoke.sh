@@ -48,7 +48,12 @@ DECLARED=$(( CTX * 3 / 4 ))
 
 mkdir -p "$OUT"
 SETTINGS="$OUT/settings.json"
-GUARD="$ROOT/scripts/cc-context-guard.py --stop-advice answer"
+# The guard is told the window the client believes in, not the one llama-server has. The client is
+# what dies: it refuses to send above CLAUDE_CODE_MAX_CONTEXT_TOKENS, and a guard measuring against the
+# larger real window would keep saying there is room right up to the error. Unset, it defaulted to
+# 98,304, which happened to equal three quarters of a 131,072-token server -- agreement by coincidence,
+# which stops the day the server is started with anything else.
+GUARD="$ROOT/scripts/cc-context-guard.py --stop-advice answer --window $DECLARED"
 FLOW="$ROOT/scripts/cc-flow-guard.py"
 GATE="$ROOT/scripts/cc-depth-gate.py"
 CONTRACT="$ROOT/scripts/cc-depth-contract.py --adapter review"

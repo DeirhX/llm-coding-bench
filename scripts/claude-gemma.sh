@@ -671,7 +671,9 @@ if (( GUARD )); then
     echo "       launch with --no-guard to proceed without it" >&2
     exit 1
   fi
-  GUARD_CMD="$GUARD_SCRIPT --window $CTX_TOKENS --framing $CTX_RESERVE"
+  # The declared window, not the real one: the client refuses to send past what it was told, so that
+  # is the ceiling a session actually hits, and it is the lower of the two.
+  GUARD_CMD="$GUARD_SCRIPT --window $CTX_DECLARED --framing $CTX_RESERVE"
   GUARD_CMD="$GUARD_CMD --stop-pct ${CLAUDE_GEMMA_STOP_PCT:-80}"
   PRE_TOOL+=("{ \"matcher\": \"Read|Bash|WebFetch|WebSearch|Write|Edit|MultiEdit\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$GUARD_CMD\" } ] }")
 fi
