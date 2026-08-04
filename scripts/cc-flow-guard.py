@@ -134,6 +134,18 @@ CLERICAL = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet",
 # harness told it to.
 POLLING = {"TaskOutput"}
 
+# And the way round it. Taking the tool away did not take away the want: run 26's parent, refused
+# TaskOutput, went looking for the same thing on disk -- `ls -la /private/tmp/claude-501/<project>/
+# <session>/tasks/<agent>.output` -- and having no idea where that file was, invented one path after
+# another, 206 of them, each with the session id and the agent id mutated a character at a time. Every
+# call returned nothing. Every call was a turn. None of them could have worked, because a stage's
+# report does not reach the parent that way at all: the gate reads it and hands back a verdict.
+#
+# Matched on the shape of the thing being reached for rather than on any one path, since the paths were
+# hallucinated and no two were alike.
+_REACHING_ROUND = re.compile(r"claude-\d+/.*?/tasks/|/tasks/[a-f0-9]{8,}\.output|"
+                             r"tasks/agent-[a-z0-9]+\.(?:output|jsonl)", re.I)
+
 
 def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = "",
                        tool_input: dict | None = None, agent: str = "") -> None:
@@ -150,6 +162,13 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
              "filling the window while the stage was still working. You do not need its output: "
              "when it reports, its findings are judged and you are told the verdict. Say in one "
              "short sentence that you are waiting, and stop. Stopping is how you wait here.")
+    if _REACHING_ROUND.search(str((tool_input or {}).get("command") or "")
+                              or str((tool_input or {}).get("file_path") or "")):
+        deny("The stage's working file is not how you find out what it did, and looking for it is how "
+             "a session spends a round on nothing: 206 calls went to invented paths under tasks/, none "
+             "of which existed, because that file is not where a report arrives. When the stage "
+             "reports, its claims are checked and you are told the verdict. Say in one short sentence "
+             "that you are waiting, and stop.")
     if tool in CLERICAL:
         allow()
     if tool == "TaskStop" and cc_flowstate.deaf(state):
@@ -194,10 +213,19 @@ def _orchestrator_only(state: dict, tool: str, session: str = "", root: str = ""
         else:
             allow()
     if in_flight:
-        # A stage is in flight, so this is that stage working -- but only up to a point. Reading is
-        # charged against a budget because a claims stage once spent 387 calls re-reading the files
-        # it was about to cite, announcing each time that it needed to re-read them first.
-        spent = cc_flowstate.spend(state, in_flight[0])
+        # A stage is in flight, and if this call carries an agent id it is that stage working -- but
+        # only up to a point. Reading is charged against a budget because a claims stage once spent
+        # 387 calls re-reading the files it was about to cite, announcing each time that it needed to
+        # re-read them first.
+        #
+        # Only the stage's own calls are charged to it. Charged for the parent's as well, a stage
+        # cannot go stale while the parent is doing anything at all -- and the parent is never idle,
+        # because being told to wait is what makes it try something. Run 26 ended that way: the
+        # claims subagent had been dead for twelve minutes while the parent ran 206 Bash calls
+        # looking for its output file, and every one of them refreshed the dead stage's heartbeat.
+        # `active` never aged past six seconds, nothing was ever dropped as silent, and the flow sat
+        # on a round that had already finished until it was killed from outside.
+        spent = cc_flowstate.spend(state, in_flight[0]) if agent else 0
         if agent:
             # Bind the stage to the worker that is actually making the calls. Launches are recorded
             # before the client has said which agent it started, so the id only becomes knowable when

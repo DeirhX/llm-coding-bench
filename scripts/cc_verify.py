@@ -664,6 +664,7 @@ def command_result(calls, command_fragment: str, expected: str) -> Verdict:
         return Verdict(UNVERIFIED, "the citation says what was run and not what it printed; add "
                                    "-> <text it printed> so there is something to check")
     seen = 0
+    failed_but_said: Verdict | None = None
     for call in calls:
         if call.tool != "Bash":
             continue
@@ -687,8 +688,19 @@ def command_result(calls, command_fragment: str, expected: str) -> Verdict:
             return Verdict(PASS, "%s -- stopped, as the claim says" % command_fragment[:60])
         payloads = [m.group("value") for m in _PAYLOAD.finditer(wanted)]
         if _supports(_section(call.text or "", payloads), expected):
-            return Verdict(PASS if call.ok else FAIL,
-                           "%s (exit %s)" % (command_fragment[:60], "ok" if call.ok else "error"))
+            if call.ok:
+                return Verdict(PASS, "%s (exit ok)" % command_fragment[:60])
+            # A run that printed the evidence and then died on a later line has still printed it, but
+            # a non-zero exit is worth saying rather than passing over. Kept and carried on with,
+            # because a clean run of the same command may be further down the list and returning here
+            # would judge the claim on the worst attempt at it. Run 26's probe printed
+            # `forget_running=['claims']` and then crashed on a typo three lines later; two clean runs
+            # afterwards printed the same thing, and the claim was refused on the first one.
+            failed_but_said = Verdict(FAIL, "%s printed this, but that run exited non-zero -- run it "
+                                            "again cleanly and cite the run that worked"
+                                     % command_fragment[:60])
+    if failed_but_said is not None:
+        return failed_but_said
     if not seen:
         return Verdict(UNVERIFIED, "no recorded command matching %r" % command_fragment[:80])
     return Verdict(FAIL, "%d run(s) of %r, none printed anything like %r"
@@ -753,7 +765,16 @@ HEADERS = ("CLAIM:", "EVIDENCE:", "QUOTES:", "QUOTE:", "UNKNOWN:", "SEVERITY:", 
 # Case-insensitive because a stage writing a report writes `Evidence:`, not `EVIDENCE:`. Matched
 # only at the start of a line and only before a colon, which is where a header lives and where prose
 # does not put these words. 188 claims cited nothing over the case of one letter.
-HEADER_RE = re.compile(r"^(?P<name>%s)\s*(?:\([^)]*\))?\s*:"
+# And `QUOTE from `scripts/cc_flowstate.py` lines 444-445:` -- the citation said between the header
+# word and the colon rather than in brackets or on an EVIDENCE line above. Run 26's claims stage wrote
+# every one of its twelve quotes this way, with the lines fenced underneath, and the header went
+# unrecognised: the quote attached to nothing and six correct findings were told their citations were
+# "missing the lines themselves" while the lines sat one line below. Two rounds and nineteen minutes.
+#
+# The phrase is bounded and may not contain a colon, so a header stays a header and a sentence with a
+# colon in the middle does not become one.
+HEADER_RE = re.compile(r"^(?P<name>%s)\s*(?:\((?P<bracketed>[^)]*)\))?"
+                       r"(?P<said>[^:\n]{0,120}?)\s*:"
                        % "|".join(h.rstrip(":") for h in HEADERS), re.I)
 
 # The four shapes an EVIDENCE line may take. Only the first was accepted originally, which quietly
@@ -1510,6 +1531,14 @@ def parse_ledger(text: str, root: str = "") -> tuple[list[dict], list[str]]:
                 evidence = sibling
                 cited = [sibling]
             quote = []
+            # The citation between the header word and the colon, read with the same parser as
+            # everywhere else. Only filled in where the EVIDENCE line above said nothing, so a stage
+            # that says where twice is not overruled by its own header.
+            aside = _path_lines(seen.group("said") or "")
+            if aside and evidence is not None:
+                for key, value in aside[0].items():
+                    if key != "quote" and not evidence.get(key):
+                        evidence[key] = value
             rest = line[seen.end():].strip()
             spread = _spread(rest)
             if len(spread) > 1:

@@ -601,7 +601,7 @@ def test_an_inherited_path_does_not_excuse_the_wrong_line() -> None:
 
 def _call(command: str, printed: str):
     import cc_evidence
-    return cc_evidence.ToolCall(agent="claims", tool="Bash", call_id="1",
+    return ev.ToolCall(agent="claims", tool="Bash", call_id="1",
                                 args={"command": command}, text=printed)
 
 
@@ -1303,3 +1303,69 @@ def test_a_probe_that_printed_a_refusal_is_not_read_as_silent() -> None:
     calls = [_bash('echo p | python3 guard.py && echo "ALLOWED"', "DENIED", ok=True)]
     verdict = vf.command_result(calls, "python3 guard.py", "empty output (allowed)")
     assert not verdict.ok, verdict.detail
+
+
+def _bash(command: str, printed: str, ok: bool = True):
+    return ev.ToolCall(agent="claims", tool="Bash", call_id="c%d" % id(printed),
+                                args={"command": command}, ok=ok, text=printed)
+
+
+def test_a_probe_that_printed_the_evidence_and_then_crashed_does_not_beat_the_clean_run() -> None:
+    """Run 26's probe printed what the claim rested on and died three lines later on a typo.
+
+    Two clean runs of the same command printed the same thing afterwards, and the gate refused the
+    claim on the first attempt because it returned on the first match it found. Order of attempts is
+    not evidence about anything; a session that gets a probe working on the third go has got it
+    working.
+    """
+    command = "python3 -c 'print(forget_running(s, every=True))'"
+    calls = [_bash(command, "forget_running=['claims']\nTraceback ... NameError", ok=False),
+             _bash(command, "forget_running=['claims']", ok=True)]
+    said = vf.command_result(calls, command, "['claims']")
+    assert said.kind == vf.PASS, said
+
+    # And with only the failed run on record it is still refused -- but usefully, naming the reason.
+    only_broken = vf.command_result(calls[:1], command, "['claims']")
+    assert only_broken.kind == vf.FAIL, only_broken
+    assert "exited non-zero" in only_broken.detail, only_broken.detail
+    assert "again cleanly" in only_broken.detail, only_broken.detail
+
+
+def test_a_quote_headed_with_its_citation_before_the_colon_is_read() -> None:
+    """`QUOTE from `s.py` lines 4-5:` -- how run 26's claims stage wrote all twelve of its quotes.
+
+    The header was not recognised as a header, so the fenced lines under it attached to nothing and
+    the claim was reported as citing none of them.
+    """
+    import cc_ledger
+    with tempfile.TemporaryDirectory() as root:
+        body = ["import os", "", "", "def pick(entry):", "    return SHORT if entry else LONG"]
+        pathlib.Path(root, "s.py").write_text("\n".join(body) + "\n")
+        ledger = ("**FINDING 1: the limit depends on the entry.**\n"
+                  "\n"
+                  "QUOTE from `s.py` lines 4-5:\n"
+                  "```\n"
+                  "def pick(entry):\n"
+                  "    return SHORT if entry else LONG\n"
+                  "```\n"
+                  "\n"
+                  "Which is what the claim rests on.\n")
+        claims, _ = cc_ledger.claims_from_text(ledger, root)
+        assert len(claims) == 1, claims
+        evidence = claims[0].evidence
+        assert evidence, "the quote attached to nothing, as in run 26"
+        assert evidence[0].path == "s.py", evidence[0]
+        assert (evidence[0].start, evidence[0].end) == (4, 5), evidence[0]
+        said = vf.file_quote(root, evidence[0].path, evidence[0].start, evidence[0].end,
+                                   evidence[0].quote or "")
+        assert said.ok, said
+
+
+def test_the_bounded_phrase_does_not_turn_a_sentence_into_a_header() -> None:
+    """The reason it is bounded and colon-free: a header must stay distinguishable from prose."""
+    for line in ("QUOTE from `s.py` lines 4-5:", "QUOTE (lines 212-217):", "QUOTE:",
+                 "EVIDENCE: command: rg -n X s.py -> X = 3"):
+        assert vf.HEADER_RE.match(line), line
+    for line in ("The quote from s.py shows that the limit depends on the entry",
+                 "    QUOTE: indented, so part of a quoted block rather than a header of one"):
+        assert not vf.HEADER_RE.match(line), line

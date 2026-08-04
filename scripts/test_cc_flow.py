@@ -31,10 +31,15 @@ def _load_guard():
 
 
 def run(prompt: str, root: str, session: str = "s1", tool: str = "Task",
-        kind: str = "general-purpose") -> tuple[str, str, dict]:
+        kind: str = "general-purpose", agent: str = "") -> tuple[str, str, dict]:
+    """One call at the flow guard. `agent` is what tells it a stage is calling rather than the parent,
+    and it is not optional for anything about a stage's own work: the guard charges a round for the
+    calls its worker makes and deliberately not for the parent's."""
     payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": session,
                "cwd": root, "tool_input": {"prompt": prompt, "description": "a stage",
                                            "subagent_type": kind}}
+    if agent:
+        payload["agent_id"] = agent
     proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
                           capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
@@ -468,7 +473,7 @@ def test_a_stage_that_will_not_stop_reading_is_made_to_answer() -> None:
         cc_flowstate.record_launch(state, "claims")   # the survey has a shorter leash of its own
         state["stages"][-1]["calls"] = cc_flowstate.CALL_BUDGET
         cc_flowstate.save(state, "s1", root)
-        decision, why, _ = run("", root, tool="Read")
+        decision, why, _ = run("", root, tool="Read", agent="a1")
     assert decision == "deny", why
     assert "Stop reading and write your answer" in why, why
 
@@ -478,7 +483,7 @@ def test_a_stage_reading_within_its_budget_is_left_alone() -> None:
         state = cc_flowstate.begin("review", "t", "s1", root)
         cc_flowstate.record_launch(state, "survey")
         cc_flowstate.save(state, "s1", root)
-        decision, why, _ = run("", root, tool="Read")
+        decision, why, _ = run("", root, tool="Read", agent="a1")
         after = cc_flowstate.load("s1", root)
     assert decision == "allow", why
     assert after["stages"][-1]["calls"] == 1, after
@@ -843,8 +848,8 @@ def test_the_budget_refusal_gets_shorter_as_it_repeats() -> None:
         cc_flowstate.record_launch(state, "claims")
         state["stages"][-1]["calls"] = cc_flowstate.CALL_BUDGET
         cc_flowstate.save(state, session, root)
-        first = _edit(session, root, tool="Read", path="a.py")
-        seen = [_edit(session, root, tool="Read", path="a.py")[1] for _ in range(8)]
+        first = _edit(session, root, tool="Read", path="a.py", agent="a1")
+        seen = [_edit(session, root, tool="Read", path="a.py", agent="a1")[1] for _ in range(8)]
         assert first[0] == "deny", first
         assert "You have spent" in first[1], first
         assert len(seen[-1]) < 80, seen[-1]
@@ -1292,3 +1297,94 @@ def test_a_finished_flow_that_proved_nothing_says_so_rather_than_inventing() -> 
         decision, said = _stop("Here is my review.", root, session="s-none")
         assert decision == "block", said
         assert "nothing here to report as established" in said, said
+
+
+def test_the_parents_own_tool_calls_are_not_charged_to_the_stage_it_is_waiting_on() -> None:
+    """A stage cannot be allowed to look alive because the parent is busy.
+
+    Run 26's claims subagent had been finished for twelve minutes while the parent ran 206 Bash calls
+    hunting for its output file on disk -- `TaskOutput` having been taken away, it reached around it --
+    and every one of those calls refreshed the dead round's `active` timestamp. So the round was never
+    silent, `forget_running` never dropped it, `admits` never let the flow move on, and the session sat
+    there until it was killed from outside. The parent is never idle: being told to wait is precisely
+    what makes it try something else.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "claims", "a1")
+        state["stages"][-1]["calls"] = 3
+        state["stages"][-1]["active"] = time.time() - 1000
+        cc_flowstate.save(state, "s1", root)
+
+        run("", root, tool="Read")                      # the parent, with no agent id
+        idle = cc_flowstate.load("s1", root)["stages"][-1]
+        assert idle["calls"] == 3, "the parent's call was charged to the stage: %s" % idle
+        assert time.time() - idle["active"] > 900, (
+            "the parent's call refreshed the stage's heartbeat, which is how run 26 hung")
+
+        run("", root, tool="Read", agent="a1")          # the stage itself
+        working = cc_flowstate.load("s1", root)["stages"][-1]
+        assert working["calls"] == 4, "the stage's own call was not charged: %s" % working
+        assert time.time() - working["active"] < 60, "the stage's own call must count as a heartbeat"
+
+
+def test_a_round_the_parent_is_only_waiting_on_still_goes_stale() -> None:
+    """The consequence of the above, at the level the flow actually decides on."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "claims", "a1")
+        state["stages"][-1]["calls"] = 3
+        state["stages"][-1]["active"] = time.time() - (cc_flowstate.STALE_AFTER + 60)
+        state["stages"][-1]["launched"] = time.time() - (cc_flowstate.STALE_AFTER + 60)
+        cc_flowstate.save(state, "s1", root)
+        for _ in range(5):
+            run("", root, tool="Read")                  # the parent, poking about
+        after = cc_flowstate.load("s1", root)
+        assert cc_flowstate.forget_running(after, every=False) == ["claims"], (
+            "a round nothing but the parent has touched for %d seconds is not running"
+            % cc_flowstate.STALE_AFTER)
+
+
+def _parent_bash(session: str, root: str, command: str) -> tuple[str, str]:
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": session,
+               "cwd": root, "tool_input": {"command": command, "description": "looking"}}
+    proc = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                          capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    if not proc.stdout.strip():
+        return "allow", ""
+    out = json.loads(proc.stdout)["hookSpecificOutput"]
+    return out.get("permissionDecision", "allow"), out.get("permissionDecisionReason", "")
+
+
+def test_reaching_for_the_stages_working_file_on_disk_is_refused_too() -> None:
+    """Taking TaskOutput away did not take away the want.
+
+    Refused the tool, run 26's parent went after the same thing on disk and, not knowing where that
+    file was, invented 206 paths -- session id and agent id mutating a character at a time, every one
+    returning nothing, every one a turn. The loop rule could not see it because no two commands were
+    alike, so the shape of what is being reached for is what gets matched.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.save(state, "s1", root)
+        for command in (
+            "ls -la /private/tmp/claude-501/-private-tmp-r26tree/32280d93-b397/tasks/ab2e2d9f.output",
+            "cat /private/tmp/claude-501/-privateBS4-r26tree/32280d93-h9g7/tasks/ab2e30811.output",
+            "ls /tmp/x/tasks/agent-ab2e2d9f3301607c7.jsonl",
+        ):
+            decision, why = _parent_bash("s1", root, command)
+            assert decision == "deny", (command, why)
+            assert "waiting" in why, why
+
+
+def test_the_parent_may_still_run_ordinary_commands_while_it_waits() -> None:
+    """The rule is about one shape of reaching around, not about the shell."""
+    with tempfile.TemporaryDirectory() as root:
+        state = cc_flowstate.begin("review", "t", "s1", root)
+        cc_flowstate.record_launch(state, "claims", "a1")
+        cc_flowstate.save(state, "s1", root)
+        for command in ("git status --short", "ls -la scripts/", "rg -n ROUND_CAP scripts/"):
+            decision, why = _parent_bash("s1", root, command)
+            assert "tasks/" not in why, (command, why)
