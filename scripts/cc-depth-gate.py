@@ -323,9 +323,17 @@ def evaluate(contract: cc_ledger.Contract, claims: list, unknowns: list[str],
                     "about what you were going to do next. Write the ledger now: the findings you "
                     "have, each as a CLAIM with its EVIDENCE and QUOTE, and an UNKNOWN for whatever "
                     "you did not get to.")
-    elif not claims:
+    elif not claims and not unknowns:
         gaps.append("No claims were stated. Write each finding as a CLAIM/EVIDENCE/QUOTE block, or "
                     "state UNKNOWN for what you could not establish.")
+    elif not claims:
+        # An answer of unknowns and no claims is the contract's own second option, and refusing it
+        # said the opposite of the sentence above. It is also the right answer for an adversary that
+        # did its job: the stance tells it to delete every claim its attack kills, so a stage that
+        # kills all of them has nothing left to state and everything to report. Refusing that
+        # teaches the one lesson this harness exists to prevent -- that a finding is safer invented
+        # than withheld.
+        pass
 
     missing = [g for g in cc_ledger.wants(contract) if not (set(g) & kinds_seen)]
     if missing and claims:

@@ -846,3 +846,27 @@ def test_a_contract_read_back_from_disk_keeps_its_alternatives() -> None:
         cc_ledger.write_contract(cc_ledger.contract_for("review"), "s1", tmp)
         back = cc_ledger.load_contract("s1", tmp)
         assert cc_ledger.wants(back) == [(cc_ledger.FILE_QUOTE, cc_ledger.COMMAND_RESULT)], back
+
+
+def test_an_answer_of_unknowns_and_no_claims_is_not_refused_for_stating_none() -> None:
+    """The refusal said "or state UNKNOWN for what you could not establish" to an answer that had
+    stated exactly that. It is also what an adversary produces when it works: the stance tells it to
+    delete every claim its attack kills, so killing all of them leaves unknowns and no claims.
+    Refusing it teaches that a finding is safer invented than withheld."""
+    gate = _load_gate()
+    contract = cc_ledger.contract_for("review")
+    answer = ("UNKNOWN: every claim fell -- each was about a regex guarding a switch that also "
+              "needs an environment variable no stage can set, so none of them is a way past it.\n")
+    import cc_verify
+    claims, unknowns = cc_verify.parse_ledger(answer, root=".")
+    gaps, _ = gate.evaluate(contract, claims, unknowns, [], ".", answer=answer)
+    assert not any("No claims were stated" in g for g in gaps), gaps
+
+
+def test_an_answer_of_neither_claims_nor_unknowns_is_still_refused() -> None:
+    """Prose remains prose."""
+    gate = _load_gate()
+    contract = cc_ledger.contract_for("review")
+    answer = "I looked at the rule and it seems broadly fine to me, on balance. " * 12
+    gaps, _ = gate.evaluate(contract, [], [], [], ".", answer=answer)
+    assert any("No claims were stated" in g for g in gaps), gaps
